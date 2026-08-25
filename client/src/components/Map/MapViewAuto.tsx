@@ -167,7 +167,6 @@ export function MapViewAuto(props: any) {
       props.onViewportChange?.(bbox);
       const nextCenter: GeoPoint = { lat: (bbox.south + bbox.north) / 2, lng: (bbox.west + bbox.east) / 2 };
       savedCenterRef.current = nextCenter;
-      setSavedCenter([nextCenter.lat, nextCenter.lng]);
       if (mapRef.current?.getZoom) savedZoomRef.current = mapRef.current.getZoom();
       if (suppressNextSwitchRef.current) {
         suppressNextSwitchRef.current = false;
@@ -188,6 +187,7 @@ export function MapViewAuto(props: any) {
       switchTimerRef.current = setTimeout(() => {
         suppressNextSwitchRef.current = true;
         lastSwitchRef.current = Date.now();
+        setSavedCenter([savedCenterRef.current?.lat ?? nextCenter.lat, savedCenterRef.current?.lng ?? nextCenter.lng]);
         setRenderer(target);
       }, wait);
     },
