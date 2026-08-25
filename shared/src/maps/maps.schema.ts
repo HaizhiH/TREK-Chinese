@@ -111,7 +111,7 @@ export const mapsProviderConfigResultSchema = z.object({
 export type MapsProviderConfigResult = z.infer<typeof mapsProviderConfigResultSchema>;
 
 export const mapsRouteRequestSchema = z.object({
-  waypoints: z.array(geoPointSchema).min(2).max(16),
+  waypoints: z.array(geoPointSchema).min(2).max(100),
   profile: z.enum(['driving', 'walking', 'cycling']),
 });
 export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;

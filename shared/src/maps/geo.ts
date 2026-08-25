@@ -116,10 +116,11 @@ const CHINA_EXCLUSIONS: Ring[] = [
 ];
 
 function pointInRing(point: GeoPoint, ring: Ring): boolean {
+  if (ring.length < 3) return false;
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
+    const [xi, yi] = ring[i]!;
+    const [xj, yj] = ring[j]!;
     const crosses = yi > point.lat !== yj > point.lat && point.lng < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi;
     if (crosses) inside = !inside;
   }
@@ -129,7 +130,10 @@ function pointInRing(point: GeoPoint, ring: Ring): boolean {
 export function isInChinaMainland(point: GeoPoint): boolean {
   if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return false;
   if (CHINA_EXCLUSIONS.some((ring) => pointInRing(point, ring))) return false;
-  return CHINA_MAINLAND_BOUNDARY.coordinates.some((polygon) => pointInRing(point, polygon[0]));
+  return CHINA_MAINLAND_BOUNDARY.coordinates.some((polygon) => {
+    const outerRing = polygon[0];
+    return outerRing ? pointInRing(point, outerRing) : false;
+  });
 }
 
 export function boundsCenter(bounds: GeoBounds): GeoPoint {

@@ -90,7 +90,7 @@ describe('Maps e2e (real auth guard + temp SQLite)', () => {
   it('200 on reverse geocode', async () => {
     const res = await request(server).get('/api/maps/reverse').set('Cookie', sessionCookie(1)).query({ lat: '52.5', lng: '13.4' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ name: 'Spot', address: 'Street 1' });
+    expect(res.body).toEqual({ name: 'Spot', address: 'Street 1', provider: 'openstreetmap', crs: 'wgs84' });
   });
 
   it('400 on reverse geocode without coordinates', async () => {

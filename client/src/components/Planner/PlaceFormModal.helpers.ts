@@ -12,11 +12,11 @@ export interface PlaceFormData {
   website: string
   // Populated from a maps-search pick (not part of the initial blank form).
   phone?: string
-  google_place_id?: string
-  google_ftid?: string
-  osm_id?: string
-  geo_provider?: 'google' | 'openstreetmap' | 'amap'
-  provider_place_id?: string
+  google_place_id?: string | null
+  google_ftid?: string | null
+  osm_id?: string | null
+  geo_provider?: 'google' | 'openstreetmap' | 'amap' | null
+  provider_place_id?: string | null
 }
 
 export function isGoogleMapsUrl(input: string): boolean {

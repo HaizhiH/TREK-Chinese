@@ -1,9 +1,14 @@
 import type { GeoPoint } from '@trek/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { mapsApi } from '../../api/client';
+import { useTransportRoutes } from '../../hooks/useTransportRoutes';
+import { useSettingsStore } from '../../store/settingsStore';
 import type { Place, Reservation } from '../../types';
+import { visibleRouteReservations } from '../../utils/reservationRoutes';
 import { loadAmap, wgs84ToAmap } from './amapLoader';
 import type { Poi } from './poiCategories';
+import { buildReservationItems } from './reservationsMapbox';
+import { getTransitMapSegments } from './transitGeometry';
 
 interface Props {
   jsKey: string;
@@ -26,6 +31,10 @@ interface Props {
   onLoadError?: () => void;
   dark?: boolean;
   reservations?: Reservation[];
+  visibleConnectionIds?: number[];
+  showTransitRoutes?: boolean;
+  showReservationStats?: boolean;
+  onReservationClick?: (reservationId: number) => void;
 }
 
 function markerNode(label: string, selected: boolean, color = '#2563eb'): HTMLDivElement {
@@ -33,6 +42,21 @@ function markerNode(label: string, selected: boolean, color = '#2563eb'): HTMLDi
   node.style.cssText = `width:${selected ? 42 : 34}px;height:${selected ? 42 : 34}px;border-radius:50%;background:${color};border:${selected ? 3 : 2}px solid white;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;color:white;font:700 12px sans-serif;cursor:pointer;overflow:hidden;box-sizing:border-box;`;
   node.textContent = label.slice(0, 1).toUpperCase();
   node.title = label;
+  return node;
+}
+
+function reservationMarkerNode(label: string, title: string): HTMLDivElement {
+  const node = document.createElement('div');
+  node.style.cssText = 'min-width:26px;height:22px;padding:0 7px;border-radius:999px;background:#3b82f6;border:1.5px solid white;box-shadow:0 2px 6px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;color:white;font:600 11px sans-serif;white-space:nowrap;cursor:pointer;box-sizing:border-box;';
+  node.textContent = label;
+  node.title = title;
+  return node;
+}
+
+function reservationStatsNode(main: string | null, sub: string | null): HTMLDivElement {
+  const node = document.createElement('div');
+  node.style.cssText = 'padding:5px 9px;border-radius:999px;background:rgba(17,24,39,.92);border:1px solid rgba(59,130,246,.67);box-shadow:0 2px 6px rgba(0,0,0,.25);color:white;font:600 10px sans-serif;white-space:nowrap;pointer-events:none;text-align:center;';
+  node.textContent = [main, sub].filter(Boolean).join(' · ');
   return node;
 }
 
@@ -56,6 +80,11 @@ export function MapViewAmap({
   _onProviderReady,
   onLoadError,
   dark = false,
+  reservations = [],
+  visibleConnectionIds = [],
+  showTransitRoutes = true,
+  showReservationStats = false,
+  onReservationClick,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -64,6 +93,12 @@ export function MapViewAmap({
   const overlaysRef = useRef<any[]>([]);
   const lastFitKeyRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
+  const showEndpointLabels = useSettingsStore((state) => state.settings.map_booking_labels) === true;
+  const visibleReservations = useMemo(
+    () => visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes }),
+    [reservations, visibleConnectionIds, showTransitRoutes]
+  );
+  const transportRoutes = useTransportRoutes(visibleReservations);
   const handlersRef = useRef({ onMapClick, onMapContextMenu, onViewportChange });
   handlersRef.current = { onMapClick, onMapContextMenu, onViewportChange };
 
@@ -227,6 +262,74 @@ export function MapViewAmap({
           map.add(polyline);
           overlaysRef.current.push(polyline);
         }
+
+        for (const item of buildReservationItems(visibleReservations)) {
+          const transitSegments = getTransitMapSegments(item.res);
+          const roadRoute = transportRoutes.get(item.res.id);
+          const lines = transitSegments.length
+            ? transitSegments.map((segment) => ({
+                coordinates: segment.coords,
+                color: segment.walk ? '#64748b' : segment.color || '#7c3aed',
+                dashed: segment.walk,
+              }))
+            : (roadRoute && roadRoute.length >= 2 ? [roadRoute] : item.arcs).map((coordinates) => ({
+                coordinates,
+                color: '#3b82f6',
+                dashed: item.res.status !== 'confirmed',
+              }));
+          for (const line of lines) {
+            const path = await wgs84ToAmap(
+              AMap,
+              line.coordinates.map(([lat, lng]) => ({ lat, lng }))
+            );
+            if (cancelled) return;
+            const polyline = new AMap.Polyline({
+              path,
+              strokeColor: line.color,
+              strokeWeight: 4,
+              strokeOpacity: 0.9,
+              strokeStyle: line.dashed ? 'dashed' : 'solid',
+              lineJoin: 'round',
+            });
+            map.add(polyline);
+            overlaysRef.current.push(polyline);
+          }
+
+          const endpointCoords = await wgs84ToAmap(
+            AMap,
+            item.waypoints.map((endpoint) => ({ lat: endpoint.lat, lng: endpoint.lng }))
+          );
+          if (cancelled) return;
+          const endpointMarkers = item.waypoints.map((endpoint, index) => {
+            const label = showEndpointLabels ? endpoint.code || endpoint.name : item.type.slice(0, 1).toUpperCase();
+            const marker = new AMap.Marker({
+              position: endpointCoords[index],
+              content: reservationMarkerNode(label, endpoint.name),
+              anchor: 'center',
+              zIndex: 160,
+            });
+            marker.on('click', () => onReservationClick?.(item.res.id));
+            return marker;
+          });
+          map.add(endpointMarkers);
+          overlaysRef.current.push(...endpointMarkers);
+
+          if (showReservationStats && item.primaryArc.length > 1 && (item.mainLabel || item.subLabel)) {
+            const midpoint = item.primaryArc[Math.floor(item.primaryArc.length / 2)];
+            if (midpoint) {
+              const [position] = await wgs84ToAmap(AMap, [{ lat: midpoint[0], lng: midpoint[1] }]);
+              if (cancelled) return;
+              const marker = new AMap.Marker({
+                position,
+                content: reservationStatsNode(item.mainLabel, item.subLabel),
+                anchor: 'center',
+                zIndex: 150,
+              });
+              map.add(marker);
+              overlaysRef.current.push(marker);
+            }
+          }
+        }
         if (located.length && lastFitKeyRef.current !== fitKey) {
           lastFitKeyRef.current = fitKey;
           const dayIds = new Set(dayPlaces.map((place) => place.id));
@@ -241,7 +344,7 @@ export function MapViewAmap({
     return () => {
       cancelled = true;
     };
-  }, [places, dayPlaces, pois, route, selectedPlaceId, onMarkerClick, onPoiClick, fitKey, ready]);
+  }, [places, dayPlaces, pois, route, selectedPlaceId, onMarkerClick, onPoiClick, fitKey, ready, visibleReservations, transportRoutes, showEndpointLabels, showReservationStats, onReservationClick]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>

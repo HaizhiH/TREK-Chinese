@@ -27,6 +27,7 @@ import { AmapProvider, gcj02ToWgs84 } from '../../services/amapProvider';
 import { getAmapConfig } from '../../services/amapConfig';
 
 type LocationBias = { low: { lat: number; lng: number }; high: { lat: number; lng: number } };
+const MAX_PROVIDER_ROUTE_WAYPOINTS = 16;
 
 /**
  * Thin Nest wrapper around the existing maps service. All geocoding, the
@@ -171,12 +172,36 @@ export class MapsService {
   async route(waypoints: GeoPoint[], profile: RouteProfile): Promise<MapsRouteResult> {
     if (getAmapConfig().enabled && waypoints.every(isInChinaMainland)) {
       try {
-        return await this.amap.route(waypoints, profile);
+        return await this.routeInChunks(waypoints, (chunk) => this.amap.route(chunk, profile));
       } catch {
         /* preserve OSRM fallback */
       }
     }
-    return this.routeOsrm(waypoints, profile);
+    return this.routeInChunks(waypoints, (chunk) => this.routeOsrm(chunk, profile));
+  }
+
+  private async routeInChunks(
+    waypoints: GeoPoint[],
+    routeChunk: (chunk: GeoPoint[]) => Promise<MapsRouteResult>,
+  ): Promise<MapsRouteResult> {
+    const chunks: GeoPoint[][] = [];
+    for (let start = 0; start < waypoints.length - 1; start += MAX_PROVIDER_ROUTE_WAYPOINTS - 1) {
+      chunks.push(waypoints.slice(start, start + MAX_PROVIDER_ROUTE_WAYPOINTS));
+    }
+
+    const results: MapsRouteResult[] = [];
+    for (const chunk of chunks) results.push(await routeChunk(chunk));
+    const first = results[0];
+    if (!first) throw Object.assign(new Error('Route could not be calculated'), { status: 502 });
+
+    return {
+      provider: first.provider,
+      crs: 'wgs84',
+      geometry: results.flatMap((result, index) => (index === 0 ? result.geometry : result.geometry.slice(1))),
+      distance: results.reduce((sum, result) => sum + result.distance, 0),
+      duration: results.reduce((sum, result) => sum + result.duration, 0),
+      legs: results.flatMap((result) => result.legs),
+    };
   }
 
   private async routeOsrm(waypoints: GeoPoint[], profile: RouteProfile): Promise<MapsRouteResult> {
