@@ -16,13 +16,20 @@ vi.mock('../../store/settingsStore', () => ({
 vi.mock('./amapLoader', () => ({ isAmapSessionLocked: () => mocks.locked }));
 vi.mock('./MapView', () => ({
   MapView: (props: any) => (
-    <button
-      data-testid="base-map"
-      data-center={JSON.stringify(props.center || null)}
-      onClick={() => props.onViewportChange?.({ south: 39, west: 115, north: 41, east: 117 })}
-    >
-      base
-    </button>
+    <div data-testid="base-map" data-center={JSON.stringify(props.center || null)}>
+      <button
+        data-testid="base-china"
+        onClick={() => props.onViewportChange?.({ south: 39, west: 115, north: 41, east: 117 })}
+      >
+        china
+      </button>
+      <button
+        data-testid="base-tokyo"
+        onClick={() => props.onViewportChange?.({ south: 35, west: 139, north: 36, east: 140 })}
+      >
+        tokyo
+      </button>
+    </div>
   ),
 }));
 vi.mock('./MapViewAmap', () => ({
@@ -73,7 +80,7 @@ describe('MapViewAuto', () => {
     await flushConfig();
     expect(screen.getByTestId('base-map')).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId('base-map'));
+    fireEvent.click(screen.getByTestId('base-china'));
     act(() => vi.advanceTimersByTime(799));
     expect(screen.queryByTestId('amap')).toBeNull();
     act(() => vi.advanceTimersByTime(1));
@@ -88,6 +95,15 @@ describe('MapViewAuto', () => {
     expect(screen.getByTestId('amap')).toBeTruthy();
     act(() => vi.advanceTimersByTime(1));
     expect(screen.getByTestId('base-map').getAttribute('data-center')).toBe('[35.5,139.5]');
+  });
+
+  it('does not turn ordinary base-provider viewport updates into controlled camera changes', async () => {
+    render(<MapViewAuto places={[{ lat: 35.6762, lng: 139.6503 }]} />);
+    await flushConfig();
+
+    expect(screen.getByTestId('base-map').getAttribute('data-center')).toBe('null');
+    fireEvent.click(screen.getByTestId('base-tokyo'));
+    expect(screen.getByTestId('base-map').getAttribute('data-center')).toBe('null');
   });
 
   it('falls back immediately when the page goes offline', async () => {
