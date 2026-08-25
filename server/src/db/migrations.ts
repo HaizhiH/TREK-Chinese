@@ -3701,6 +3701,53 @@ function runMigrations(db: Database.Database): void {
       `);
       db.exec('CREATE INDEX IF NOT EXISTS idx_hidden_regions_user ON hidden_regions (user_id);');
     },
+
+    // Provider-neutral place identity and provider-scoped detail caching (Amap).
+    () => {
+      const addColumn = (table: string, name: string, declaration: string) => {
+        const columns = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>;
+        if (!columns.some((column) => column.name === name))
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration};`);
+      };
+      addColumn('places', 'geo_provider', "TEXT CHECK (geo_provider IN ('google', 'openstreetmap', 'amap'))");
+      addColumn('places', 'provider_place_id', 'TEXT');
+      addColumn(
+        'collection_places',
+        'geo_provider',
+        "TEXT CHECK (geo_provider IN ('google', 'openstreetmap', 'amap'))",
+      );
+      addColumn('collection_places', 'provider_place_id', 'TEXT');
+      db.exec(`
+        UPDATE places SET
+          geo_provider = CASE WHEN google_place_id IS NOT NULL AND google_place_id != '' THEN 'google'
+                              WHEN osm_id IS NOT NULL AND osm_id != '' THEN 'openstreetmap' END,
+          provider_place_id = COALESCE(NULLIF(google_place_id, ''), NULLIF(osm_id, ''))
+        WHERE geo_provider IS NULL;
+        UPDATE collection_places SET
+          geo_provider = CASE WHEN google_place_id IS NOT NULL AND google_place_id != '' THEN 'google'
+                              WHEN osm_id IS NOT NULL AND osm_id != '' THEN 'openstreetmap' END,
+          provider_place_id = COALESCE(NULLIF(google_place_id, ''), NULLIF(osm_id, ''))
+        WHERE geo_provider IS NULL;
+
+      `);
+      const cacheColumns = db.prepare("PRAGMA table_info('place_details_cache')").all() as Array<{ name: string }>;
+      if (cacheColumns.length && !cacheColumns.some((column) => column.name === 'provider'))
+        db.exec(`
+        CREATE TABLE place_details_cache_provider (
+          provider TEXT NOT NULL,
+          place_id TEXT NOT NULL,
+          lang TEXT NOT NULL DEFAULT '',
+          expanded INTEGER NOT NULL DEFAULT 0,
+          payload_json TEXT NOT NULL,
+          fetched_at INTEGER NOT NULL,
+          PRIMARY KEY (provider, place_id, lang, expanded)
+        );
+        INSERT INTO place_details_cache_provider (provider, place_id, lang, expanded, payload_json, fetched_at)
+          SELECT 'google', place_id, lang, expanded, payload_json, fetched_at FROM place_details_cache;
+        DROP TABLE place_details_cache;
+        ALTER TABLE place_details_cache_provider RENAME TO place_details_cache;
+      `);
+    },
   ];
 
   if (currentVersion < migrations.length) {

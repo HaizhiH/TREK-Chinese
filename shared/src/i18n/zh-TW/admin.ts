@@ -1,6 +1,20 @@
 import type { TranslationStrings } from '../types';
 
 const admin: TranslationStrings = {
+  'admin.amap.title': '高德地圖',
+  'admin.amap.hint': '三項憑證均驗證成功後，在中國大陸自動使用高德地圖。',
+  'admin.amap.enabled': '在中國大陸啟用高德地圖',
+  'admin.amap.active': '設定完整，功能已生效',
+  'admin.amap.inactive': '憑證完整並驗證前不會生效',
+  'admin.amap.jsKey': 'JavaScript API Key',
+  'admin.amap.securityCode': 'JavaScript 安全密鑰',
+  'admin.amap.webKey': 'Web Service Key',
+  'admin.amap.validateWeb': '驗證 Web Service',
+  'admin.amap.validateJs': '驗證瀏覽器 SDK',
+  'admin.amap.saved': '高德地圖設定已儲存',
+  'admin.amap.webValid': 'Web Service Key 驗證成功',
+  'admin.amap.jsValid': '高德地圖瀏覽器 SDK 驗證成功',
+  'admin.amap.invalid': '高德地圖驗證失敗',
   'admin.notifications.title': '通知',
   'admin.notifications.hint': '選擇一個通知渠道。一次只能啟用一個。',
   'admin.notifications.none': '已停用',

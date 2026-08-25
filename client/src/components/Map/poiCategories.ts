@@ -28,7 +28,9 @@ export const POI_CATEGORY_BY_KEY: Record<string, PoiCategory> = Object.fromEntri
 
 // One POI result from /api/maps/pois (mirror of the server's OverpassPoi).
 export interface Poi {
-  osm_id: string
+  osm_id?: string | null
+  provider?: 'google' | 'openstreetmap' | 'amap'
+  provider_place_id?: string | null
   name: string
   lat: number
   lng: number
@@ -39,5 +41,5 @@ export interface Poi {
   phone: string | null
   opening_hours: string | null
   cuisine: string | null
-  source: 'openstreetmap'
+  source: 'openstreetmap' | 'amap'
 }

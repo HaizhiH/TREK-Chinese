@@ -183,6 +183,8 @@ export async function searchNominatim(query: string, lang?: string) {
   }
   const data = (await response.json()) as NominatimResult[];
   return data.map((item) => ({
+    provider: 'openstreetmap',
+    provider_place_id: `${item.osm_type}:${item.osm_id}`,
     google_place_id: null,
     google_ftid: null,
     osm_id: `${item.osm_type}:${item.osm_id}`,
@@ -194,6 +196,7 @@ export async function searchNominatim(query: string, lang?: string) {
     website: null,
     phone: null,
     source: 'openstreetmap',
+    crs: 'wgs84',
   }));
 }
 
@@ -723,6 +726,8 @@ export async function searchPlaces(
   }
 
   const places = (data.places || []).map((p: GooglePlaceResult) => ({
+    provider: 'google',
+    provider_place_id: p.id,
     google_place_id: p.id,
     google_ftid: googleFtidFromMapsUrl(p.googleMapsUri),
     name: p.displayName?.text || '',
@@ -734,6 +739,7 @@ export async function searchPlaces(
     phone: p.nationalPhoneNumber || null,
     types: p.types || [],
     source: 'google',
+    crs: 'wgs84',
   }));
 
   return { places, source: 'google' };
@@ -793,6 +799,7 @@ export async function autocompletePlaces(
       placeId: s.placePrediction!.placeId,
       mainText: s.placePrediction!.structuredFormat?.mainText?.text || '',
       secondaryText: s.placePrediction!.structuredFormat?.secondaryText?.text || '',
+      provider: 'google' as const,
     }));
 
   return { suggestions, source: 'google' };
@@ -813,6 +820,7 @@ async function autocompleteNominatim(
           placeId: p.osm_id,
           mainText: p.name || parts[0] || '',
           secondaryText: parts.slice(1).join(', '),
+          provider: 'openstreetmap' as const,
         };
       });
     return { suggestions, source: 'nominatim' };
@@ -863,7 +871,7 @@ export async function getPlaceDetails(
   const DETAILS_TTL = 7 * 24 * 60 * 60 * 1000;
   const cached = db
     .prepare(
-      'SELECT payload_json, fetched_at FROM place_details_cache WHERE place_id = ? AND lang = ? AND expanded = 0',
+      "SELECT payload_json, fetched_at FROM place_details_cache WHERE provider = 'google' AND place_id = ? AND lang = ? AND expanded = 0",
     )
     .get(placeId, langKey) as { payload_json: string; fetched_at: number } | undefined;
   if (cached && Date.now() - cached.fetched_at < DETAILS_TTL) return { place: JSON.parse(cached.payload_json) };
@@ -911,7 +919,7 @@ export async function getPlaceDetails(
 
   try {
     db.prepare(
-      'INSERT OR REPLACE INTO place_details_cache (place_id, lang, expanded, payload_json, fetched_at) VALUES (?, ?, 0, ?, ?)',
+      "INSERT OR REPLACE INTO place_details_cache (provider, place_id, lang, expanded, payload_json, fetched_at) VALUES ('google', ?, ?, 0, ?, ?)",
     ).run(placeId, langKey, JSON.stringify(place), Date.now());
   } catch (dbErr) {
     console.error('Failed to cache place details:', dbErr);
@@ -933,7 +941,9 @@ export async function getPlaceDetailsExpanded(
   // Check DB cache for expanded result
   if (!refresh) {
     const cached = db
-      .prepare('SELECT payload_json FROM place_details_cache WHERE place_id = ? AND lang = ? AND expanded = 1')
+      .prepare(
+        "SELECT payload_json FROM place_details_cache WHERE provider = 'google' AND place_id = ? AND lang = ? AND expanded = 1",
+      )
       .get(placeId, langKey) as { payload_json: string } | undefined;
     if (cached) return { place: JSON.parse(cached.payload_json) };
   }
@@ -987,7 +997,7 @@ export async function getPlaceDetailsExpanded(
 
   try {
     db.prepare(
-      'INSERT OR REPLACE INTO place_details_cache (place_id, lang, expanded, payload_json, fetched_at) VALUES (?, ?, 1, ?, ?)',
+      "INSERT OR REPLACE INTO place_details_cache (provider, place_id, lang, expanded, payload_json, fetched_at) VALUES ('google', ?, ?, 1, ?, ?)",
     ).run(placeId, langKey, JSON.stringify(place), Date.now());
   } catch (dbErr) {
     console.error('Failed to cache expanded place details:', dbErr);

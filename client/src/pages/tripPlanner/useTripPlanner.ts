@@ -169,7 +169,7 @@ export function useTripPlanner() {
   const [dayDetailCollapsed, setDayDetailCollapsed] = useState(false)
   const [showPlaceForm, setShowPlaceForm] = useState<boolean>(false)
   const [editingPlace, setEditingPlace] = useState<Place | null>(null)
-  const [prefillCoords, setPrefillCoords] = useState<{ lat: number; lng: number; name?: string; address?: string; website?: string; phone?: string; osm_id?: string } | null>(null)
+  const [prefillCoords, setPrefillCoords] = useState<{ lat: number; lng: number; name?: string; address?: string; website?: string; phone?: string; osm_id?: string; geo_provider?: 'google' | 'openstreetmap' | 'amap'; provider_place_id?: string } | null>(null)
   const [editingAssignmentId, setEditingAssignmentId] = useState<number | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -465,7 +465,7 @@ export function useTripPlanner() {
 
   // Open the Add-Place form pre-filled from an OSM "explore" POI marker — all the
   // data already comes from the POI, so no reverse-geocode is needed.
-  const openAddPlaceFromPoi = useCallback((poi: { lat: number; lng: number; name: string; address: string | null; website: string | null; phone: string | null; osm_id: string }) => {
+  const openAddPlaceFromPoi = useCallback((poi: { lat: number; lng: number; name: string; address: string | null; website: string | null; phone: string | null; osm_id?: string | null; provider?: 'google' | 'openstreetmap' | 'amap'; provider_place_id?: string | null }) => {
     if (!can('place_edit', trip)) return
     setPrefillCoords({
       lat: poi.lat,
@@ -474,7 +474,9 @@ export function useTripPlanner() {
       address: poi.address || '',
       website: poi.website || undefined,
       phone: poi.phone || undefined,
-      osm_id: poi.osm_id,
+      osm_id: poi.osm_id || undefined,
+      geo_provider: poi.provider || (poi.osm_id ? 'openstreetmap' : undefined),
+      provider_place_id: poi.provider_place_id || poi.osm_id || undefined,
     })
     setEditingPlace(null)
     setEditingAssignmentId(null)

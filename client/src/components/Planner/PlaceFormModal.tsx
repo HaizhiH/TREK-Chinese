@@ -30,7 +30,17 @@ interface PlaceFormModalProps {
   onClose: () => void
   onSave: (data: PlaceSubmitData, files?: File[]) => Promise<void> | void
   place: Place | null
-  prefillCoords?: { lat: number; lng: number; name?: string; address?: string; website?: string; phone?: string; osm_id?: string } | null
+  prefillCoords?: {
+    lat: number
+    lng: number
+    name?: string
+    address?: string
+    website?: string
+    phone?: string
+    osm_id?: string
+    geo_provider?: 'google' | 'openstreetmap' | 'amap'
+    provider_place_id?: string
+  } | null
   tripId: number
   categories: Category[]
   onCategoryCreated: (category: { name: string; color?: string; icon?: string }) => Promise<Category> | undefined
@@ -87,7 +97,9 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
   const [pendingFiles, setPendingFiles] = useState([])
   const fileRef = useRef(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const [acSuggestions, setAcSuggestions] = useState<{ placeId: string; mainText: string; secondaryText: string }[]>([])
+  const [acSuggestions, setAcSuggestions] = useState<
+    { placeId: string; mainText: string; secondaryText: string; provider?: 'google' | 'openstreetmap' | 'amap' }[]
+  >([])
   const [acHighlight, setAcHighlight] = useState(-1)
   const acDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const acAbortRef = useRef<AbortController | null>(null)
@@ -118,6 +130,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
         notes: place.notes || '',
         transport_mode: place.transport_mode || 'walking',
         website: place.website || '',
+        geo_provider: place.geo_provider ?? undefined,
+        provider_place_id: place.provider_place_id ?? undefined,
       })
     } else if (prefillCoords) {
       setForm({
@@ -129,6 +143,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
         website: prefillCoords.website || '',
         phone: prefillCoords.phone || '',
         osm_id: prefillCoords.osm_id,
+        geo_provider: prefillCoords.geo_provider,
+        provider_place_id: prefillCoords.provider_place_id,
       })
     } else {
       setForm(DEFAULT_FORM)
@@ -245,7 +261,16 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
           return
         }
       }
-      const result = await mapsApi.search(mapsSearch, language)
+      const result = await mapsApi.search(
+        mapsSearch,
+        language,
+        locationBias
+          ? {
+              lat: (locationBias.low.lat + locationBias.high.lat) / 2,
+              lng: (locationBias.low.lng + locationBias.high.lng) / 2,
+            }
+          : undefined,
+      )
       setMapsResults(result.places || [])
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
@@ -264,6 +289,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       google_place_id: result.google_place_id || prev.google_place_id,
       google_ftid: result.google_ftid || prev.google_ftid,
       osm_id: result.osm_id || prev.osm_id,
+      geo_provider: result.provider || result.geo_provider || prev.geo_provider,
+      provider_place_id: result.provider_place_id || prev.provider_place_id,
       website: result.website || prev.website,
       phone: result.phone || prev.phone,
     }))
@@ -271,7 +298,12 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     setMapsSearch('')
   }
 
-  const handleSelectSuggestion = async (suggestion: { placeId: string; mainText: string; secondaryText: string }) => {
+  const handleSelectSuggestion = async (suggestion: {
+    placeId: string
+    mainText: string
+    secondaryText: string
+    provider?: 'google' | 'openstreetmap' | 'amap'
+  }) => {
     setAcSuggestions([])
     setAcHighlight(-1)
     const previousSearch = mapsSearch
@@ -287,7 +319,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       // clickable instead of dead-ending on "Place search failed". (#1192)
       let place: Record<string, unknown> | null = null
       try {
-        const result = await mapsApi.details(suggestion.placeId, language)
+        const result = await mapsApi.details(suggestion.placeId, language, suggestion.provider)
         if (result.place && result.place.lat != null && result.place.lng != null) {
           place = result.place
         }
@@ -296,7 +328,16 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       }
       if (!place) {
         const query = [suggestion.mainText, suggestion.secondaryText].filter(Boolean).join(', ')
-        const search = await mapsApi.search(query, language)
+        const search = await mapsApi.search(
+          query,
+          language,
+          locationBias
+            ? {
+                lat: (locationBias.low.lat + locationBias.high.lat) / 2,
+                lng: (locationBias.low.lng + locationBias.high.lng) / 2,
+              }
+            : undefined,
+        )
         place = search.places?.[0] ?? null
       }
       if (place) {

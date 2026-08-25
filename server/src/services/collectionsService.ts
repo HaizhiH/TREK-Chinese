@@ -431,14 +431,17 @@ export function savePlace(userId: number, body: CollectionSavePlaceRequest, sock
     INSERT INTO collection_places (
       collection_id, owner_id, saved_by, name, description, lat, lng, address,
       category_id, price, currency, notes, image_url, google_place_id, google_ftid,
-      osm_id, website, phone, status, source_trip_id, source_place_id, links
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      osm_id, geo_provider, provider_place_id, website, phone, status, source_trip_id, source_place_id, links
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     body.collection_id, ownerId, userId,
     body.name, body.description ?? null, body.lat ?? null, body.lng ?? null, body.address ?? null,
     body.category_id ?? null, body.price ?? null, body.currency ?? null, body.notes ?? null,
     body.image_url ?? null, body.google_place_id ?? null, body.google_ftid ?? null,
-    body.osm_id ?? null, body.website ?? null, body.phone ?? null,
+    body.osm_id ?? null,
+    body.geo_provider ?? (body.google_place_id ? 'google' : body.osm_id ? 'openstreetmap' : null),
+    body.provider_place_id ?? body.google_place_id ?? body.osm_id ?? null,
+    body.website ?? null, body.phone ?? null,
     body.status ?? 'idea', body.source_trip_id ?? null, body.source_place_id ?? null,
     serializeLinks(body.links),
   );
@@ -473,6 +476,8 @@ export function saveFromTripPlace(
     google_place_id: (place.google_place_id as string | null) ?? null,
     google_ftid: (place.google_ftid as string | null) ?? null,
     osm_id: (place.osm_id as string | null) ?? null,
+    geo_provider: (place.geo_provider as 'google' | 'openstreetmap' | 'amap' | null) ?? null,
+    provider_place_id: (place.provider_place_id as string | null) ?? null,
     website: (place.website as string | null) ?? null,
     phone: (place.phone as string | null) ?? null,
     source_trip_id: tripId,
@@ -495,8 +500,8 @@ export function saveFromTripPlaces(
     INSERT INTO collection_places (
       collection_id, owner_id, saved_by, name, description, lat, lng, address,
       category_id, price, currency, notes, image_url, google_place_id, google_ftid,
-      osm_id, website, phone, status, source_trip_id, source_place_id, links
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idea', ?, ?, NULL)
+      osm_id, geo_provider, provider_place_id, website, phone, status, source_trip_id, source_place_id, links
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idea', ?, ?, NULL)
   `);
   let copied = 0;
   const skipped: { id: number; name: string }[] = [];
@@ -515,7 +520,10 @@ export function saveFromTripPlaces(
       name, (p.description as string | null) ?? null, lat, lng, (p.address as string | null) ?? null,
       (p.category_id as number | null) ?? null, (p.price as number | null) ?? null, (p.currency as string | null) ?? null, (p.notes as string | null) ?? null,
       (p.image_url as string | null) ?? null, (p.google_place_id as string | null) ?? null, (p.google_ftid as string | null) ?? null,
-      (p.osm_id as string | null) ?? null, (p.website as string | null) ?? null, (p.phone as string | null) ?? null,
+      (p.osm_id as string | null) ?? null,
+      (p.geo_provider as string | null) ?? ((p.google_place_id as string | null) ? 'google' : (p.osm_id as string | null) ? 'openstreetmap' : null),
+      (p.provider_place_id as string | null) ?? (p.google_place_id as string | null) ?? (p.osm_id as string | null) ?? null,
+      (p.website as string | null) ?? null, (p.phone as string | null) ?? null,
       tripId, placeId,
     );
     copied++;
@@ -611,11 +619,11 @@ export function copyToTrip(userId: number, body: CollectionCopyToTripRequest): {
   const sources: Array<{ id: number; name: string; description: string | null; lat: number | null; lng: number | null;
     address: string | null; category_id: number | null; price: number | null; currency: string | null;
     notes: string | null; image_url: string | null; google_place_id: string | null; google_ftid: string | null;
-    osm_id: string | null; website: string | null; phone: string | null; collection_id: number }> = [];
+    osm_id: string | null; geo_provider: 'google' | 'openstreetmap' | 'amap' | null; provider_place_id: string | null; website: string | null; phone: string | null; collection_id: number }> = [];
   for (const pid of body.place_ids) {
     const row = db.prepare(`
       SELECT id, collection_id, name, description, lat, lng, address, category_id, price, currency,
-             notes, image_url, google_place_id, google_ftid, osm_id, website, phone
+             notes, image_url, google_place_id, google_ftid, osm_id, geo_provider, provider_place_id, website, phone
       FROM collection_places WHERE id = ?
     `).get(pid) as (typeof sources)[number] | undefined;
     if (!row) httpError(404, 'Place not found');
@@ -633,8 +641,8 @@ export function copyToTrip(userId: number, body: CollectionCopyToTripRequest): {
 
   const insertPlace = db.prepare(`
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price,
-      currency, notes, image_url, google_place_id, google_ftid, website, phone, osm_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      currency, notes, image_url, google_place_id, google_ftid, website, phone, osm_id, geo_provider, provider_place_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertTag = db.prepare('INSERT OR IGNORE INTO place_tags (place_id, tag_id) VALUES (?, ?)');
 
@@ -648,6 +656,7 @@ export function copyToTrip(userId: number, body: CollectionCopyToTripRequest): {
     const res = insertPlace.run(
       body.trip_id, s.name, s.description, s.lat, s.lng, s.address, s.category_id, s.price,
       s.currency, s.notes, s.image_url, s.google_place_id, s.google_ftid, s.website, s.phone, s.osm_id,
+      s.geo_provider, s.provider_place_id,
     );
     const newPlaceId = Number(res.lastInsertRowid);
     const tagIds = db.prepare('SELECT tag_id FROM collection_place_tags WHERE collection_place_id = ?').all(s.id) as { tag_id: number }[];

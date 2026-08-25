@@ -120,27 +120,30 @@ export function createPlace(
     category_id?: number; price?: number; currency?: string;
     place_time?: string; end_time?: string;
     duration_minutes?: number; notes?: string; image_url?: string;
-    google_place_id?: string; google_ftid?: string; osm_id?: string; website?: string; phone?: string;
+    google_place_id?: string; google_ftid?: string; osm_id?: string; geo_provider?: 'google' | 'openstreetmap' | 'amap'; provider_place_id?: string; website?: string; phone?: string;
     transport_mode?: string; tags?: number[];
   },
 ) {
   const {
     name, description, lat, lng, address, category_id, price, currency,
     place_time, end_time,
-    duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone,
+    duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, geo_provider, provider_place_id, website, phone,
     transport_mode, tags = [],
   } = body;
 
   const result = db.prepare(`
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price, currency,
       place_time, end_time,
-      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone, transport_mode)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, geo_provider, provider_place_id, website, phone, transport_mode)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     tripId, name, description || null, lat || null, lng || null, address || null,
     category_id || null, price || null, currency || null,
     place_time || null, end_time || null, duration_minutes || 60, notes || null, image_url || null,
-    google_place_id || null, google_ftid || null, osm_id || null, website || null, phone || null, transport_mode || 'walking',
+    google_place_id || null, google_ftid || null, osm_id || null,
+    geo_provider || (google_place_id ? 'google' : osm_id ? 'openstreetmap' : null),
+    provider_place_id || google_place_id || osm_id || null,
+    website || null, phone || null, transport_mode || 'walking',
   );
 
   const placeId = result.lastInsertRowid;
@@ -177,7 +180,7 @@ export function updatePlace(
     category_id?: number; price?: number; currency?: string;
     place_time?: string; end_time?: string;
     duration_minutes?: number; notes?: string; image_url?: string;
-    google_place_id?: string; google_ftid?: string; osm_id?: string; website?: string; phone?: string;
+    google_place_id?: string; google_ftid?: string; osm_id?: string; geo_provider?: 'google' | 'openstreetmap' | 'amap'; provider_place_id?: string; website?: string; phone?: string;
     transport_mode?: string; tags?: number[];
   },
   ifMatch?: string,
@@ -195,7 +198,7 @@ export function updatePlace(
   const {
     name, description, lat, lng, address, category_id, price, currency,
     place_time, end_time,
-    duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone,
+    duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, geo_provider, provider_place_id, website, phone,
     transport_mode, tags,
   } = body;
 
@@ -217,6 +220,8 @@ export function updatePlace(
       google_place_id = ?,
       google_ftid = ?,
       osm_id = ?,
+      geo_provider = ?,
+      provider_place_id = ?,
       website = ?,
       phone = ?,
       transport_mode = COALESCE(?, transport_mode),
@@ -239,6 +244,8 @@ export function updatePlace(
     google_place_id !== undefined ? google_place_id : existingPlace.google_place_id,
     google_ftid !== undefined ? google_ftid : existingPlace.google_ftid,
     osm_id !== undefined ? osm_id : existingPlace.osm_id,
+    geo_provider !== undefined ? geo_provider : existingPlace.geo_provider,
+    provider_place_id !== undefined ? provider_place_id : existingPlace.provider_place_id,
     website !== undefined ? website : existingPlace.website,
     phone !== undefined ? phone : existingPlace.phone,
     transport_mode || null,

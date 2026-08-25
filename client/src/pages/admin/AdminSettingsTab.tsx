@@ -1,5 +1,6 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { adminApi, authApi } from '../../api/client'
+import { loadAmap, wgs84ToAmap } from '../../components/Map/amapLoader'
 import { getApiErrorMessage } from '../../types'
 import { Eye, EyeOff, Save, CheckCircle, XCircle, Loader2, Sun, RefreshCw, AlertTriangle } from 'lucide-react'
 import type { TranslationFn } from '../../types'
@@ -31,6 +32,81 @@ export default function AdminSettingsTab({ admin, t }: AdminSettingsTabProps): R
     handleToggleAuthSetting, handleToggleRequireMfa,
     toggleKey, handleSaveApiKeys, handleValidateKey,
   } = admin
+  const [amap, setAmap] = useState({
+    enabled: false,
+    effective_enabled: false,
+    js_key: '',
+    security_code: '',
+    web_service_key: '',
+    web_service_key_set: false,
+    web_validated: false,
+    js_validated: false,
+  })
+  const [savingAmap, setSavingAmap] = useState(false)
+  const [validatingAmap, setValidatingAmap] = useState<'web' | 'js' | null>(null)
+
+  useEffect(() => {
+    adminApi.getAmap()
+      .then(value => setAmap(current => ({ ...current, ...value })))
+      .catch(() => {})
+  }, [])
+
+  const persistAmap = async () => {
+    const payload: Record<string, unknown> = {
+      enabled: amap.enabled,
+      js_key: amap.js_key,
+      security_code: amap.security_code,
+    }
+    if (amap.web_service_key) payload.web_service_key = amap.web_service_key
+    const value = await adminApi.updateAmap(payload)
+    setAmap(current => ({ ...current, ...value, web_service_key: '' }))
+    return value
+  }
+
+  const saveAmap = async () => {
+    setSavingAmap(true)
+    try {
+      await persistAmap()
+      toast.success(t('admin.amap.saved'))
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, t('admin.amap.invalid')))
+    } finally {
+      setSavingAmap(false)
+    }
+  }
+
+  const validateAmapWeb = async () => {
+    setValidatingAmap('web')
+    try {
+      await persistAmap()
+      const result = await adminApi.validateAmapWeb()
+      setAmap(current => ({ ...current, web_validated: result.valid }))
+      if (result.valid) toast.success(t('admin.amap.webValid'))
+      else toast.error(result.message || t('admin.amap.invalid'))
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, t('admin.amap.invalid')))
+    } finally {
+      setValidatingAmap(null)
+    }
+  }
+
+  const validateAmapJs = async () => {
+    setValidatingAmap('js')
+    try {
+      await persistAmap()
+      const AMap = await loadAmap(amap.js_key, amap.security_code)
+      await wgs84ToAmap(AMap, [{ lat: 39.9042, lng: 116.4074 }])
+      await adminApi.validateAmapJs(true)
+      setAmap(current => ({ ...current, js_validated: true }))
+      toast.success(t('admin.amap.jsValid'))
+    } catch (error) {
+      await adminApi.validateAmapJs(false).catch(() => {})
+      setAmap(current => ({ ...current, js_validated: false }))
+      toast.error(getApiErrorMessage(error, t('admin.amap.invalid')))
+    } finally {
+      setValidatingAmap(null)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -118,6 +194,109 @@ export default function AdminSettingsTab({ admin, t }: AdminSettingsTabProps): R
               </button>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-100 px-6 py-4">
+          <h2 className="font-semibold text-slate-900">{t('admin.amap.title')}</h2>
+          <p className="mt-1 text-xs text-slate-400">{t('admin.amap.hint')}</p>
+        </div>
+        <div className="space-y-4 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-slate-700">{t('admin.amap.enabled')}</p>
+              <p className="mt-0.5 text-xs text-slate-400">
+                {amap.effective_enabled ? t('admin.amap.active') : t('admin.amap.inactive')}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAmap((value) => ({ ...value, enabled: !value.enabled }))}
+              disabled={savingAmap || validatingAmap !== null}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${amap.enabled ? 'bg-content' : 'bg-edge'}`}
+            >
+              <span
+                className="absolute left-0.5 h-5 w-5 rounded-full bg-white transition-transform duration-200"
+                style={{ transform: amap.enabled ? 'translateX(20px)' : 'translateX(0)' }}
+              />
+            </button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-sm text-slate-700">
+              {t('admin.amap.jsKey')}
+              <input
+                value={amap.js_key}
+                onChange={(event) => setAmap((value) => ({ ...value, js_key: event.target.value }))}
+                disabled={savingAmap || validatingAmap !== null}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                autoComplete="off"
+              />
+            </label>
+            <label className="text-sm text-slate-700">
+              {t('admin.amap.securityCode')}
+              <input
+                value={amap.security_code}
+                onChange={(event) => setAmap((value) => ({ ...value, security_code: event.target.value }))}
+                disabled={savingAmap || validatingAmap !== null}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                autoComplete="off"
+              />
+            </label>
+          </div>
+          <label className="block text-sm text-slate-700">
+            {t('admin.amap.webKey')}
+            <input
+              type="password"
+              value={amap.web_service_key}
+              onChange={(event) => setAmap((value) => ({ ...value, web_service_key: event.target.value }))}
+              disabled={savingAmap || validatingAmap !== null}
+              placeholder={amap.web_service_key_set ? '••••••••' : ''}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              autoComplete="new-password"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={saveAmap}
+              disabled={savingAmap || validatingAmap !== null}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50"
+            >
+              {savingAmap ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+              {t('common.save')}
+            </button>
+            <button
+              type="button"
+              onClick={validateAmapWeb}
+              disabled={validatingAmap !== null || (!amap.web_service_key_set && !amap.web_service_key)}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:opacity-50"
+            >
+              {validatingAmap === 'web' ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : amap.web_validated ? (
+                <CheckCircle size={15} />
+              ) : (
+                <XCircle size={15} />
+              )}
+              {t('admin.amap.validateWeb')}
+            </button>
+            <button
+              type="button"
+              onClick={validateAmapJs}
+              disabled={validatingAmap !== null || !amap.js_key || !amap.security_code}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:opacity-50"
+            >
+              {validatingAmap === 'js' ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : amap.js_validated ? (
+                <CheckCircle size={15} />
+              ) : (
+                <XCircle size={15} />
+              )}
+              {t('admin.amap.validateJs')}
+            </button>
+          </div>
         </div>
       </div>
 

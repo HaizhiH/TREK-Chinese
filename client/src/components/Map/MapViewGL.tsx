@@ -98,6 +98,7 @@ interface Props {
   glProvider?: GlMapProvider
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onMapReady?: (map: any | null) => void
+  _onProviderReady?: (map: any | null) => void
 }
 
 function createMarkerElement(place: Place & { category_color?: string; category_icon?: string }, photoUrl: string | null, orderNumbers: number[] | null, selected: boolean): HTMLDivElement {
@@ -216,6 +217,7 @@ export function MapViewGL({
   onViewportChange,
   glProvider = 'mapbox-gl',
   onMapReady,
+  _onProviderReady,
 }: Props) {
   const rawMapboxStyle = useSettingsStore(s => s.settings.mapbox_style || MAPBOX_DEFAULT_STYLE)
   const rawMaplibreStyle = useSettingsStore(s => s.settings.maplibre_style || '')
@@ -275,6 +277,8 @@ export function MapViewGL({
   onViewportChangeRef.current = onViewportChange
   const onMapReadyRef = useRef(onMapReady)
   onMapReadyRef.current = onMapReady
+  const onProviderReadyRef = useRef(_onProviderReady)
+  onProviderReadyRef.current = _onProviderReady
   const { position: userPosition, mode: trackingMode, error: trackingError, cycleMode: cycleTrackingMode, setMode: setTrackingMode } = useGeolocation()
   const onClickRefs = useRef({ marker: onMarkerClick, map: onMapClick, context: onMapContextMenu })
   onClickRefs.current.marker = onMarkerClick
@@ -335,6 +339,7 @@ export function MapViewGL({
     // Hand the map out so the trip planner can render its own compass pill next to
     // the POI pill (a custom round control instead of Mapbox's default top-right one).
     onMapReadyRef.current?.(map)
+    onProviderReadyRef.current?.(map)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(window as any).__trek_map = map
 
@@ -664,6 +669,7 @@ export function MapViewGL({
       markersRef.current.clear()
       if (popupRef.current) { popupRef.current.remove(); popupRef.current = null }
       onMapReadyRef.current?.(null)
+      onProviderReadyRef.current?.(null)
       if (reservationOverlayRef.current) {
         reservationOverlayRef.current.destroy()
         reservationOverlayRef.current = null

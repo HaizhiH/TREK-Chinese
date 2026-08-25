@@ -2,11 +2,18 @@
 interface DragDataPayload { placeId?: string; assignmentId?: string; noteId?: string; reservationId?: string; fromDayId?: string; phase?: 'single' | 'start' | 'middle' | 'end' }
 declare global { interface Window { __dragData: DragDataPayload | null } }
 
+import { isInChinaMainland } from '@trek/shared'
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { avatarSrc } from '../../utils/avatarSrc'
 import { ChevronDown, ChevronRight, ChevronUp, Navigation, RotateCcw, ExternalLink, Clock, Pencil, GripVertical, Ticket, Plus, FileText, Trash2, Car, Lock, Hotel, Footprints, Route as RouteIcon, Bookmark, TramFront } from 'lucide-react'
 import { assignmentsApi, reservationsApi } from '../../api/client'
-import { calculateRoute, calculateRouteWithLegs, optimizeRoute, generateGoogleMapsUrl } from '../Map/RouteCalculator'
+import {
+  calculateRoute,
+  calculateRouteWithLegs,
+  generateAmapRouteUrls,
+  generateGoogleMapsUrl,
+  optimizeRoute,
+} from '../Map/RouteCalculator'
 import PlaceAvatar from '../shared/PlaceAvatar'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import { useContextMenu, ContextMenu } from '../shared/ContextMenu'
@@ -1372,6 +1379,41 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
             (routeBookends?.evening?.place_lat != null && routeBookends?.evening?.place_lng != null)
           )
           const routeToolsRoutable = da.length >= 2 || (loc != null && hasRouteBookend)
+          const exportAssignments = da.filter(a => a.place?.lat != null && a.place?.lng != null)
+          const exportStops = exportAssignments.map(a => ({
+            lat: a.place!.lat!,
+            lng: a.place!.lng!,
+            name: a.place!.name,
+          }))
+          const firstExportStop = exportStops[0]
+          const lastExportStop = exportStops[exportStops.length - 1]
+          const drawExportMorning = !!routeBookends && shouldDrawMorningLeg(
+            routeBookends,
+            day,
+            firstExportStop ? { isPlace: true, time: exportAssignments[0].place?.place_time ?? null } : undefined,
+          )
+          const drawExportEvening = !!routeBookends && shouldDrawEveningLeg(
+            routeBookends,
+            day,
+            lastExportStop
+              ? {
+                  isPlace: true,
+                  time: [...da].reverse().find(a => a.place?.lat != null && a.place?.lng != null)?.place?.place_time ?? null,
+                }
+              : undefined,
+          )
+          const morningExport = drawExportMorning && routeBookends?.morning?.place_lat != null && routeBookends?.morning?.place_lng != null
+            ? { lat: routeBookends.morning.place_lat, lng: routeBookends.morning.place_lng, name: routeBookends.morning.place_name }
+            : null
+          const eveningExport = drawExportEvening && routeBookends?.evening?.place_lat != null && routeBookends?.evening?.place_lng != null
+            ? { lat: routeBookends.evening.place_lat, lng: routeBookends.evening.place_lng, name: routeBookends.evening.place_name }
+            : null
+          const routeExportPoints = [
+            ...(morningExport ? [morningExport] : []),
+            ...exportStops,
+            ...(eveningExport ? [eveningExport] : []),
+          ]
+          const canExportAmap = routeExportPoints.length > 0 && routeExportPoints.every(isInChinaMainland)
           // Is this day's inline route currently on? Mobile toggles it per day (its
           // own expandedRouteDayIds entry); desktop uses the global Route toggle on
           // the selected day (#1374).
@@ -2391,24 +2433,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                         {/* Open the day's stops as a route in Google Maps (planned order). #1255 */}
                         <button
                           onClick={() => {
-                            // Bookend the Google Maps route with the day's accommodation the
-                            // same way the drawn map route does (routeBookends is null when
-                            // "optimize from accommodation" is off), so hotels aren't dropped
-                            // from the exported route (#1372) — but only when the leg is real:
-                            // no hotel prepended before an early check-in-day stop, none appended
-                            // after a post-check-out stop (#1465).
-                            const dayStops = getDayAssignments(day.id).filter(a => a.place?.lat != null && a.place?.lng != null)
-                            const stops = dayStops.map(a => ({ lat: a.place!.lat!, lng: a.place!.lng! }))
-                            const firstStop = dayStops[0] ? { isPlace: true, time: dayStops[0].place?.place_time ?? null } : undefined
-                            const lastAssignment = dayStops[dayStops.length - 1]
-                            const lastStop = lastAssignment ? { isPlace: true, time: lastAssignment.place?.place_time ?? null } : undefined
-                            const drawMorning = !!routeBookends && shouldDrawMorningLeg(routeBookends, day, firstStop)
-                            const drawEvening = !!routeBookends && shouldDrawEveningLeg(routeBookends, day, lastStop)
-                            const morning = drawMorning && routeBookends?.morning?.place_lat != null && routeBookends?.morning?.place_lng != null
-                              ? { lat: routeBookends.morning.place_lat, lng: routeBookends.morning.place_lng } : null
-                            const evening = drawEvening && routeBookends?.evening?.place_lat != null && routeBookends?.evening?.place_lng != null
-                              ? { lat: routeBookends.evening.place_lat, lng: routeBookends.evening.place_lng } : null
-                            const url = generateGoogleMapsUrl([...(morning ? [morning] : []), ...stops, ...(evening ? [evening] : [])])
+                            const url = generateGoogleMapsUrl(routeExportPoints)
                             if (url) window.open(url, '_blank', 'noopener,noreferrer')
                           }}
                           aria-label={t('planner.openGoogleMaps')}
@@ -2427,6 +2452,23 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                             <path d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
                           </svg>
                         </button>
+                        {canExportAmap && (
+                          <button
+                            onClick={() => generateAmapRouteUrls(routeExportPoints).forEach(url =>
+                              window.open(url, '_blank', 'noopener,noreferrer'),
+                            )}
+                            aria-label={t('planner.openAmap')}
+                            title={t('planner.openAmap')}
+                            className="bg-transparent text-content-secondary"
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-faint)',
+                              cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+                            }}
+                          >
+                            <Navigation size={14} aria-hidden="true" />
+                          </button>
+                        )}
                         <button onClick={() => handleOptimize(day.id)} className="bg-surface-hover text-content-secondary" style={{
                           flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                           padding: '6px 0', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500, borderRadius: 8, border: 'none',

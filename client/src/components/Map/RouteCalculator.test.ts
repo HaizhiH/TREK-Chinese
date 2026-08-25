@@ -4,23 +4,20 @@ import { server } from '../../../tests/helpers/msw/server'
 import {
   calculateRoute,
   calculateSegments,
+  generateAmapPlaceUrl,
+  generateAmapRouteUrls,
   optimizeRoute,
   generateGoogleMapsUrl,
   withHotelBookends,
 } from './RouteCalculator'
 
-const OSRM_BASE = 'https://router.project-osrm.org/route/v1'
-
-const buildOsrmRouteResponse = (distance = 5000, duration = 360) => ({
-  code: 'Ok',
-  routes: [
-    {
-      geometry: { coordinates: [[2.3522, 48.8566], [2.3600, 48.8600]] },
-      distance,
-      duration,
-      legs: [{ distance, duration }],
-    },
-  ],
+const buildRouteResponse = (distance = 5000, duration = 360) => ({
+  provider: 'openstreetmap',
+  crs: 'wgs84',
+  geometry: [{ lat: 48.8566, lng: 2.3522 }, { lat: 48.8600, lng: 2.3600 }],
+  distance,
+  duration,
+  legs: [{ distance, duration, steps: [] }],
 })
 
 const wp1 = { lat: 48.8566, lng: 2.3522 }
@@ -35,9 +32,10 @@ describe('calculateRoute', () => {
 
   it('FE-COMP-ROUTECALCULATOR-002: returns parsed coordinates on success', async () => {
     server.use(
-      http.get(`${OSRM_BASE}/driving/:coords`, () =>
-        HttpResponse.json(buildOsrmRouteResponse())
-      )
+      http.post('/api/maps/route', async ({ request }) => {
+        expect(await request.json()).toEqual({ waypoints: [wp1, wp2], profile: 'driving' })
+        return HttpResponse.json(buildRouteResponse())
+      })
     )
     const result = await calculateRoute([wp1, wp2])
     expect(result.coordinates).toEqual([[48.8566, 2.3522], [48.8600, 2.3600]])
@@ -45,9 +43,7 @@ describe('calculateRoute', () => {
 
   it('FE-COMP-ROUTECALCULATOR-003: returns formatted distance text for >= 1000 m', async () => {
     server.use(
-      http.get(`${OSRM_BASE}/driving/:coords`, () =>
-        HttpResponse.json(buildOsrmRouteResponse(1500, 360))
-      )
+      http.post('/api/maps/route', () => HttpResponse.json(buildRouteResponse(1500, 360)))
     )
     const result = await calculateRoute([wp1, wp2])
     expect(result.distanceText).toBe('1.5 km')
@@ -55,9 +51,7 @@ describe('calculateRoute', () => {
 
   it('FE-COMP-ROUTECALCULATOR-004: returns formatted distance in meters for short routes', async () => {
     server.use(
-      http.get(`${OSRM_BASE}/driving/:coords`, () =>
-        HttpResponse.json(buildOsrmRouteResponse(800, 360))
-      )
+      http.post('/api/maps/route', () => HttpResponse.json(buildRouteResponse(800, 360)))
     )
     const result = await calculateRoute([wp1, wp2])
     expect(result.distanceText).toBe('800 m')
@@ -67,9 +61,7 @@ describe('calculateRoute', () => {
     const distance = 5000
     const osrmDuration = 999
     server.use(
-      http.get(`${OSRM_BASE}/walking/:coords`, () =>
-        HttpResponse.json(buildOsrmRouteResponse(distance, osrmDuration))
-      )
+      http.post('/api/maps/route', () => HttpResponse.json(buildRouteResponse(distance, osrmDuration)))
     )
     const result = await calculateRoute([wp1, wp2], 'walking')
     const expectedDuration = distance / (5000 / 3600)
@@ -77,29 +69,23 @@ describe('calculateRoute', () => {
     expect(result.duration).not.toBe(osrmDuration)
   })
 
-  it('FE-COMP-ROUTECALCULATOR-006: throws when OSRM returns non-ok HTTP status', async () => {
+  it('FE-COMP-ROUTECALCULATOR-006: throws when the maps API returns non-ok HTTP status', async () => {
     server.use(
-      http.get(`${OSRM_BASE}/driving/:coords`, () =>
-        HttpResponse.json({}, { status: 500 })
-      )
+      http.post('/api/maps/route', () => HttpResponse.json({}, { status: 500 }))
     )
-    await expect(calculateRoute([wp1, wp2])).rejects.toThrow('Route could not be calculated')
+    await expect(calculateRoute([wp1, wp2])).rejects.toThrow()
   })
 
-  it('FE-COMP-ROUTECALCULATOR-007: throws when OSRM code is not Ok', async () => {
+  it('FE-COMP-ROUTECALCULATOR-007: throws when the maps API rejects the route', async () => {
     server.use(
-      http.get(`${OSRM_BASE}/driving/:coords`, () =>
-        HttpResponse.json({ code: 'NoRoute', routes: [] })
-      )
+      http.post('/api/maps/route', () => HttpResponse.json({ error: 'No route found' }, { status: 422 }))
     )
-    await expect(calculateRoute([wp1, wp2])).rejects.toThrow('No route found')
+    await expect(calculateRoute([wp1, wp2])).rejects.toThrow()
   })
 
   it('FE-COMP-ROUTECALCULATOR-008: respects AbortSignal', async () => {
     server.use(
-      http.get(`${OSRM_BASE}/driving/:coords`, () =>
-        HttpResponse.json(buildOsrmRouteResponse())
-      )
+      http.post('/api/maps/route', () => HttpResponse.json(buildRouteResponse()))
     )
     const controller = new AbortController()
     controller.abort()
@@ -117,16 +103,7 @@ describe('calculateSegments', () => {
 
   it('FE-COMP-ROUTECALCULATOR-010: returns segment midpoints and travel times', async () => {
     server.use(
-      http.get(`${OSRM_BASE}/driving/:coords`, () =>
-        HttpResponse.json({
-          code: 'Ok',
-          routes: [
-            {
-              legs: [{ distance: 1000, duration: 120 }],
-            },
-          ],
-        })
-      )
+      http.post('/api/maps/route', () => HttpResponse.json(buildRouteResponse(1000, 120)))
     )
     const result = await calculateSegments([wp1, wp2])
     expect(result).toHaveLength(1)
@@ -242,6 +219,37 @@ describe('generateGoogleMapsUrl', () => {
     expect(result).toContain('48.86,2.36')
   })
 })
+
+describe('Amap URI export', () => {
+  it('exports a mainland place as WGS-84', () => {
+    const url = generateAmapPlaceUrl({ lat: 39.9042, lng: 116.4074, name: 'Beijing' });
+    expect(url).not.toBeNull();
+    const parsed = new URL(url!);
+    expect(parsed.hostname).toBe('uri.amap.com');
+    expect(parsed.searchParams.get('coordinate')).toBe('wgs84');
+    expect(parsed.searchParams.get('position')).toBe('116.4074,39.9042');
+  });
+
+  it('exports multi-stop mainland routes as one official URI per leg', () => {
+    const urls = generateAmapRouteUrls([
+      { lat: 39.9042, lng: 116.4074, name: 'Beijing' },
+      { lat: 36.0671, lng: 120.3826, name: 'Qingdao' },
+      { lat: 31.2304, lng: 121.4737, name: 'Shanghai' },
+    ]);
+    expect(urls).toHaveLength(2);
+    expect(urls.every((url) => new URL(url).searchParams.get('coordinate') === 'wgs84')).toBe(true);
+  });
+
+  it('does not export non-mainland places to Amap', () => {
+    expect(generateAmapPlaceUrl({ lat: 35.6762, lng: 139.6503, name: 'Tokyo' })).toBeNull();
+    expect(
+      generateAmapRouteUrls([
+        { lat: 39.9042, lng: 116.4074, name: 'Beijing' },
+        { lat: 35.6762, lng: 139.6503, name: 'Tokyo' },
+      ])
+    ).toEqual([]);
+  });
+});
 
 // ── withHotelBookends (#1275: draw the hotel → first / last → hotel legs) ────────
 

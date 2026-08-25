@@ -323,6 +323,52 @@ describe('PlaceFormModal', () => {
     expect(await screen.findByDisplayValue('48.8584')).toBeInTheDocument();
   });
 
+  it('FE-PLANNER-PLACEFORM-021e: Amap suggestions use the provider details route and preserve provider identity', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    let detailsRequested = false;
+    server.use(
+      http.post('/api/maps/autocomplete', () =>
+        HttpResponse.json({
+          suggestions: [
+            { placeId: 'B000A83U0P', mainText: 'Forbidden City', secondaryText: 'Beijing', provider: 'amap' },
+          ],
+          source: 'amap',
+        })
+      ),
+      http.get('/api/maps/details/amap/:placeId', ({ params }) => {
+        detailsRequested = params.placeId === 'B000A83U0P';
+        return HttpResponse.json({
+          place: {
+            name: 'Forbidden City',
+            address: 'Beijing',
+            lat: 39.9163,
+            lng: 116.3972,
+            provider: 'amap',
+            provider_place_id: 'B000A83U0P',
+            amap_place_id: 'B000A83U0P',
+          },
+        });
+      })
+    );
+
+    render(<PlaceFormModal {...defaultProps} onSave={onSave} />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Forbidden');
+    await user.click(await screen.findByText('Beijing'));
+    expect(await screen.findByDisplayValue('39.9163')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Add$/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(detailsRequested).toBe(true);
+    expect(onSave.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        geo_provider: 'amap',
+        provider_place_id: 'B000A83U0P',
+      })
+    );
+  });
+
   it('FE-PLANNER-PLACEFORM-021d: suggestion click shows error only when the fallback also finds nothing', async () => {
     const addToast = vi.fn();
     window.__addToast = addToast;

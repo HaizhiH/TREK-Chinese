@@ -19,6 +19,10 @@ import type {
   MapsResolveUrlResult,
   MapsReverseResult,
   MapsSearchResult,
+  MapsProviderConfigResult,
+  MapsRouteResult,
+  RouteProfile,
+  GeoPoint,
 } from '@trek/shared';
 import type { User } from '../../types';
 import { MapsService } from './maps.service';
@@ -145,6 +149,61 @@ export class MapsController {
       console.error('Maps details error:', err);
       throw toHttpException(err, 'Error fetching place details', 500);
     }
+  }
+
+  @Get('details/:provider/:placeId')
+  async providerDetails(
+    @CurrentUser() user: User,
+    @Param('provider') provider: string,
+    @Param('placeId') placeId: string,
+    @Query('lang') lang?: string,
+  ): Promise<MapsPlaceDetailsResult> {
+    if (this.maps.detailsDisabled()) return { place: null, disabled: true };
+    try {
+      return await this.maps.detailsForProvider(user.id, provider, placeId, lang);
+    } catch (err: unknown) {
+      throw toHttpException(err, 'Error fetching place details', 500);
+    }
+  }
+
+  @Get('provider-config')
+  providerConfig(): MapsProviderConfigResult {
+    return this.maps.providerConfig();
+  }
+
+  @Post('route')
+  @HttpCode(200)
+  async route(@Body('waypoints') waypoints: unknown, @Body('profile') profile: unknown): Promise<MapsRouteResult> {
+    if (
+      !Array.isArray(waypoints) ||
+      waypoints.length < 2 ||
+      waypoints.length > 16 ||
+      waypoints.some((p) => !p || !Number.isFinite((p as GeoPoint).lat) || !Number.isFinite((p as GeoPoint).lng))
+    ) {
+      throw new HttpException({ error: 'Between 2 and 16 valid WGS-84 waypoints are required' }, 400);
+    }
+    if (!['driving', 'walking', 'cycling'].includes(String(profile))) {
+      throw new HttpException({ error: 'Invalid route profile' }, 400);
+    }
+    try {
+      return await this.maps.route(waypoints as GeoPoint[], profile as RouteProfile);
+    } catch (err: unknown) {
+      throw toHttpException(err, 'Route could not be calculated', 502);
+    }
+  }
+
+  @Post('convert/amap-to-wgs84')
+  @HttpCode(200)
+  convertAmapToWgs84(@Body('points') points: unknown): { points: GeoPoint[]; crs: 'wgs84' } {
+    if (
+      !Array.isArray(points) ||
+      points.length < 1 ||
+      points.length > 100 ||
+      points.some((p) => !p || !Number.isFinite((p as GeoPoint).lat) || !Number.isFinite((p as GeoPoint).lng))
+    ) {
+      throw new HttpException({ error: 'Between 1 and 100 valid points are required' }, 400);
+    }
+    return { points: this.maps.amapPointsToWgs84(points as GeoPoint[]), crs: 'wgs84' };
   }
 
   @Get('place-photo/:placeId')

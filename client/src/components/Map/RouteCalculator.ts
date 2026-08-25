@@ -1,24 +1,15 @@
 import { useSettingsStore } from '../../store/settingsStore'
 import type { DistanceUnit, RouteResult, RouteSegment, RouteWithLegs, Waypoint, RouteAnchors } from '../../types'
 import { formatDistance } from '../../utils/units'
-
-const OSRM_BASE = 'https://router.project-osrm.org/route/v1'
-
-// FOSSGIS hosts OSRM with real per-profile routing (car/foot/bike) — the
-// project-osrm.org demo is car-only (it ignores the profile in the URL). Use
-// the matching profile so walking routes follow footpaths, not the road network.
-const OSRM_PROFILE_BASE: Record<'driving' | 'walking' | 'cycling', string> = {
-  driving: 'https://routing.openstreetmap.de/routed-car/route/v1/driving',
-  walking: 'https://routing.openstreetmap.de/routed-foot/route/v1/foot',
-  cycling: 'https://routing.openstreetmap.de/routed-bike/route/v1/bike',
-}
+import { mapsApi } from '../../api/client'
+import { isInChinaMainland } from '@trek/shared'
 
 // Cache route responses keyed by the exact waypoint list. Routes are stable, so
 // this avoids re-hitting the public OSRM demo server on every day switch / reorder.
 const routeCache = new Map<string, RouteWithLegs>()
 const ROUTE_CACHE_MAX = 200
 
-/** Fetches a full route via OSRM and returns coordinates, distance, and duration estimates for driving/walking. */
+/** Fetches a provider-selected route from TREK's WGS-84 maps API. */
 export async function calculateRoute(
   waypoints: Waypoint[],
   profile: 'driving' | 'walking' | 'cycling' = 'driving',
@@ -28,22 +19,8 @@ export async function calculateRoute(
     throw new Error('At least 2 waypoints required')
   }
 
-  const coords = waypoints.map((p) => `${p.lng},${p.lat}`).join(';')
-  const url = `${OSRM_BASE}/${profile}/${coords}?overview=full&geometries=geojson&steps=false`
-
-  const response = await fetch(url, { signal })
-  if (!response.ok) {
-    throw new Error('Route could not be calculated')
-  }
-
-  const data = await response.json()
-
-  if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
-    throw new Error('No route found')
-  }
-
-  const route = data.routes[0]
-  const coordinates: [number, number][] = route.geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng])
+  const route = await mapsApi.route(waypoints, profile, signal)
+  const coordinates: [number, number][] = route.geometry.map(({ lat, lng }) => [lat, lng])
 
   const distance: number = route.distance
   let duration: number
@@ -98,6 +75,41 @@ export function generateGoogleMapsUrl(places: Waypoint[]): string | null {
   }
   const stops = valid.map((p) => `${p.lat},${p.lng}`).join('/')
   return `https://www.google.com/maps/dir/${stops}`
+}
+
+export function generateAmapPlaceUrl(place: Waypoint & { name?: string | null }): string | null {
+  if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng) || !isInChinaMainland(place)) return null;
+  const params = new URLSearchParams({
+    position: `${place.lng},${place.lat}`,
+    name: place.name || '',
+    src: 'TREK',
+    coordinate: 'wgs84',
+    callnative: '1',
+  });
+  return `https://uri.amap.com/marker?${params}`;
+}
+
+/** Amap URI navigation supports two endpoints, so multi-stop days export one link per leg. */
+export function generateAmapRouteUrls(places: Array<Waypoint & { name?: string | null }>): string[] {
+  const valid = places.filter((place) => Number.isFinite(place.lat) && Number.isFinite(place.lng));
+  if (valid.length !== places.length || !valid.every(isInChinaMainland)) return [];
+  if (valid.length === 1) return [generateAmapPlaceUrl(valid[0])!];
+  const urls: string[] = [];
+  for (let index = 0; index < valid.length - 1; index++) {
+    const from = valid[index];
+    const to = valid[index + 1];
+    const params = new URLSearchParams({
+      from: `${from.lng},${from.lat},${from.name || ''}`,
+      to: `${to.lng},${to.lat},${to.name || ''}`,
+      mode: 'car',
+      policy: '1',
+      src: 'TREK',
+      coordinate: 'wgs84',
+      callnative: '1',
+    });
+    urls.push(`https://uri.amap.com/navigation?${params}`);
+  }
+  return urls;
 }
 
 // Squared planar distance — enough for nearest-neighbor comparisons and cheaper than a full haversine.
@@ -192,23 +204,15 @@ export function optimizeRoute<T extends Waypoint>(places: T[], anchors: RouteAnc
   return order
 }
 
-/** Fetches per-leg distance/duration from OSRM and returns segment metadata (midpoints, walking/driving times). */
+/** Fetches per-leg distance/duration from the provider-neutral maps API. */
 export async function calculateSegments(
   waypoints: Waypoint[],
   { signal }: { signal?: AbortSignal } = {}
 ): Promise<RouteSegment[]> {
   if (!waypoints || waypoints.length < 2) return []
 
-  const coords = waypoints.map((p) => `${p.lng},${p.lat}`).join(';')
-  const url = `${OSRM_BASE}/driving/${coords}?overview=false&geometries=geojson&steps=false&annotations=distance,duration`
-
-  const response = await fetch(url, { signal })
-  if (!response.ok) throw new Error('Route could not be calculated')
-
-  const data = await response.json()
-  if (data.code !== 'Ok' || !data.routes?.[0]) throw new Error('No route found')
-
-  const legs = data.routes[0].legs
+  const route = await mapsApi.route(waypoints, 'driving', signal)
+  const legs = route.legs
   return legs.map((leg: { distance: number; duration: number }, i: number): RouteSegment => {
     const from: [number, number] = [waypoints[i].lat, waypoints[i].lng]
     const to: [number, number] = [waypoints[i + 1].lat, waypoints[i + 1].lng]
@@ -226,7 +230,7 @@ export async function calculateSegments(
 }
 
 /**
- * One OSRM call per waypoint-run that returns BOTH the real road geometry (for the
+ * One server call per waypoint-run that returns BOTH the real road geometry (for the
  * map) and per-leg distance/duration (for the sidebar connectors). Results are cached
  * by the exact waypoint list. Throws on OSRM failure so callers can fall back to a
  * straight line.
@@ -246,17 +250,8 @@ export async function calculateRouteWithLegs(
   const cached = routeCache.get(cacheKey)
   if (cached) return cached
 
-  const url = `${OSRM_PROFILE_BASE[profile]}/${coords}?overview=full&geometries=geojson&annotations=distance,duration`
-  const response = await fetch(url, { signal })
-  if (!response.ok) throw new Error('Route could not be calculated')
-
-  const data = await response.json()
-  if (data.code !== 'Ok' || !data.routes?.[0]) throw new Error('No route found')
-
-  const route = data.routes[0]
-  const coordinates: [number, number][] = route.geometry.coordinates.map(
-    ([lng, lat]: [number, number]) => [lat, lng]
-  )
+  const route = await mapsApi.route(waypoints, profile, signal)
+  const coordinates: [number, number][] = route.geometry.map(({ lat, lng }) => [lat, lng])
   const legs: RouteSegment[] = (route.legs || []).map(
     (leg: { distance: number; duration: number }, i: number): RouteSegment => {
       const from: [number, number] = [waypoints[i].lat, waypoints[i].lng]

@@ -95,6 +95,8 @@ const ALLOWED_DESTRUCTIVE: Record<string, string> = {
     'Make place_id nullable + ON DELETE SET NULL. Rebuild, rows copied.',
   'DROP TABLE schema_version':
     'Add surrogate id PK to schema_version. Rebuild, version row copied.',
+  'DROP TABLE place_details_cache':
+    'Amap provider identity: rebuild cache to widen its PK with provider. Every row is copied to the replacement table first.',
 
   // ── photo/journey table rebuilds (data preserved) ────────────────────────
   'DROP TABLE trip_photos':
@@ -189,6 +191,17 @@ describe('migration hygiene — full chain smoke', () => {
     try {
       const row = db.prepare('SELECT version FROM schema_version').get() as { version: number };
       expect(row.version).toBeGreaterThan(0);
+      const placeColumns = db.prepare("PRAGMA table_info('places')").all() as Array<{ name: string }>;
+      expect(placeColumns.map((column) => column.name)).toEqual(
+        expect.arrayContaining(['geo_provider', 'provider_place_id']),
+      );
+      const cachePk = (
+        db.prepare("PRAGMA table_info('place_details_cache')").all() as Array<{ name: string; pk: number }>
+      )
+        .filter((column) => column.pk > 0)
+        .sort((a, b) => a.pk - b.pk)
+        .map((column) => column.name);
+      expect(cachePk).toEqual(['provider', 'place_id', 'lang', 'expanded']);
     } finally {
       db.close();
     }

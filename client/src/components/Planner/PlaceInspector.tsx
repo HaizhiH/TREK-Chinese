@@ -8,6 +8,7 @@ import { X, Clock, MapPin, ExternalLink, Phone, Banknote, Edit2, Trash2, Plus, M
 import PlaceAvatar from '../shared/PlaceAvatar'
 import GuestBadge from '../shared/GuestBadge'
 import StatusBadge from '../Collections/StatusBadge'
+import { generateAmapPlaceUrl } from '../Map/RouteCalculator'
 import { mapsApi, pluginsApi } from '../../api/client'
 import { collectionsApi } from '../../api/collections'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -39,21 +40,22 @@ function setSessionCache(key, value) {
   try { sessionStorage.setItem(key, JSON.stringify(value)) } catch {}
 }
 
-function usePlaceDetails(googlePlaceId, osmId, language) {
+function usePlaceDetails(googlePlaceId, osmId, geoProvider, providerPlaceId, language) {
   const [details, setDetails] = useState(null)
-  const detailId = googlePlaceId || osmId
-  const cacheKey = `gdetails_${detailId}_${language}`
+  const provider = geoProvider || (googlePlaceId ? 'google' : osmId ? 'openstreetmap' : undefined)
+  const detailId = providerPlaceId || googlePlaceId || osmId
+  const cacheKey = `details_${provider || 'legacy'}_${detailId}_${language}`
   useEffect(() => {
     if (!detailId) { setDetails(null); return }
     if (detailsCache.has(cacheKey)) { setDetails(detailsCache.get(cacheKey)); return }
     const cached = getSessionCache(cacheKey)
     if (cached) { detailsCache.set(cacheKey, cached); setDetails(cached); return }
-    mapsApi.details(detailId, language).then(data => {
+    mapsApi.details(detailId, language, provider).then(data => {
       detailsCache.set(cacheKey, data.place)
       setSessionCache(cacheKey, data.place)
       setDetails(data.place)
     }).catch(() => {})
-  }, [detailId, language])
+  }, [detailId, provider, language])
   return details
 }
 
@@ -177,7 +179,13 @@ export default function PlaceInspector({
   const [nameValue, setNameValue] = useState('')
   const nameInputRef = useRef(null)
   const fileInputRef = useRef(null)
-  const googleDetails = usePlaceDetails(place?.google_place_id, place?.osm_id, language)
+  const googleDetails = usePlaceDetails(
+    place?.google_place_id,
+    place?.osm_id,
+    place?.geo_provider,
+    place?.provider_place_id,
+    language,
+  )
 
   // Library-wide "is this place already saved anywhere I can see?" indicator for
   // the trip-planner footer bookmark. Re-checks when the place changes or after
@@ -259,6 +267,9 @@ export default function PlaceInspector({
     googleDetails?.google_maps_url,
   )
   const openStreetMapUrl = getOpenStreetMapUrlForPlace(place)
+  const amapUrl = place.lat != null && place.lng != null
+    ? generateAmapPlaceUrl({ lat: place.lat, lng: place.lng, name: place.name })
+    : null
   const selectedDay = days?.find(d => d.id === selectedDayId)
   const weekdayIndex = getWeekdayIndex(selectedDay?.date)
 
@@ -438,6 +449,14 @@ export default function PlaceInspector({
           {openStreetMapUrl && (
             <ActionButton onClick={() => window.open(openStreetMapUrl, '_blank')} variant="ghost" icon={<MapIcon size={13} />}
               label={<span className="hidden sm:inline">{t('inspector.openStreetMap')}</span>} />
+          )}
+          {amapUrl && (
+            <ActionButton
+              onClick={() => window.open(amapUrl, '_blank')}
+              variant="ghost"
+              icon={<MapIcon size={13} />}
+              label={<span className="hidden sm:inline">{t('inspector.amap')}</span>}
+            />
           )}
           {(place.website || googleDetails?.website) && (
             <ActionButton onClick={() => window.open(place.website || googleDetails?.website, '_blank')} variant="ghost" icon={<ExternalLink size={13} />}

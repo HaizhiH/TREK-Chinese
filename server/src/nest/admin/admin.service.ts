@@ -4,6 +4,12 @@ import { getAdminUserDefaults, setAdminUserDefaults } from '../../services/setti
 import { invalidateMcpSessions } from '../../mcp';
 import { getPreferencesMatrix, setAdminPreferences } from '../../services/notificationPreferencesService';
 import { adminResetPasskeys } from '../../services/passkeyService';
+import {
+  getAmapAdminConfig,
+  recordAmapJsValidation,
+  updateAmapConfig,
+  validateAmapWebServiceKey,
+} from '../../services/amapConfig';
 
 /**
  * Thin Nest wrapper around the existing admin service (+ the settings,
@@ -27,6 +33,10 @@ export class AdminService {
 
   getOidcSettings() { return svc.getOidcSettings(); }
   updateOidcSettings(body: unknown) { return svc.updateOidcSettings(body as Parameters<typeof svc.updateOidcSettings>[0]); }
+  getAmapConfig() { return getAmapAdminConfig(); }
+  updateAmapConfig(body: unknown) { return updateAmapConfig(body as Parameters<typeof updateAmapConfig>[0]); }
+  validateAmapWeb() { return validateAmapWebServiceKey(); }
+  recordAmapJsValidation(valid: boolean) { return recordAmapJsValidation(valid); }
   saveDemoBaseline() { return svc.saveDemoBaseline(); }
 
   getGithubReleases(perPage: string, page: string) { return svc.getGithubReleases(perPage, page); }

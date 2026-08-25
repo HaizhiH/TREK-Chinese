@@ -1,6 +1,7 @@
 import type { TranslationStrings } from '../types';
 
 const planner: TranslationStrings = {
+  'planner.openAmap': 'Open route legs in Amap', // en-fallback
   'planner.places': '場所',
   'planner.bookings': '予約',
   'planner.packingList': '持ち物リスト',

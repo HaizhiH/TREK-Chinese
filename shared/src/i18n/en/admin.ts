@@ -1,6 +1,20 @@
 import type { TranslationStrings } from '../types';
 
 const admin: TranslationStrings = {
+  'admin.amap.title': 'Amap (Gaode Maps)',
+  'admin.amap.hint': 'Automatically used for mainland China after all three credentials are validated.',
+  'admin.amap.enabled': 'Enable Amap in mainland China',
+  'admin.amap.active': 'Configuration complete and active',
+  'admin.amap.inactive': 'Inactive until credentials are complete and validated',
+  'admin.amap.jsKey': 'JavaScript API Key',
+  'admin.amap.securityCode': 'JavaScript security code',
+  'admin.amap.webKey': 'Web Service Key',
+  'admin.amap.validateWeb': 'Validate Web Service',
+  'admin.amap.validateJs': 'Validate browser SDK',
+  'admin.amap.saved': 'Amap settings saved',
+  'admin.amap.webValid': 'Web Service Key validated',
+  'admin.amap.jsValid': 'Amap browser SDK validated',
+  'admin.amap.invalid': 'Amap validation failed',
   'admin.notifications.title': 'Notifications',
   'admin.notifications.hint': 'Choose one notification channel. Only one can be active at a time.',
   'admin.notifications.none': 'Disabled',

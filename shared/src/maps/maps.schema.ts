@@ -15,10 +15,19 @@ import { z } from 'zod';
  * stay byte-identical to Express.
  */
 
-const latLng = z.object({ lat: z.number(), lng: z.number() });
+export const geoProviderSchema = z.enum(['google', 'openstreetmap', 'amap']);
+export const geoPointSchema = z.object({ lat: z.number(), lng: z.number() });
+export const geoBoundsSchema = z.object({
+  south: z.number(),
+  west: z.number(),
+  north: z.number(),
+  east: z.number(),
+});
+const latLng = geoPointSchema;
 
 export const mapsSearchRequestSchema = z.object({
   query: z.string().min(1),
+  locationBias: geoPointSchema.extend({ radius: z.number().positive().optional() }).optional(),
 });
 export type MapsSearchRequest = z.infer<typeof mapsSearchRequestSchema>;
 
@@ -54,6 +63,7 @@ export const mapsAutocompleteSuggestionSchema = z.object({
   placeId: z.string(),
   mainText: z.string(),
   secondaryText: z.string(),
+  provider: geoProviderSchema,
 });
 export const mapsAutocompleteResultSchema = z.object({
   suggestions: z.array(mapsAutocompleteSuggestionSchema),
@@ -76,6 +86,8 @@ export type MapsPlacePhotoResult = z.infer<typeof mapsPlacePhotoResultSchema>;
 export const mapsReverseResultSchema = z.object({
   name: z.string().nullable(),
   address: z.string().nullable(),
+  provider: geoProviderSchema.optional(),
+  crs: z.literal('wgs84').optional(),
 });
 export type MapsReverseResult = z.infer<typeof mapsReverseResultSchema>;
 
@@ -87,3 +99,40 @@ export const mapsResolveUrlResultSchema = z.object({
   google_ftid: z.string().nullable().optional(),
 });
 export type MapsResolveUrlResult = z.infer<typeof mapsResolveUrlResultSchema>;
+
+export const mapsProviderConfigResultSchema = z.object({
+  amap: z.object({
+    enabled: z.boolean(),
+    jsKey: z.string().optional(),
+    securityCode: z.string().optional(),
+    regionPolicy: z.literal('china-mainland-auto'),
+  }),
+});
+export type MapsProviderConfigResult = z.infer<typeof mapsProviderConfigResultSchema>;
+
+export const mapsRouteRequestSchema = z.object({
+  waypoints: z.array(geoPointSchema).min(2).max(16),
+  profile: z.enum(['driving', 'walking', 'cycling']),
+});
+export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;
+
+export const mapsRouteStepSchema = z.object({
+  instruction: z.string().nullable(),
+  distance: z.number(),
+  duration: z.number(),
+  geometry: z.array(geoPointSchema),
+});
+export const mapsRouteLegSchema = z.object({
+  distance: z.number(),
+  duration: z.number(),
+  steps: z.array(mapsRouteStepSchema),
+});
+export const mapsRouteResultSchema = z.object({
+  provider: geoProviderSchema,
+  crs: z.literal('wgs84'),
+  geometry: z.array(geoPointSchema),
+  distance: z.number(),
+  duration: z.number(),
+  legs: z.array(mapsRouteLegSchema),
+});
+export type MapsRouteResult = z.infer<typeof mapsRouteResultSchema>;

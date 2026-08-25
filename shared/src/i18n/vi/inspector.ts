@@ -1,6 +1,7 @@
 import type { TranslationStrings } from '../types';
 
 const inspector: TranslationStrings = {
+  'inspector.amap': 'Amap', // en-fallback
   'inspector.opened': 'Mở',
   'inspector.closed': 'Đã đóng',
   'inspector.openingHours': 'Giờ mở cửa',

@@ -1,6 +1,7 @@
 import type { TranslationStrings } from '../types';
 
 const inspector: TranslationStrings = {
+  'inspector.amap': '高德地圖',
   'inspector.opened': '營業中',
   'inspector.closed': '已關閉',
   'inspector.openingHours': '營業時間',

@@ -116,6 +116,50 @@ export class AdminController {
     return { success: true, message: result.message };
   }
 
+  @Get('amap')
+  getAmap() {
+    return this.admin.getAmapConfig();
+  }
+
+  @Put('amap')
+  updateAmap(@CurrentUser() user: User, @Body() body: Record<string, unknown>, @Req() req: Request) {
+    const result = this.admin.updateAmapConfig(body);
+    writeAudit({
+      userId: user.id,
+      action: 'admin.amap_update',
+      ip: getClientIp(req),
+      details: {
+        enabled: result.enabled,
+        js_key_set: Boolean(result.js_key),
+        security_code_set: Boolean(result.security_code),
+        web_service_key_set: result.web_service_key_set,
+      },
+    });
+    return result;
+  }
+
+  @Post('amap/validate-web')
+  @HttpCode(200)
+  async validateAmapWeb(@CurrentUser() user: User, @Req() req: Request) {
+    const result = await this.admin.validateAmapWeb();
+    writeAudit({
+      userId: user.id,
+      action: 'admin.amap_validate_web',
+      ip: getClientIp(req),
+      details: { valid: result.valid },
+    });
+    return result;
+  }
+
+  @Post('amap/validate-js')
+  @HttpCode(200)
+  validateAmapJs(@CurrentUser() user: User, @Body('valid') valid: unknown, @Req() req: Request) {
+    if (typeof valid !== 'boolean') throw new HttpException({ error: 'valid must be a boolean' }, 400);
+    const result = this.admin.recordAmapJsValidation(valid);
+    writeAudit({ userId: user.id, action: 'admin.amap_validate_js', ip: getClientIp(req), details: { valid } });
+    return result;
+  }
+
   // ── GitHub / version ──
   @Get('github-releases')
   async githubReleases(@Query('per_page') perPage = '10', @Query('page') page = '1') {

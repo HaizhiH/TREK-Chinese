@@ -15,6 +15,8 @@ export interface PlaceFormData {
   google_place_id?: string
   google_ftid?: string
   osm_id?: string
+  geo_provider?: 'google' | 'openstreetmap' | 'amap'
+  provider_place_id?: string
 }
 
 export function isGoogleMapsUrl(input: string): boolean {

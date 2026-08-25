@@ -49,6 +49,7 @@ vi.mock('../PDF/TripPDF', () => ({ downloadTripPDF: vi.fn().mockResolvedValue(un
 
 vi.mock('../Map/RouteCalculator', () => ({
   calculateRoute: vi.fn().mockResolvedValue({ distanceText: '5 km', durationText: '1h', coordinates: [] }),
+  generateAmapRouteUrls: vi.fn().mockReturnValue(['https://uri.amap.com/navigation?...']),
   generateGoogleMapsUrl: vi.fn().mockReturnValue('https://maps.google.com/...'),
   optimizeRoute: vi.fn().mockImplementation((places) => places),
   // One leg per waypoint gap; the connector between two stops reads distanceText.

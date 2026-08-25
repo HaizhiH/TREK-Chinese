@@ -5,7 +5,8 @@ import { useTripStore } from '../store/tripStore'
 import { useCanDo } from '../store/permissionsStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { MapViewAuto as MapView } from '../components/Map/MapViewAuto'
-import { MapCompassPill, type CompassMap } from '../components/Map/MapCompassPill'
+import { MapCompassPill } from '../components/Map/MapCompassPill'
+import type { MapController } from '../components/Map/mapController'
 import { getCached, fetchPhoto } from '../services/photoService'
 import DayPlanSidebar from '../components/Planner/DayPlanSidebar'
 import PlacesSidebar from '../components/Planner/PlacesSidebar'
@@ -217,7 +218,8 @@ export default function TripPlannerPage(): React.ReactElement | null {
   } = useTripPlanner()
 
   const poi = usePoiExplore()
-  const [glMap, setGlMap] = useState<CompassMap | null>(null)
+  const [mapController, setMapController] = useState<MapController | null>(null)
+  const compassMap = mapController?.compass || null
   const poiPillEnabled = useSettingsStore(s => s.settings.map_poi_pill_enabled) !== false
 
   // Costs expense editor opened from a booking modal (save-then-open). Lives at the
@@ -341,23 +343,23 @@ export default function TripPlannerPage(): React.ReactElement | null {
               pois={poi.pois}
               onPoiClick={openAddPlaceFromPoi}
               onViewportChange={poi.onViewportChange}
-              onMapReady={setGlMap}
+              onMapReady={setMapController}
             />
 
-            {(poiPillEnabled || glMap) && (
+            {(poiPillEnabled || compassMap) && (
               <div className="hidden md:flex" style={{ position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)', zIndex: 25, pointerEvents: 'none', alignItems: 'flex-start', gap: 8 }}>
                 {poiPillEnabled && (
                   <PoiCategoryPill active={poi.active} onToggle={poi.toggle} loadingKeys={poi.loadingKeys} errorKeys={poi.errorKeys} moved={poi.moved} onSearchArea={poi.searchArea} />
                 )}
-                {glMap && <MapCompassPill map={glMap} />}
+                {compassMap && <MapCompassPill map={compassMap} />}
               </div>
             )}
 
             {/* Mobile: the compass/reset-orientation control lives centre-top on its own
                 (the desktop cluster above is hidden below md), between the edge Plan/Places tabs. */}
-            {glMap && (
+            {compassMap && (
               <div className="flex md:hidden" style={{ position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)', zIndex: 25, pointerEvents: 'none' }}>
-                <MapCompassPill map={glMap} />
+                <MapCompassPill map={compassMap} />
               </div>
             )}
 

@@ -77,8 +77,8 @@ A self-hosted, real-time collaborative travel planner — with maps, budgets, pa
 #### 🧭 Trip planning
 
 - **Drag & drop planner** — organise places into day plans with reordering and cross-day moves
-- **Interactive map** — Leaflet or Mapbox GL with 3D buildings, terrain, photo markers, clustering, route visualization
-- **Place search** — Google Places (photos, ratings, hours) or OpenStreetMap (free, no API key)
+- **Interactive map** — Leaflet, Mapbox GL, MapLibre or automatic Amap in mainland China, with photo markers, clustering and route visualization
+- **Place search** — Google Places, OpenStreetMap, or automatic Amap search in mainland China
 - **Place import** — shared Google Maps / Naver Maps lists, plus GPX and KML/KMZ/GeoJSON map files
 - **Day notes** — timestamped, icon-tagged notes with drag-and-drop reordering
 - **Route optimisation** — auto-sort places and export to Google Maps
@@ -205,7 +205,7 @@ Open `http://localhost:3000`. On first boot TREK seeds an admin account — if y
 
 </div>
 
-Real-time sync via WebSocket (`ws`). Backend on NestJS 11. State with Zustand. Auth via JWT + OAuth 2.1 + OIDC + Passkeys (WebAuthn) + TOTP MFA. Weather via Open-Meteo (no key required). Maps with Leaflet and Mapbox GL.
+Real-time sync via WebSocket (`ws`). Backend on NestJS 11. State with Zustand. Auth via JWT + OAuth 2.1 + OIDC + Passkeys (WebAuthn) + TOTP MFA. Weather via Open-Meteo (no key required). Maps with Leaflet, Mapbox GL, MapLibre and optional Amap JS API 2.x.
 
 <br />
 
@@ -472,4 +472,3 @@ for full third-party attributions.
 ## License
 
 TREK is [AGPL v3](LICENSE). Self-host freely for personal or internal company use. If you modify and offer TREK as a network service to third parties, your modifications must be open-sourced under the same licence.
-

@@ -114,7 +114,7 @@ export function applyGlobalMiddleware(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'wasm-unsafe-eval'", "'unsafe-eval'"],
+        scriptSrc: ["'self'", "'wasm-unsafe-eval'", "'unsafe-eval'", "https://*.amap.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: [
@@ -127,7 +127,8 @@ export function applyGlobalMiddleware(
           "https://geocoding-api.open-meteo.com", "https://api.frankfurter.dev",
           "https://router.project-osrm.org/route/v1/", "https://routing.openstreetmap.de/",
           "https://api.mapbox.com", "https://*.tiles.mapbox.com", "https://events.mapbox.com",
-          "https://tiles.openfreemap.org"
+          "https://tiles.openfreemap.org",
+          "https://*.amap.com", "https://*.autonavi.com"
         ],
         workerSrc: ["'self'", "blob:"],
         childSrc: ["'self'", "blob:"],
@@ -167,7 +168,7 @@ export function applyGlobalMiddleware(
   app.use(enforceGlobalMfaPolicy);
 
   // Request logging with sensitive field redaction
-  const SENSITIVE_KEYS = new Set(['password', 'new_password', 'current_password', 'token', 'jwt', 'authorization', 'cookie', 'client_secret', 'mfa_token', 'code', 'smtp_pass']);
+  const SENSITIVE_KEYS = new Set(['password', 'new_password', 'current_password', 'token', 'jwt', 'authorization', 'cookie', 'client_secret', 'mfa_token', 'code', 'smtp_pass', 'js_key', 'security_code', 'web_service_key', 'amap_js_key', 'amap_security_code', 'amap_web_service_key']);
   const redact = (value: unknown): unknown => {
     if (!value || typeof value !== 'object') return value;
     if (Array.isArray(value)) return (value as unknown[]).map(redact);

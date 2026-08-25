@@ -1,6 +1,20 @@
 import type { TranslationStrings } from '../types';
 
 const admin: TranslationStrings = {
+  'admin.amap.title': 'Amap (Gaode Maps)', // en-fallback
+  'admin.amap.hint': 'Automatically used for mainland China after all three credentials are validated.', // en-fallback
+  'admin.amap.enabled': 'Enable Amap in mainland China', // en-fallback
+  'admin.amap.active': 'Configuration complete and active', // en-fallback
+  'admin.amap.inactive': 'Inactive until credentials are complete and validated', // en-fallback
+  'admin.amap.jsKey': 'JavaScript API Key', // en-fallback
+  'admin.amap.securityCode': 'JavaScript security code', // en-fallback
+  'admin.amap.webKey': 'Web Service Key', // en-fallback
+  'admin.amap.validateWeb': 'Validate Web Service', // en-fallback
+  'admin.amap.validateJs': 'Validate browser SDK', // en-fallback
+  'admin.amap.saved': 'Amap settings saved', // en-fallback
+  'admin.amap.webValid': 'Web Service Key validated', // en-fallback
+  'admin.amap.jsValid': 'Amap browser SDK validated', // en-fallback
+  'admin.amap.invalid': 'Amap validation failed', // en-fallback
   'admin.notifications.title': '알림',
   'admin.notifications.hint': '알림 채널을 하나 선택하세요. 한 번에 하나만 활성화할 수 있습니다.',
   'admin.notifications.none': '비활성화',

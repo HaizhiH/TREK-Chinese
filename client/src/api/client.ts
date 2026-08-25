@@ -598,6 +598,10 @@ export const adminApi = {
   updateNotificationPreferences: (prefs: Record<string, Record<string, boolean>>) => apiClient.put('/admin/notification-preferences', prefs).then(r => r.data),
   getDefaultUserSettings: () => apiClient.get('/admin/default-user-settings').then(r => r.data),
   updateDefaultUserSettings: (settings: Record<string, unknown>) => apiClient.put('/admin/default-user-settings', settings).then(r => r.data),
+  getAmap: () => apiClient.get('/admin/amap').then(r => r.data),
+  updateAmap: (settings: Record<string, unknown>) => apiClient.put('/admin/amap', settings).then(r => r.data),
+  validateAmapWeb: () => apiClient.post('/admin/amap/validate-web').then(r => r.data as { valid: boolean; message?: string }),
+  validateAmapJs: (valid: boolean) => apiClient.post('/admin/amap/validate-js', { valid }).then(r => r.data as { valid: boolean }),
 }
 
 export const addonsApi = {
@@ -804,10 +808,16 @@ export const journeyApi = {
 }
 
 export const mapsApi = {
-  search: (query: string, lang?: string) => apiClient.post(`/maps/search?lang=${lang || 'en'}`, { query }).then(r => checkInDev(mapsSearchResultSchema, r.data, 'maps.search')),
+  search: (query: string, lang?: string, locationBias?: { lat: number; lng: number; radius?: number }) => apiClient.post(`/maps/search?lang=${lang || 'en'}`, { query, locationBias }).then(r => checkInDev(mapsSearchResultSchema, r.data, 'maps.search')),
   autocomplete: (input: string, lang?: string, locationBias?: { low: { lat: number; lng: number }; high: { lat: number; lng: number } }, signal?: AbortSignal) =>
       apiClient.post('/maps/autocomplete', { input, lang, locationBias }, { signal }).then(r => checkInDev(mapsAutocompleteResultSchema, r.data, 'maps.autocomplete')),
-  details: (placeId: string, lang?: string) => apiClient.get(`/maps/details/${encodeURIComponent(placeId)}`, { params: { lang } }).then(r => checkInDev(mapsPlaceDetailsResultSchema, r.data, 'maps.details')),
+  details: (placeId: string, lang?: string, provider?: 'google' | 'openstreetmap' | 'amap') => apiClient.get(provider
+    ? `/maps/details/${provider}/${encodeURIComponent(placeId)}`
+    : `/maps/details/${encodeURIComponent(placeId)}`, { params: { lang } }).then(r => checkInDev(mapsPlaceDetailsResultSchema, r.data, 'maps.details')),
+  providerConfig: () => apiClient.get('/maps/provider-config').then(r => r.data as import('@trek/shared').MapsProviderConfigResult),
+  route: (waypoints: import('@trek/shared').GeoPoint[], profile: import('@trek/shared').RouteProfile, signal?: AbortSignal) =>
+    apiClient.post('/maps/route', { waypoints, profile }, { signal, timeout: 20000 }).then(r => r.data as import('@trek/shared').MapsRouteResult),
+  amapToWgs84: (points: import('@trek/shared').GeoPoint[]) => apiClient.post('/maps/convert/amap-to-wgs84', { points }).then(r => r.data as { points: import('@trek/shared').GeoPoint[]; crs: 'wgs84' }),
   placePhoto: (placeId: string, lat?: number, lng?: number, name?: string) => apiClient.get(`/maps/place-photo/${encodeURIComponent(placeId)}`, { params: { lat, lng, name } }).then(r => checkInDev(mapsPlacePhotoResultSchema, r.data, 'maps.placePhoto')),
   reverse: (lat: number, lng: number, lang?: string) => apiClient.get('/maps/reverse', { params: { lat, lng, lang } }).then(r => checkInDev(mapsReverseResultSchema, r.data, 'maps.reverse')),
   resolveUrl: (url: string) => apiClient.post('/maps/resolve-url', { url }).then(r => checkInDev(mapsResolveUrlResultSchema, r.data, 'maps.resolveUrl')),

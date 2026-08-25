@@ -179,6 +179,15 @@ function ViewportController({ onViewportChange }: { onViewportChange?: (b: { sou
   return null
 }
 
+function ProviderReadyController({ onReady }: { onReady?: (map: L.Map | null) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    onReady?.(map);
+    return () => onReady?.(null);
+  }, [map, onReady]);
+  return null;
+}
+
 interface SelectionControllerProps {
   places: Place[]
   selectedPlaceId: number | null
@@ -466,11 +475,12 @@ export const MapView = memo(function MapView({
   pois = [] as Poi[],
   onPoiClick,
   onViewportChange,
+  _onProviderReady,
   tripId,
 }: any) {
   const poiMarkers = useMemo(() => (pois as Poi[]).map((poi: Poi) => (
     <Marker
-      key={`poi-${poi.osm_id}`}
+      key={`poi-${poi.provider || 'openstreetmap'}-${poi.provider_place_id || poi.osm_id}`}
       position={[poi.lat, poi.lng]}
       icon={createPoiIcon(poi.category)}
       zIndexOffset={500}
@@ -709,7 +719,8 @@ export const MapView = memo(function MapView({
       <MapClickHandler onClick={onMapClick} />
       <MapContextMenuHandler onContextMenu={onMapContextMenu} />
       <CameraHoverGuard movingRef={mapMovingRef} onMoveStart={clearHover} />
-      <ViewportController onViewportChange={onViewportChange} />
+          <ViewportController onViewportChange={onViewportChange} />
+          <ProviderReadyController onReady={_onProviderReady} />
       <LeafletLocationLayer position={userPosition} mode={trackingMode} />
 
       <MarkerClusterGroup

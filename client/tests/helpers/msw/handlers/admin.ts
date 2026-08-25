@@ -63,6 +63,18 @@ export const adminHandlers = [
     return HttpResponse.json({ ...body });
   }),
 
+  http.get('/api/admin/amap', () => {
+    return HttpResponse.json({
+      enabled: false,
+      effective_enabled: false,
+      js_key: '',
+      security_code: '',
+      web_service_key_set: false,
+      web_validated: false,
+      js_validated: false,
+    });
+  }),
+
   http.get('/api/admin/version-check', () => {
     return HttpResponse.json({ update_available: false, latest: '1.0.0', current: '1.0.0' });
   }),
