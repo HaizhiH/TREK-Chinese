@@ -369,6 +369,43 @@ describe('PlaceFormModal', () => {
     );
   });
 
+  it('clears identifiers from the previous provider when a different search result is selected', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const place = buildPlace({
+      name: 'Old Google Place',
+      google_place_id: 'google-old',
+      google_ftid: 'ftid-old',
+      geo_provider: 'google',
+      provider_place_id: 'google-old',
+    });
+    server.use(
+      http.post('/api/maps/search', () => HttpResponse.json({
+        places: [{
+          name: 'New Amap Place', address: 'Beijing', lat: 39.9, lng: 116.4,
+          provider: 'amap', provider_place_id: 'amap-new',
+        }],
+        source: 'amap',
+      }))
+    );
+
+    render(<PlaceFormModal {...defaultProps} place={place} onSave={onSave} />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'New Amap Place');
+    await user.keyboard('{Enter}');
+    await user.click(await screen.findByText('New Amap Place'));
+    await user.click(screen.getByRole('button', { name: /^Update$/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toEqual(expect.objectContaining({
+      google_place_id: null,
+      google_ftid: null,
+      osm_id: null,
+      geo_provider: 'amap',
+      provider_place_id: 'amap-new',
+    }));
+  });
+
   it('FE-PLANNER-PLACEFORM-021d: suggestion click shows error only when the fallback also finds nothing', async () => {
     const addToast = vi.fn();
     window.__addToast = addToast;

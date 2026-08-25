@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { maps } = vi.hoisted(() => ({
   maps: {
@@ -32,6 +32,7 @@ function svc(row?: { value: string }) {
 }
 
 beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.unstubAllGlobals());
 
 describe('MapsService', () => {
   describe('kill-switch settings reads', () => {
@@ -126,6 +127,41 @@ describe('MapsService', () => {
     it('returns null when nothing is cached', () => {
       serveFilePath.mockReturnValue(null);
       expect(svc().photoBytesPath('p1')).toBeNull();
+    });
+  });
+
+  describe('route', () => {
+    it('splits 17 waypoints into overlapping provider requests and merges every leg', async () => {
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+        const points = decodeURIComponent(url.pathname.split('/').at(-1) || '')
+          .split(';')
+          .map((value) => value.split(',').map(Number) as [number, number]);
+        return new Response(JSON.stringify({
+          code: 'Ok',
+          routes: [{
+            distance: (points.length - 1) * 1000,
+            duration: (points.length - 1) * 60,
+            geometry: { coordinates: points },
+            legs: points.slice(1).map(() => ({ distance: 1000, duration: 60, steps: [] })),
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const waypoints = Array.from({ length: 17 }, (_, index) => ({ lat: 50 + index / 100, lng: 8 }));
+
+      const result = await svc().route(waypoints, 'driving');
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const requestSizes = fetchMock.mock.calls.map(([input]) =>
+        decodeURIComponent(new URL(String(input)).pathname.split('/').at(-1) || '').split(';').length
+      );
+      expect(requestSizes).toEqual([16, 2]);
+      expect(result.geometry).toHaveLength(17);
+      expect(result.legs).toHaveLength(16);
+      expect(result.distance).toBe(16000);
+      expect(result.duration).toBe(960);
+      expect(result.provider).toBe('openstreetmap');
     });
   });
 });

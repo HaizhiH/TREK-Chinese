@@ -177,10 +177,10 @@ export class MapsController {
     if (
       !Array.isArray(waypoints) ||
       waypoints.length < 2 ||
-      waypoints.length > 16 ||
+      waypoints.length > 100 ||
       waypoints.some((p) => !p || !Number.isFinite((p as GeoPoint).lat) || !Number.isFinite((p as GeoPoint).lng))
     ) {
-      throw new HttpException({ error: 'Between 2 and 16 valid WGS-84 waypoints are required' }, 400);
+      throw new HttpException({ error: 'Between 2 and 100 valid WGS-84 waypoints are required' }, 400);
     }
     if (!['driving', 'walking', 'cycling'].includes(String(profile))) {
       throw new HttpException({ error: 'Invalid route profile' }, 400);

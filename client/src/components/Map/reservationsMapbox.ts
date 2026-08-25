@@ -18,7 +18,7 @@ import type { Reservation, ReservationEndpoint } from '../../types'
 export const RESERVATION_SOURCE_ID = 'trek-reservations'
 export const RESERVATION_LINE_LAYER_ID = 'trek-reservations-lines'
 
-type TransportType = 'flight' | 'train' | 'cruise' | 'car' | 'bus' | 'taxi' | 'bicycle' | 'ferry' | 'transit' | 'transport_other'
+export type TransportType = 'flight' | 'train' | 'cruise' | 'car' | 'bus' | 'taxi' | 'bicycle' | 'ferry' | 'transit' | 'transport_other'
 const TRANSPORT_TYPES: TransportType[] = ['flight', 'train', 'cruise', 'car', 'bus', 'taxi', 'bicycle', 'ferry', 'transit', 'transport_other']
 const TRANSPORT_COLOR = '#3b82f6'
 
@@ -90,7 +90,7 @@ function computeDuration(from: ReservationEndpoint, to: ReservationEndpoint, fal
 const cleanName = (name: string) => name.replace(/\s*\([^)]*\)/g, '').trim()
 
 // ── item building ─────────────────────────────────────────────────────────
-interface TransportItem {
+export interface TransportItem {
   res: Reservation
   from: ReservationEndpoint
   to: ReservationEndpoint
@@ -102,7 +102,7 @@ interface TransportItem {
   subLabel: string | null
 }
 
-function buildItems(reservations: Reservation[]): TransportItem[] {
+export function buildReservationItems(reservations: Reservation[]): TransportItem[] {
   const out: TransportItem[] = []
   for (const r of reservations) {
     if (!TRANSPORT_TYPES.includes(r.type as TransportType)) continue
@@ -224,7 +224,7 @@ export class ReservationMapboxOverlay {
 
   update(reservations: Reservation[], opts: ReservationOverlayOptions, roadRoutes?: Map<number, [number, number][]>) {
     this.opts = opts
-    this.items = buildItems(reservations)
+    this.items = buildReservationItems(reservations)
     this.roadRoutes = roadRoutes ?? new Map()
     this.render()
   }

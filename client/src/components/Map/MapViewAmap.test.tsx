@@ -24,6 +24,7 @@ import { MapViewAmap } from './MapViewAmap';
 
 describe('MapViewAmap', () => {
   it('renders initial overlays and fits them after the asynchronous SDK is ready', async () => {
+    const onReservationClick = vi.fn();
     const map = {
       add: vi.fn(),
       addControl: vi.fn(),
@@ -62,6 +63,20 @@ describe('MapViewAmap', () => {
             [31.2304, 121.4737],
           ],
         ]}
+        reservations={[
+          {
+            id: 7,
+            type: 'flight',
+            status: 'confirmed',
+            endpoints: [
+              { role: 'from', sequence: 0, name: 'Beijing Airport', code: 'PEK', lat: 40.0799, lng: 116.6031 },
+              { role: 'to', sequence: 1, name: 'Shanghai Airport', code: 'PVG', lat: 31.1443, lng: 121.8083 },
+            ],
+          } as any,
+        ]}
+        visibleConnectionIds={[7]}
+        showReservationStats
+        onReservationClick={onReservationClick}
       />
     );
 
@@ -69,7 +84,11 @@ describe('MapViewAmap', () => {
     sdk.resolve(AMap);
 
     await waitFor(() => expect(AMap.MarkerCluster).toHaveBeenCalledTimes(1));
-    expect(AMap.Polyline).toHaveBeenCalledTimes(1);
+    expect(AMap.Polyline).toHaveBeenCalledTimes(2);
+    expect(AMap.Marker).toHaveBeenCalledTimes(4);
+    const endpointMarker = AMap.Marker.mock.results.find((result) => result.value.options.content.title === 'Beijing Airport');
+    endpointMarker?.value.on.mock.calls.find(([event]) => event === 'click')?.[1]();
+    expect(onReservationClick).toHaveBeenCalledWith(7);
     expect(map.setMapStyle).toHaveBeenCalledWith('amap://styles/dark');
     expect(map.setFitView).toHaveBeenCalledTimes(1);
   });

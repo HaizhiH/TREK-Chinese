@@ -3,6 +3,7 @@ import {
   mapsAutocompleteRequestSchema,
   mapsReverseQuerySchema,
   mapsResolveUrlRequestSchema,
+  mapsRouteRequestSchema,
 } from './maps.schema';
 
 import { describe, it, expect } from 'vitest';
@@ -43,5 +44,17 @@ describe('mapsResolveUrlRequestSchema', () => {
       }).success,
     ).toBe(true);
     expect(mapsResolveUrlRequestSchema.safeParse({ url: '' }).success).toBe(false);
+  });
+});
+
+describe('mapsRouteRequestSchema', () => {
+  it('accepts complete day routes beyond a provider single-request limit', () => {
+    const waypoint = { lat: 52.5, lng: 13.4 };
+    expect(mapsRouteRequestSchema.safeParse({ waypoints: Array(17).fill(waypoint), profile: 'driving' }).success).toBe(
+      true,
+    );
+    expect(mapsRouteRequestSchema.safeParse({ waypoints: Array(101).fill(waypoint), profile: 'driving' }).success).toBe(
+      false,
+    );
   });
 });
