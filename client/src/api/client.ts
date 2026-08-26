@@ -871,6 +871,14 @@ export const reservationsApi = {
   update: (tripId: number | string, id: number, data: ReservationUpdateRequest) => apiClient.put(`/trips/${tripId}/reservations/${id}`, data).then(r => r.data),
   delete: (tripId: number | string, id: number) => apiClient.delete(`/trips/${tripId}/reservations/${id}`).then(r => r.data),
   updatePositions: (tripId: number | string, positions: { id: number; day_plan_position: number }[], dayId?: number) => apiClient.put(`/trips/${tripId}/reservations/positions`, { positions, day_id: dayId }).then(r => r.data),
+  chinaRailTimetable: (tripId: number | string, trainNumber: string, date: string) =>
+    apiClient.get(`/trips/${tripId}/reservations/train/12306`, { params: { trainNumber, date } }).then(r => r.data as {
+      trainNumber: string
+      date: string
+      from: string
+      to: string
+      stops: Array<{ sequence: number; name: string; arrivalTime: string | null; departureTime: string | null; stopoverMinutes: number | null }>
+    }),
   importBookingPreview: (tripId: number | string, files: File[], mode: BookingImportMode = 'no-ai'): Promise<BookingImportPreviewResponse> => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)

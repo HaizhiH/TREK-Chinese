@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { Plane, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront, Paperclip, FileText, X, ExternalLink, Link2, Plus, Trash2 } from 'lucide-react'
+import { Plane, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront, Paperclip, FileText, X, ExternalLink, Link2, Plus, Trash2, RefreshCw } from 'lucide-react'
 import Modal from '../shared/Modal'
 import CustomSelect from '../shared/CustomSelect'
 import CustomTimePicker from '../shared/CustomTimePicker'
@@ -12,7 +12,7 @@ import { useTripStore } from '../../store/tripStore'
 import { useAddonStore } from '../../store/addonStore'
 import { formatDate, splitReservationDateTime, resolveDayId } from '../../utils/formatters'
 import { openFile } from '../../utils/fileDownload'
-import apiClient from '../../api/client'
+import apiClient, { mapsApi, reservationsApi } from '../../api/client'
 import type { Day, Place, Accommodation, Reservation, ReservationEndpoint, TripFile, BudgetItem, AssignmentsMap } from '../../types'
 import { parseReservationMetadata, orderedEndpoints } from '../../utils/flightLegs'
 import { BookingCostsSection } from './BookingCostsSection'
@@ -20,6 +20,7 @@ import type { BookingExpenseRequest } from './BookingCostsSection.types'
 import type { BookingReviewDraft } from './parsedItemToDraft'
 import TransitSearchPanel, { type PickedPlace } from './TransitSearchPanel'
 import { typeToCostCategory } from '@trek/shared'
+import ToggleSwitch from '../Settings/ToggleSwitch'
 
 const TRANSPORT_TYPES = ['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cruise', 'ferry', 'transit', 'transport_other'] as const
 type TransportType = typeof TRANSPORT_TYPES[number]
@@ -102,6 +103,14 @@ interface StationWaypointForm {
   platform: string
   seat: string
 }
+
+interface ChinaRailStop {
+  sequence: number
+  name: string
+  arrivalTime: string | null
+  departureTime: string | null
+  stopoverMinutes: number | null
+}
 function emptyStationWaypoint(dayId: string | number = ''): StationWaypointForm {
   return { location: null, arrDayId: dayId, arrTime: '', depDayId: dayId, depTime: '', train_number: '', platform: '', seat: '' }
 }
@@ -183,6 +192,10 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
   const [waypoints, setWaypoints] = useState<WaypointForm[]>([emptyWaypoint(), emptyWaypoint()])
   // Train route as an ordered list of stations (origin .. stops .. destination).
   const [trainWaypoints, setTrainWaypoints] = useState<StationWaypointForm[]>([emptyStationWaypoint(), emptyStationWaypoint()])
+  const [chinaRailSync, setChinaRailSync] = useState(false)
+  const [chinaRailStops, setChinaRailStops] = useState<ChinaRailStop[]>([])
+  const [selectedChinaRailStops, setSelectedChinaRailStops] = useState<Set<number>>(new Set())
+  const [chinaRailLoading, setChinaRailLoading] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [showFilePicker, setShowFilePicker] = useState(false)
@@ -191,6 +204,9 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
 
   useEffect(() => {
     if (!isOpen) return
+    setChinaRailSync(false)
+    setChinaRailStops([])
+    setSelectedChinaRailStops(new Set())
     // Edit uses the saved `reservation`; a review-import populates from `prefill`.
     // Either way the init reads the same fields — `reservation` still decides
     // edit-vs-create at submit time.
@@ -316,6 +332,81 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
   }, [isOpen, reservation, prefill, selectedDayId, budgetItems])
 
   const set = (field: string, value: any) => setForm(prev => ({ ...prev, [field]: value }))
+
+  const lookupChinaRail = async () => {
+    const trainNumber = trainWaypoints[0]?.train_number.trim()
+    const departureDay = days.find(day => day.id === Number(trainWaypoints[0]?.depDayId))
+    if (!trainNumber || !departureDay?.date || !tripId) {
+      toast.error(t('reservations.12306.missingInput'))
+      return
+    }
+    setChinaRailLoading(true)
+    try {
+      const timetable = await reservationsApi.chinaRailTimetable(tripId, trainNumber, departureDay.date)
+      setChinaRailStops(timetable.stops)
+      setSelectedChinaRailStops(new Set(timetable.stops.map(stop => stop.sequence)))
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || t('reservations.12306.lookupError'))
+      setChinaRailStops([])
+    } finally {
+      setChinaRailLoading(false)
+    }
+  }
+
+  const applyChinaRailStops = async () => {
+    const picked = chinaRailStops.filter(stop => selectedChinaRailStops.has(stop.sequence))
+    if (picked.length < 2) {
+      toast.error(t('reservations.12306.selectTwo'))
+      return
+    }
+    setChinaRailLoading(true)
+    try {
+      let dayOffset = 0
+      let previousMinutes = -1
+      const offsets = new Map<number, number>()
+      for (const stop of chinaRailStops) {
+        const time = stop.departureTime || stop.arrivalTime
+        if (time) {
+          const [hours, minutes] = time.split(':').map(Number)
+          const total = hours * 60 + minutes
+          if (previousMinutes >= 0 && total < previousMinutes) dayOffset += 1
+          previousMinutes = total
+        }
+        offsets.set(stop.sequence, dayOffset)
+      }
+      const baseDate = days.find(day => day.id === Number(trainWaypoints[0]?.depDayId))?.date
+      const trainNumber = trainWaypoints[0]?.train_number.trim().toUpperCase() || ''
+      const resolved = await Promise.all(picked.map(async (stop) => {
+        const result = await mapsApi.search(`${stop.name}站 火车站`, 'zh-CN')
+        const place = result.places?.[0]
+        const lat = Number(place?.lat)
+        const lng = Number(place?.lng)
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error(stop.name)
+        const offset = offsets.get(stop.sequence) || 0
+        const date = baseDate ? new Date(`${baseDate}T12:00:00Z`) : null
+        if (date) date.setUTCDate(date.getUTCDate() + offset)
+        const dayId = date ? (days.find(day => day.date === date.toISOString().slice(0, 10))?.id || '') : ''
+        return {
+          location: { name: stop.name, lat, lng, address: place.address || null },
+          arrDayId: dayId,
+          arrTime: stop.arrivalTime || '',
+          depDayId: dayId,
+          depTime: stop.departureTime || '',
+          train_number: trainNumber,
+          platform: '',
+          seat: '',
+        } satisfies StationWaypointForm
+      }))
+      setTrainWaypoints(resolved)
+      if (!form.title.trim()) set('title', `${trainNumber} ${picked[0].name} - ${picked[picked.length - 1].name}`)
+      toast.success(t('reservations.12306.applied', { count: resolved.length }))
+    } catch (err) {
+      const station = err instanceof Error ? err.message : ''
+      toast.error(t('reservations.12306.geocodeError', { station }))
+    } finally {
+      setChinaRailLoading(false)
+    }
+  }
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -783,6 +874,44 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         ) : form.type === 'train' ? (
           /* ── Train route: ordered stations (origin · stops · destination) ── */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="bg-surface-card" style={{ border: '1px solid var(--border-primary)', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <div className="text-content" style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 600 }}>{t('reservations.12306.title')}</div>
+                  <div className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))' }}>{t('reservations.12306.hint')}</div>
+                </div>
+                <ToggleSwitch on={chinaRailSync} onToggle={() => { setChinaRailSync(value => !value); setChinaRailStops([]) }} label={t('reservations.12306.title')} />
+              </div>
+              {chinaRailSync && (
+                <>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
+                    <div style={{ flex: 1 }}>
+                      <label className={labelClass}>{t('reservations.meta.trainNumber')}</label>
+                      <input type="text" value={trainWaypoints[0]?.train_number || ''} onChange={e => setTrainWaypoints(prev => prev.map((wp, index) => index === 0 ? { ...wp, train_number: e.target.value } : wp))} placeholder="G1" className={inputClass} />
+                    </div>
+                    <button type="button" onClick={lookupChinaRail} disabled={chinaRailLoading} className="bg-[var(--text-primary)] text-[var(--bg-primary)]" style={{ height: 38, padding: '0 12px', border: 0, borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, cursor: chinaRailLoading ? 'wait' : 'pointer', fontFamily: 'inherit', fontSize: 'calc(12px * var(--fs-scale-body, 1))' }}>
+                      <RefreshCw size={14} className={chinaRailLoading ? 'animate-spin' : ''} /> {t('reservations.12306.lookup')}
+                    </button>
+                  </div>
+                  {chinaRailStops.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))' }}>{t('reservations.12306.pickStops')}</div>
+                      <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border-primary)', borderRadius: 8 }}>
+                        {chinaRailStops.map((stop, index) => {
+                          const checked = selectedChinaRailStops.has(stop.sequence)
+                          return <label key={stop.sequence} className="text-content" style={{ minHeight: 36, padding: '7px 10px', display: 'grid', gridTemplateColumns: '20px minmax(0, 1fr) auto', alignItems: 'center', gap: 8, borderBottom: index < chinaRailStops.length - 1 ? '1px solid var(--border-primary)' : 'none', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={checked} onChange={() => setSelectedChinaRailStops(prev => { const next = new Set(prev); if (next.has(stop.sequence)) next.delete(stop.sequence); else next.add(stop.sequence); return next })} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{stop.name}</span>
+                            <span className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', whiteSpace: 'nowrap' }}>{stop.arrivalTime || '--:--'} / {stop.departureTime || '--:--'}</span>
+                          </label>
+                        })}
+                      </div>
+                      <button type="button" onClick={applyChinaRailStops} disabled={chinaRailLoading} className="text-content" style={{ alignSelf: 'flex-end', padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'var(--bg-tertiary)', cursor: chinaRailLoading ? 'wait' : 'pointer', fontFamily: 'inherit' }}>{t('reservations.12306.apply')}</button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
             <label className={labelClass}>{t('reservations.layover.route')}</label>
             {trainWaypoints.map((wp, i) => {
               const isFirst = i === 0
