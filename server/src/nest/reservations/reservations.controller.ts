@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import type { User } from '../../types';
@@ -15,6 +16,7 @@ import { ReservationsService } from './reservations.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { pushReservationToAirtrail } from '../../services/airtrail/airtrailSync';
+import { queryChinaRailTrain } from '../../services/chinaRailService';
 
 type ReservationBody = Record<string, unknown> & {
   title?: string;
@@ -54,6 +56,25 @@ export class ReservationsController {
   list(@CurrentUser() user: User, @Param('tripId') tripId: string) {
     this.requireTrip(tripId, user);
     return { reservations: this.reservations.list(tripId) };
+  }
+
+  @Get('train/12306')
+  async chinaRailTimetable(
+    @CurrentUser() user: User,
+    @Param('tripId') tripId: string,
+    @Query('trainNumber') trainNumber?: string,
+    @Query('date') date?: string,
+  ) {
+    this.requireTrip(tripId, user);
+    if (!trainNumber || !date) {
+      throw new HttpException({ error: 'Train number and date are required' }, 400);
+    }
+    try {
+      return await queryChinaRailTrain(trainNumber, date);
+    } catch (err: unknown) {
+      const status = (err as { status?: number }).status || 502;
+      throw new HttpException({ error: err instanceof Error ? err.message : '12306 lookup failed' }, status);
+    }
   }
 
   @Post()

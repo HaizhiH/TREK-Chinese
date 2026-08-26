@@ -138,6 +138,25 @@ describe('TransportModal', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ type: 'train' }));
   });
 
+  it('FE-PLANNER-TRANSMODAL-010b: 12306 sync loads a selectable timetable', async () => {
+    server.use(http.get('/api/trips/1/reservations/train/12306', () => HttpResponse.json({
+      trainNumber: 'G1', date: '2026-08-26', from: '北京南', to: '上海虹桥',
+      stops: [
+        { sequence: 1, name: '北京南', arrivalTime: null, departureTime: '06:30', stopoverMinutes: null },
+        { sequence: 2, name: '上海虹桥', arrivalTime: '11:24', departureTime: '11:24', stopoverMinutes: null },
+      ],
+    })));
+    render(<TransportModal {...defaultProps} days={[buildDay({ id: 10, date: '2026-08-26' })]} selectedDayId={10} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Sync from 12306/i }));
+    const trainInputs = screen.getAllByPlaceholderText('G1');
+    await userEvent.type(trainInputs[0], 'G1');
+    await userEvent.click(screen.getByRole('button', { name: /Find train/i }));
+    expect(await screen.findByText('北京南')).toBeInTheDocument();
+    expect(screen.getByText('上海虹桥')).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+  });
+
   // ── Budget addon ─────────────────────────────────────────────────────────────
 
   it('FE-PLANNER-TRANSMODAL-011: costs section (create expense) visible when budget addon is enabled', () => {
