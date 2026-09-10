@@ -7,18 +7,29 @@ on:
     branches: [main]
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
   scout:
     # Docker Hub secrets are not exposed to pull requests from forks, so the
     # Scout login can never succeed there.
-    if: github.repository == 'liketrek/TREK' && github.event.pull_request.head.repo.fork != true
+    if: github.repository == 'HaizhiH/TREK-Chinese' && github.event.pull_request.head.repo.fork != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker Hub credentials
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be configured"
+            exit 1
+          fi
 
       - uses: docker/build-push-action@v5
         with:

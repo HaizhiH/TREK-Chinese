@@ -1,6 +1,6 @@
 
 image:
-  repository: mauriceboe/trek
+  repository: huahaizhi/trek-chinese
   # tag: latest
   pullPolicy: IfNotPresent
 
