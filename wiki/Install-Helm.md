@@ -5,21 +5,21 @@ Deploy TREK on Kubernetes using the official Helm chart.
 ## Add the Chart Repository
 
 ```bash
-helm repo add trek https://chart.liketrek.com
+helm repo add trek https://haizhih.github.io/TREK-Chinese
 helm repo update
 ```
 
-> **Note:** `chart.liketrek.com` is a custom domain (CNAME) for the GitHub Pages site at `https://liketrek.github.io/TREK` — both serve the same chart repository. Using the custom domain keeps your setup working even if the GitHub repository moves again.
+> **Note:** This fork publishes its chart from the `HaizhiH/TREK-Chinese` GitHub Pages site.
 
 > **⚠️ Repository moved:** The chart is no longer served at `https://mauriceboe.github.io/TREK` (the project moved from a personal repo to the `liketrek` organization). If you added the repo from the old URL, switch to the new one:
 >
 > ```bash
 > helm repo remove trek
-> helm repo add trek https://chart.liketrek.com
+> helm repo add trek https://haizhih.github.io/TREK-Chinese
 > helm repo update
 > ```
 >
-> Existing releases keep working — only the repo URL changes; future `helm repo update` / `helm upgrade` runs require the new URL. (`https://liketrek.github.io/TREK` also works — it redirects to `chart.liketrek.com`.)
+> Existing releases keep working; future `helm repo update` / `helm upgrade` runs require the fork URL.
 
 ## Basic Install
 
@@ -97,7 +97,7 @@ imagePullSecrets: []
 
 ```yaml
 service:
-  type: ClusterIP   # change to LoadBalancer or NodePort to expose externally
+  type: ClusterIP # change to LoadBalancer or NodePort to expose externally
   port: 3000
 ```
 
@@ -135,10 +135,10 @@ These are stored in a Kubernetes Secret and injected as environment variables:
 
 ```yaml
 secretEnv:
-  ENCRYPTION_KEY: ""        # recommended: openssl rand -hex 32
-  ADMIN_EMAIL: ""           # initial admin email (first boot only)
-  ADMIN_PASSWORD: ""        # initial admin password (first boot only)
-  OIDC_CLIENT_SECRET: ""    # set if using OIDC
+  ENCRYPTION_KEY: "" # recommended: openssl rand -hex 32
+  ADMIN_EMAIL: "" # initial admin email (first boot only)
+  ADMIN_PASSWORD: "" # initial admin password (first boot only)
+  OIDC_CLIENT_SECRET: "" # set if using OIDC
 ```
 
 Alternatively, use `generateEncryptionKey: true` to let the chart generate and manage the encryption key, or point `existingSecret` / `existingSecretKey` at an existing Kubernetes Secret.
@@ -149,9 +149,9 @@ Alternatively, use `generateEncryptionKey: true` to let the chart generate and m
 persistence:
   enabled: true
   data:
-    size: 1Gi     # SQLite database, logs, secrets
+    size: 1Gi # SQLite database, logs, secrets
   uploads:
-    size: 1Gi     # uploaded files — increase if you expect large media uploads
+    size: 1Gi # uploaded files — increase if you expect large media uploads
 ```
 
 ### Resource Limits
@@ -171,10 +171,10 @@ resources:
 ```yaml
 ingress:
   enabled: true
-  className: "nginx"   # your ingress class
+  className: "nginx" # your ingress class
   annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"  # required for WebSockets
-    nginx.ingress.kubernetes.io/proxy-body-size: "500m"       # required for backup restore
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400" # required for WebSockets
+    nginx.ingress.kubernetes.io/proxy-body-size: "500m" # required for backup restore
   hosts:
     - host: trek.example.com
       paths:

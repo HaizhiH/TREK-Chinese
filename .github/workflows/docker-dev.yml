@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: 'Bump line for next prerelease (auto detects in-flight major)'
+        description: "Bump line for next prerelease (auto detects in-flight major)"
         type: choice
         options: [auto, minor, major]
         default: auto
@@ -43,7 +43,7 @@ jobs:
           # Get latest stable tag (exclude prerelease tags)
           STABLE_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v '\-pre\.' | sort -V | tail -1)
           STABLE="${STABLE_TAG#v}"
-          STABLE="${STABLE:-0.0.0}"
+          STABLE="${STABLE:-$(node -p "require('./package.json').version")}"
           echo "Latest stable: $STABLE"
 
           IFS='.' read -r MAJOR MINOR PATCH <<< "$STABLE"

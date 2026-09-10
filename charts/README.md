@@ -3,6 +3,7 @@
 This is a minimal Helm chart for deploying the TREK app.
 
 ## Features
+
 - Deploys the TREK container
 - Exposes port 3000 via Service
 - Optional persistent storage for `/app/data` and `/app/uploads`
@@ -15,12 +16,12 @@ This is a minimal Helm chart for deploying the TREK app.
 A hosted Helm repository is available:
 
 ```sh
-helm repo add trek https://chart.liketrek.com
+helm repo add trek https://haizhih.github.io/TREK-Chinese
 helm repo update
 helm install trek trek/trek
 ```
 
-> **Note:** `chart.liketrek.com` is a custom domain (CNAME) for the GitHub Pages site at `https://liketrek.github.io/TREK` — both URLs serve the same repository. The github.io URL keeps working (it redirects to `chart.liketrek.com`), but the custom domain is the canonical one to use.
+> **Note:** This fork publishes its chart from the `HaizhiH/TREK-Chinese` GitHub Pages site.
 
 ## Usage
 
@@ -35,11 +36,13 @@ helm install trek ./chart \
 See `values.yaml` for more options.
 
 ## Files
+
 - `Chart.yaml` — chart metadata
 - `values.yaml` — configuration values
 - `templates/` — Kubernetes manifests
 
 ## Notes
+
 - Ingress is off by default. Enable and configure hosts for your domain.
 - PVCs use the cluster's default StorageClass. Set `persistence.data.storageClassName` and/or `persistence.uploads.storageClassName` to bind a specific class.
 - To use your own PVCs, set `persistence.data.existingClaim` and/or `persistence.uploads.existingClaim`. The other values for that volume (size, storageClassName, annotations) are then ignored.

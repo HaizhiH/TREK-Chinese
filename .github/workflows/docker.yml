@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: 'Force bump line (auto = patch/finalize as today)'
+        description: "Force bump line (auto = patch/finalize as today)"
         type: choice
         options: [auto, patch, minor, major]
         default: auto
       confirm_major:
         description: "Type MAJOR (all caps) to confirm a major release"
         type: string
-        default: ''
+        default: ""
 
 permissions:
   contents: write
@@ -39,13 +39,20 @@ jobs:
 
       - name: Determine bump type and update version
         id: bump
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be configured"
+            exit 1
+          fi
           git fetch --tags
 
           # Derive version from git tags — no package.json dependency
           STABLE_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v '\-pre\.' | sort -V | tail -1)
           STABLE="${STABLE_TAG#v}"
-          STABLE="${STABLE:-0.0.0}"
+          STABLE="${STABLE:-$(node -p "require('./package.json').version")}"
 
           PRE_TAG=$(git tag -l 'v*-pre.*' | sort -V | tail -1)
 
@@ -95,21 +102,8 @@ jobs:
 
           echo "Bump type: $BUMP"
           echo "VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "$STABLE → $NEW_VERSION ($BUMP)"
-
-          # Update all workspace + root package.json files and the root lockfile in one shot
-          npm version "$NEW_VERSION" --workspaces --include-workspace-root --no-git-tag-version
-          sed -i "s/^version: .*/version: $NEW_VERSION/" charts/trek/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"$NEW_VERSION\"/" charts/trek/Chart.yaml
-
-          # Push the version commit so downstream jobs can fetch the exact SHA.
-          # The release tag is created only after the image manifest succeeds.
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json server/package.json client/package.json shared/package.json charts/trek/Chart.yaml
-          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
           echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          git push origin HEAD:main
+          echo "$STABLE → $NEW_VERSION ($BUMP)"
 
   build:
     runs-on: ${{ matrix.runner }}
@@ -177,6 +171,8 @@ jobs:
   merge:
     runs-on: ubuntu-latest
     needs: [version-bump, build]
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,12 +207,21 @@ jobs:
       - name: Inspect manifest
         run: docker buildx imagetools inspect "$IMAGE_NAME:latest"
 
-      - name: Push git tag
+      - name: Commit version and push git tag
+        id: release
         run: |
           VERSION="${{ needs.version-bump.outputs.version }}"
+          npm version "$VERSION" --workspaces --include-workspace-root --no-git-tag-version
+          sed -i "s/^version: .*/version: $VERSION/" charts/trek/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"$VERSION\"/" charts/trek/Chart.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$VERSION" -m "v$VERSION" "${{ needs.version-bump.outputs.sha }}"
+          git add package.json package-lock.json server/package.json client/package.json shared/package.json charts/trek/Chart.yaml
+          git commit -m "chore: bump version to $VERSION [skip ci]"
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          git push origin HEAD:main
+          git tag -a "v$VERSION" -m "v$VERSION" "$SHA"
           git push origin "v$VERSION"
 
   release-helm:
@@ -226,7 +231,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version-bump.outputs.sha }}
+          ref: ${{ needs.merge.outputs.sha }}
 
       - name: Publish Helm chart
         uses: stefanprodan/helm-gh-pages@v1.7.0
