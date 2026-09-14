@@ -13,7 +13,10 @@ This is a minimal Helm chart for deploying the TREK app.
 
 ## Helm Repository
 
-A hosted Helm repository is available:
+The workflow targets the following hosted Helm repository. It is usable only
+after chart publication succeeds and an administrator enables GitHub Pages
+from the `gh-pages` branch, `/` (root), in repository Settings > Pages.
+Verify that the site's `index.yaml` is available before using these commands:
 
 ```sh
 helm repo add trek https://haizhih.github.io/TREK-Chinese
@@ -21,14 +24,14 @@ helm repo update
 helm install trek trek/trek
 ```
 
-> **Note:** This fork publishes its chart from the `HaizhiH/TREK-Chinese` GitHub Pages site.
+> Publishing configuration does not imply that GitHub Pages is enabled.
 
 ## Usage
 
 Or install directly from the local chart:
 
 ```sh
-helm install trek ./chart \
+helm install trek ./charts/trek \
   --set ingress.enabled=true \
   --set ingress.hosts[0].host=yourdomain.com
 ```

@@ -57,7 +57,9 @@ docker run -d --name trek -p 3000:3000 \
 
 ## Helm (Kubernetes)
 
-> **Chart repository moved:** This fork publishes its Helm chart from the `HaizhiH/TREK-Chinese` GitHub Pages site. If your `trek` repo still points to an old URL, switch it before updating:
+> The fork's configured Chart URL requires successful chart publication and an
+> administrator enabling GitHub Pages from `gh-pages`, `/` (root). Confirm that
+> `index.yaml` is available before switching from an upstream URL:
 >
 > ```bash
 > helm repo remove trek

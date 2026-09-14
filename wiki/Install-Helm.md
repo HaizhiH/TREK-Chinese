@@ -9,9 +9,12 @@ helm repo add trek https://haizhih.github.io/TREK-Chinese
 helm repo update
 ```
 
-> **Note:** This fork publishes its chart from the `HaizhiH/TREK-Chinese` GitHub Pages site.
+> The URL above is the workflow's publishing target, not a confirmed live site.
+> An administrator must enable GitHub Pages from `gh-pages`, `/` (root), after
+> successful chart publication. Verify `index.yaml` before adding the repository.
+> Until then, install from a checkout with `helm install trek ./charts/trek`.
 
-> **⚠️ Repository moved:** The chart is no longer served at `https://mauriceboe.github.io/TREK` (the project moved from a personal repo to the `liketrek` organization). If you added the repo from the old URL, switch to the new one:
+> Once the fork's hosted repository is available, replace any upstream URL:
 >
 > ```bash
 > helm repo remove trek
@@ -200,7 +203,7 @@ helm upgrade trek trek/trek
 
 ## Full Values Reference
 
-See the [`charts/README.md`](https://github.com/liketrek/TREK/blob/main/charts/README.md) for all available values.
+See the [`charts/README.md`](https://github.com/HaizhiH/TREK-Chinese/blob/main/charts/README.md) for all available values.
 
 ## Next Steps
 

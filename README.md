@@ -274,13 +274,18 @@ docker compose up -d
 
 <h2 id="helm-kubernetes">Helm (Kubernetes)</h2>
 
+The hosted repository below requires an administrator to enable GitHub Pages
+from the `gh-pages` branch (root) after the Helm publishing workflow succeeds.
+Until its `index.yaml` is available, install from the checkout with
+`helm install trek ./charts/trek`.
+
 ```bash
 helm repo add trek https://haizhih.github.io/TREK-Chinese
 helm repo update
 helm install trek trek/trek
 ```
 
-See [`charts/README.md`](https://github.com/liketrek/TREK/blob/main/charts/README.md) for values.
+See [`charts/README.md`](charts/README.md) for values.
 
 <h2 id="install-as-app-pwa">Install as App (PWA)</h2>
 
