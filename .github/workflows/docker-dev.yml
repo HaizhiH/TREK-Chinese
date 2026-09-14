@@ -158,7 +158,20 @@ jobs:
         working-directory: /tmp/digests
         run: |
           VERSION="${{ needs.version-bump.outputs.version }}"
-          mapfile -t digests < <(printf '%s@sha256:%s\n' "$IMAGE_NAME" *)
+          shopt -s nullglob
+          digest_files=(*)
+          if [ "${#digest_files[@]}" -ne 2 ]; then
+            echo "::error::Expected two architecture digests"
+            exit 1
+          fi
+          digests=()
+          for digest in "${digest_files[@]}"; do
+            if [[ ! -f "$digest" || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::Invalid architecture digest: $digest"
+              exit 1
+            fi
+            digests+=("$IMAGE_NAME@sha256:$digest")
+          done
           MAJOR_TAG="$(echo "$VERSION" | cut -d. -f1)-pre"
           docker buildx imagetools create \
             -t "$IMAGE_NAME:latest-pre" \
