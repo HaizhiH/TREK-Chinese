@@ -217,7 +217,7 @@ Real-time sync via WebSocket (`ws`). Backend on NestJS 11. State with Zustand. A
 ```yaml
 services:
   app:
-    image: huahaizhi/trek-chinese:latest
+    image: ${TREK_IMAGE:-registry.cn-guangzhou.aliyuncs.com/tsugar/trek:latest}
     container_name: trek
     read_only: true
     security_opt:
@@ -265,6 +265,23 @@ Then:
 ```bash
 docker compose up -d
 ```
+
+The Compose file defaults to the Alibaba Cloud ACR mirror for faster pulls from
+mainland China. Both registries carry the same tags. For production, pin the
+immutable tag for the main commit you approved in `.env`:
+
+```bash
+TREK_IMAGE=registry.cn-guangzhou.aliyuncs.com/tsugar/trek:sha-<12-character-commit>
+```
+
+If ACR is unavailable, use the matching Docker Hub tag as a fallback:
+
+```bash
+TREK_IMAGE=huahaizhi/trek-chinese:sha-<12-character-commit>
+```
+
+`latest` remains available for convenience, but moves whenever `main` is
+published and is not recommended for production rollouts.
 
 **HTTPS notes:** `FORCE_HTTPS=true` is optional — it adds a 301 redirect, HSTS, CSP upgrade-insecure-requests, and forces the `secure` cookie flag. Only use it behind a TLS-terminating reverse proxy. `TRUST_PROXY=1` tells the server how many proxies sit in front so real client IPs and `X-Forwarded-Proto` work.
 
