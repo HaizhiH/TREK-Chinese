@@ -2,7 +2,10 @@ require "yaml"
 require "tmpdir"
 require "open3"
 
-image = "huahaizhi/trek-chinese"
+images = [
+  "huahaizhi/trek-chinese",
+  "registry.cn-guangzhou.aliyuncs.com/tsugar/trek",
+]
 hashes = ["a" * 64, "b" * 64]
 cases = {
   "amd64 and arm64" => hashes,
@@ -37,7 +40,10 @@ cases = {
         end
       end
       stdout, stderr, status = Open3.capture3(
-        { "IMAGE_NAME" => workflow.fetch("env").fetch("IMAGE_NAME") },
+        {
+          "IMAGE_NAME" => workflow.fetch("env").fetch("IMAGE_NAME"),
+          "ACR_IMAGE" => images.last,
+        },
         "bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", stub + script,
         chdir: directory,
       )
@@ -46,9 +52,11 @@ cases = {
       end.compact
       if name == "amd64 and arm64"
         tags = prerelease ? ["latest-pre", "3-pre", version] : ["latest", "3", version]
-        expected = ["buildx", "imagetools", "create"] +
-          tags.flat_map { |tag| ["-t", "#{image}:#{tag}"] } +
-          hashes.map { |digest| "#{image}@sha256:#{digest}" }
+        expected = images.flat_map do |image|
+          ["buildx", "imagetools", "create"] +
+            tags.flat_map { |tag| ["-t", "#{image}:#{tag}"] } +
+            hashes.map { |digest| "#{image}@sha256:#{digest}" }
+        end
         unless status.success? && arguments == expected
           abort "FAIL #{filename}: #{name}\n#{stdout}#{stderr}"
         end

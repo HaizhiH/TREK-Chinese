@@ -14,6 +14,7 @@ permissions:
 
 env:
   IMAGE_NAME: huahaizhi/trek-chinese
+  ACR_IMAGE: ${{ vars.ACR_IMAGE }}
 
 concurrency:
   group: release-build
@@ -32,13 +33,28 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Validate registry configuration
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
+          ACR_USERNAME: ${{ vars.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ] || \
+             [ -z "$ACR_IMAGE" ] || [ -z "$ACR_REGISTRY" ] || \
+             [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
+            echo "::error::Docker Hub credentials and ACR_IMAGE, ACR_REGISTRY, ACR_USERNAME, and ACR_REDACTED_CREDENTIAL must be configured"
+            exit 1
+          fi
+
       - name: Determine prerelease version
         id: bump
         run: |
           git fetch --tags
 
           # Capture the exact commit we're building so build/merge jobs are pinned to it
-          echo "SHA=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
           # Get latest stable tag (exclude prerelease tags)
           STABLE_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v '\-pre\.' | sort -V | tail -1)
@@ -46,7 +62,7 @@ jobs:
           STABLE="${STABLE:-$(node -p "require('./package.json').version")}"
           echo "Latest stable: $STABLE"
 
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$STABLE"
+          IFS='.' read -r MAJOR MINOR _ <<< "$STABLE"
 
           # Detect any in-flight major prerelease (v(MAJOR+1).0.0-pre.*). Stay on that line if found.
           NEXT_MAJOR="$((MAJOR + 1)).0.0"
@@ -63,10 +79,10 @@ jobs:
 
           # Find the highest existing prerelease N for this target and increment
           LAST_N=$(git tag -l "v${TARGET}-pre.*" | sed 's/.*-pre\.//' | sort -n | tail -1)
-          N=$(( ${LAST_N:-0} + 1 ))
+          N=$((${LAST_N:-0} + 1))
 
           NEW_VERSION="${TARGET}-pre.${N}"
-          echo "VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "$STABLE → $NEW_VERSION"
 
   build:
@@ -82,7 +98,9 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - name: Prepare platform tag-safe name
-        run: echo "PLATFORM_PAIR=$(echo ${{ matrix.platform }} | sed 's|/|-|g')" >> $GITHUB_ENV
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
         with:
@@ -90,20 +108,18 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Validate Docker Hub credentials
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
-            echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be configured"
-            exit 1
-          fi
-
-      - uses: docker/login-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to Alibaba Cloud ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ACR_REGISTRY }}
+          username: ${{ vars.ACR_USERNAME }}
+          password: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
 
       - name: Build and push by digest
         id: build
@@ -111,7 +127,7 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
           no-cache: true
           build-args: |
             APP_VERSION=${{ needs.version-bump.outputs.version }}
@@ -149,10 +165,18 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to Alibaba Cloud ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ACR_REGISTRY }}
+          username: ${{ vars.ACR_USERNAME }}
+          password: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
 
       - name: Create and push multi-arch manifest
         working-directory: /tmp/digests
@@ -164,23 +188,27 @@ jobs:
             echo "::error::Expected two architecture digests"
             exit 1
           fi
-          digests=()
-          for digest in "${digest_files[@]}"; do
-            if [[ ! -f "$digest" || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
-              echo "::error::Invalid architecture digest: $digest"
-              exit 1
-            fi
-            digests+=("$IMAGE_NAME@sha256:$digest")
-          done
           MAJOR_TAG="$(echo "$VERSION" | cut -d. -f1)-pre"
-          docker buildx imagetools create \
-            -t "$IMAGE_NAME:latest-pre" \
-            -t "$IMAGE_NAME:$MAJOR_TAG" \
-            -t "$IMAGE_NAME:$VERSION" \
-            "${digests[@]}"
+          for image in "$IMAGE_NAME" "$ACR_IMAGE"; do
+            digests=()
+            for digest in "${digest_files[@]}"; do
+              if [[ ! -f "$digest" || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+                echo "::error::Invalid architecture digest: $digest"
+                exit 1
+              fi
+              digests+=("$image@sha256:$digest")
+            done
+            docker buildx imagetools create \
+              -t "$image:latest-pre" \
+              -t "$image:$MAJOR_TAG" \
+              -t "$image:$VERSION" \
+              "${digests[@]}"
+          done
 
-      - name: Inspect manifest
-        run: docker buildx imagetools inspect "$IMAGE_NAME:latest-pre"
+      - name: Inspect manifests
+        run: |
+          docker buildx imagetools inspect "$IMAGE_NAME:latest-pre"
+          docker buildx imagetools inspect "$ACR_IMAGE:latest-pre"
 
       - name: Push git tag
         run: |
@@ -196,7 +224,7 @@ jobs:
         run: |
           KEEP=20
           VERSION="${{ needs.version-bump.outputs.version }}"
-          BASE_VERSION="$(echo "$VERSION" | sed 's/-pre\..*//')"
+          BASE_VERSION="${VERSION%%-pre.*}"
           git fetch --tags
           # Sort by numeric prerelease N (field after -pre.) to get correct ascending order
           mapfile -t ALL_TAGS < <(git tag -l "v${BASE_VERSION}-pre.*" | awk -F'-pre\\.' '{print $2" "$0}' | sort -n | awk '{print $2}')

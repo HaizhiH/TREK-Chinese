@@ -1,6 +1,6 @@
 services:
   app:
-    image: huahaizhi/trek-chinese:latest
+    image: ${TREK_IMAGE:-registry.cn-guangzhou.aliyuncs.com/tsugar/trek:latest}
     container_name: trek
     read_only: true
     security_opt:
