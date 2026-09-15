@@ -8,11 +8,11 @@ Back up your data first. Go to Admin Panel → Backups and create a manual backu
 
 ## Image Tags
 
-| Tag | Example | Behavior |
-|---|---|---|
-| `latest` | `mauriceboe/trek:latest` | Always the newest release across all major versions |
-| Major version | `mauriceboe/trek:3` | Latest release pinned to that major version |
-| Full version | `mauriceboe/trek:3.4.0` | Exact release; never changes |
+| Tag           | Example                         | Behavior                                            |
+| ------------- | ------------------------------- | --------------------------------------------------- |
+| `latest`      | `huahaizhi/trek-chinese:latest` | Always the newest release across all major versions |
+| Major version | `huahaizhi/trek-chinese:3`      | Latest release pinned to that major version         |
+| Full version  | `huahaizhi/trek-chinese:3.4.0`  | Exact release; never changes                        |
 
 Use `latest` or a major-version tag if you want updates on each redeploy. Use a full version tag for explicit control — update by changing the tag, not by re-pulling.
 
@@ -39,28 +39,31 @@ docker compose up -d
 If you started TREK with `docker run`, pull the new image and replace the container:
 
 ```bash
-docker pull mauriceboe/trek
+docker pull huahaizhi/trek-chinese
 docker rm -f trek
 docker run -d --name trek -p 3000:3000 \
   -v ./data:/app/data \
   -v ./uploads:/app/uploads \
   -e ENCRYPTION_KEY=<your-key> \
   --restart unless-stopped \
-  mauriceboe/trek
+  huahaizhi/trek-chinese
 ```
 
 > **Tip:** Not sure which volume paths you used? Check before removing:
+>
 > ```bash
 > docker inspect trek --format '{{json .Mounts}}'
 > ```
 
 ## Helm (Kubernetes)
 
-> **⚠️ Chart repository moved:** The Helm chart is no longer served at `https://mauriceboe.github.io/TREK` (the project moved from a personal repo to the `liketrek` organization). The canonical chart URL is now `https://chart.liketrek.com` — a custom domain (CNAME) for the GitHub Pages site at `https://liketrek.github.io/TREK`, so it stays stable even if the repository moves again. If your `trek` repo still points to an old URL, switch it before updating:
+> The fork's configured Chart URL requires successful chart publication and an
+> administrator enabling GitHub Pages from `gh-pages`, `/` (root). Confirm that
+> `index.yaml` is available before switching from an upstream URL:
 >
 > ```bash
 > helm repo remove trek
-> helm repo add trek https://chart.liketrek.com
+> helm repo add trek https://haizhih.github.io/TREK-Chinese
 > ```
 >
 > You can check which URL you have configured with `helm repo list`. Existing releases are unaffected — only the repo URL changes.

@@ -7,13 +7,13 @@ on:
     branches: [main]
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
   scout:
-    # Docker Hub secrets are not exposed to pull requests from forks, so the
-    # Scout login can never succeed there.
-    if: github.repository == 'liketrek/TREK' && github.event.pull_request.head.repo.fork != true
+    # Never expose Docker Hub credentials to external fork PRs.
+    if: github.repository == 'HaizhiH/TREK-Chinese' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,15 +27,26 @@ jobs:
           load: true
           tags: trek:scan
 
-      - uses: docker/login-action@v3
+      - name: Authenticate Docker Scout
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/scout-action@v1
         with:
+          dockerhub-user: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
           command: cves
-          image: trek:scan
+          image: local://trek:scan
           only-severities: critical,high
           only-fixed: true
           exit-code: true
+
+  fork-scan-notice:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Explain credential boundary
+        run: echo 'Docker Scout is not run for external fork PRs because Docker Hub credentials are unavailable. A trusted same-repository PR must pass the blocking image scan before merge.' >> "$GITHUB_STEP_SUMMARY"

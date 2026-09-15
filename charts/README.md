@@ -3,6 +3,7 @@
 This is a minimal Helm chart for deploying the TREK app.
 
 ## Features
+
 - Deploys the TREK container
 - Exposes port 3000 via Service
 - Optional persistent storage for `/app/data` and `/app/uploads`
@@ -12,22 +13,25 @@ This is a minimal Helm chart for deploying the TREK app.
 
 ## Helm Repository
 
-A hosted Helm repository is available:
+The workflow targets the following hosted Helm repository. It is usable only
+after chart publication succeeds and an administrator enables GitHub Pages
+from the `gh-pages` branch, `/` (root), in repository Settings > Pages.
+Verify that the site's `index.yaml` is available before using these commands:
 
 ```sh
-helm repo add trek https://chart.liketrek.com
+helm repo add trek https://haizhih.github.io/TREK-Chinese
 helm repo update
 helm install trek trek/trek
 ```
 
-> **Note:** `chart.liketrek.com` is a custom domain (CNAME) for the GitHub Pages site at `https://liketrek.github.io/TREK` — both URLs serve the same repository. The github.io URL keeps working (it redirects to `chart.liketrek.com`), but the custom domain is the canonical one to use.
+> Publishing configuration does not imply that GitHub Pages is enabled.
 
 ## Usage
 
 Or install directly from the local chart:
 
 ```sh
-helm install trek ./chart \
+helm install trek ./charts/trek \
   --set ingress.enabled=true \
   --set ingress.hosts[0].host=yourdomain.com
 ```
@@ -35,11 +39,13 @@ helm install trek ./chart \
 See `values.yaml` for more options.
 
 ## Files
+
 - `Chart.yaml` — chart metadata
 - `values.yaml` — configuration values
 - `templates/` — Kubernetes manifests
 
 ## Notes
+
 - Ingress is off by default. Enable and configure hosts for your domain.
 - PVCs use the cluster's default StorageClass. Set `persistence.data.storageClassName` and/or `persistence.uploads.storageClassName` to bind a specific class.
 - To use your own PVCs, set `persistence.data.existingClaim` and/or `persistence.uploads.existingClaim`. The other values for that volume (size, storageClassName, annotations) are then ignored.

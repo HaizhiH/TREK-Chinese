@@ -5,21 +5,24 @@ Deploy TREK on Kubernetes using the official Helm chart.
 ## Add the Chart Repository
 
 ```bash
-helm repo add trek https://chart.liketrek.com
+helm repo add trek https://haizhih.github.io/TREK-Chinese
 helm repo update
 ```
 
-> **Note:** `chart.liketrek.com` is a custom domain (CNAME) for the GitHub Pages site at `https://liketrek.github.io/TREK` — both serve the same chart repository. Using the custom domain keeps your setup working even if the GitHub repository moves again.
+> The URL above is the workflow's publishing target, not a confirmed live site.
+> An administrator must enable GitHub Pages from `gh-pages`, `/` (root), after
+> successful chart publication. Verify `index.yaml` before adding the repository.
+> Until then, install from a checkout with `helm install trek ./charts/trek`.
 
-> **⚠️ Repository moved:** The chart is no longer served at `https://mauriceboe.github.io/TREK` (the project moved from a personal repo to the `liketrek` organization). If you added the repo from the old URL, switch to the new one:
+> Once the fork's hosted repository is available, replace any upstream URL:
 >
 > ```bash
 > helm repo remove trek
-> helm repo add trek https://chart.liketrek.com
+> helm repo add trek https://haizhih.github.io/TREK-Chinese
 > helm repo update
 > ```
 >
-> Existing releases keep working — only the repo URL changes; future `helm repo update` / `helm upgrade` runs require the new URL. (`https://liketrek.github.io/TREK` also works — it redirects to `chart.liketrek.com`.)
+> Existing releases keep working; future `helm repo update` / `helm upgrade` runs require the fork URL.
 
 ## Basic Install
 
@@ -84,7 +87,7 @@ helm install trek trek/trek \
 
 ```yaml
 image:
-  repository: mauriceboe/trek
+  repository: huahaizhi/trek-chinese
   # tag: latest        # defaults to the chart's appVersion
   pullPolicy: IfNotPresent
 
@@ -97,7 +100,7 @@ imagePullSecrets: []
 
 ```yaml
 service:
-  type: ClusterIP   # change to LoadBalancer or NodePort to expose externally
+  type: ClusterIP # change to LoadBalancer or NodePort to expose externally
   port: 3000
 ```
 
@@ -135,10 +138,10 @@ These are stored in a Kubernetes Secret and injected as environment variables:
 
 ```yaml
 secretEnv:
-  ENCRYPTION_KEY: ""        # recommended: openssl rand -hex 32
-  ADMIN_EMAIL: ""           # initial admin email (first boot only)
-  ADMIN_PASSWORD: ""        # initial admin password (first boot only)
-  OIDC_CLIENT_SECRET: ""    # set if using OIDC
+  ENCRYPTION_KEY: "" # recommended: openssl rand -hex 32
+  ADMIN_EMAIL: "" # initial admin email (first boot only)
+  ADMIN_PASSWORD: "" # initial admin password (first boot only)
+  OIDC_CLIENT_SECRET: "" # set if using OIDC
 ```
 
 Alternatively, use `generateEncryptionKey: true` to let the chart generate and manage the encryption key, or point `existingSecret` / `existingSecretKey` at an existing Kubernetes Secret.
@@ -149,9 +152,9 @@ Alternatively, use `generateEncryptionKey: true` to let the chart generate and m
 persistence:
   enabled: true
   data:
-    size: 1Gi     # SQLite database, logs, secrets
+    size: 1Gi # SQLite database, logs, secrets
   uploads:
-    size: 1Gi     # uploaded files — increase if you expect large media uploads
+    size: 1Gi # uploaded files — increase if you expect large media uploads
 ```
 
 ### Resource Limits
@@ -171,10 +174,10 @@ resources:
 ```yaml
 ingress:
   enabled: true
-  className: "nginx"   # your ingress class
+  className: "nginx" # your ingress class
   annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"  # required for WebSockets
-    nginx.ingress.kubernetes.io/proxy-body-size: "500m"       # required for backup restore
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400" # required for WebSockets
+    nginx.ingress.kubernetes.io/proxy-body-size: "500m" # required for backup restore
   hosts:
     - host: trek.example.com
       paths:
@@ -200,7 +203,7 @@ helm upgrade trek trek/trek
 
 ## Full Values Reference
 
-See the [`charts/README.md`](https://github.com/liketrek/TREK/blob/main/charts/README.md) for all available values.
+See the [`charts/README.md`](https://github.com/HaizhiH/TREK-Chinese/blob/main/charts/README.md) for all available values.
 
 ## Next Steps
 
