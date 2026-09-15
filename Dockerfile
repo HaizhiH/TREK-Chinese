@@ -47,6 +47,7 @@ COPY shared/package.json ./shared/
 COPY server/package.json ./server/
 
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends tzdata dumb-init wget ca-certificates python3 build-essential \
     libkitinerary-bin && \
     npm ci --workspace=server --omit=dev && \

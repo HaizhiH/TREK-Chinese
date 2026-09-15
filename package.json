@@ -32,11 +32,24 @@
   "scarfSettings": {
     "enabled": false
   },
-  "comment:overrides": "Force a single React 19 across the workspace so the test renderer (@testing-library/react) and the app share one react-dom.",
+  "comment:overrides": "Keep workspace-wide runtime dependencies on compatible patched releases and force a single React 19 for the app and test renderer.",
   "overrides": {
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "multer": "^2.2.0"
+    "@nestjs/platform-express": {
+      "multer": "^2.3.0"
+    },
+    "@nestjs/swagger": {
+      "js-yaml": "^4.3.2"
+    },
+    "fast-uri": "^3.1.6",
+    "ip-address": "^10.3.1",
+    "minimatch@^5.0.0": {
+      "brace-expansion": "^2.1.4"
+    },
+    "minimatch@^9.0.0": {
+      "brace-expansion": "^2.1.4"
+    }
   },
   "optionalDependencies": {
     "@img/sharp-linuxmusl-arm64": "0.35.1",
