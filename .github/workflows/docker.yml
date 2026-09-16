@@ -159,6 +159,8 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           outputs: type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          sbom: false
           no-cache: true
           build-args: |
             APP_VERSION=${{ needs.version-bump.outputs.version }}

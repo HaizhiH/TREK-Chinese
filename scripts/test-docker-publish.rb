@@ -44,9 +44,12 @@ publish_files.each do |filename|
 
   builds = steps.select { |step| step["uses"] == "docker/build-push-action@v6" }
   abort "FAIL #{filename}: expected one build invocation" unless builds.length == 1
+  build = builds.first.fetch("with")
+  unless build.values_at("provenance", "sbom") == [false, false]
+    abort "FAIL #{filename}: provenance and SBOM attestations must be explicitly disabled for ACR compatibility"
+  end
 
   if filename == "docker-publish.yml"
-    build = builds.first.fetch("with")
     unless build.fetch("platforms") == "linux/amd64,linux/arm64" && build.fetch("push") == true
       abort "FAIL #{filename}: continuous publish must push one amd64/arm64 build"
     end
@@ -55,12 +58,12 @@ publish_files.each do |filename|
       abort "FAIL #{filename}: missing tag #{tag}" unless tags.include?(tag)
     end
   else
-    output = builds.first.fetch("with").fetch("outputs")
+    output = build.fetch("outputs")
     expected_output = 'type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true'
     abort "FAIL #{filename}: architecture build must export one digest to both registries" unless output == expected_output
   end
 
-  puts "PASS #{filename}: dual-registry publish contract"
+  puts "PASS #{filename}: dual-registry publish contract with attestations disabled"
 end
 
 security = YAML.load_file(File.join(workflow_dir, "security.yml"))

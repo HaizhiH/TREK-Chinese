@@ -1,0 +1,28 @@
+name: Docker Publish Contracts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/docker*.yml'
+      - '.github/workflows/security.yml'
+      - 'scripts/test-docker-*.rb'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Verify dual-registry publish and security contracts
+        run: ruby scripts/test-docker-publish.rb
+
+      - name: Verify multi-architecture manifest assembly
+        run: ruby scripts/test-docker-manifest.rb
