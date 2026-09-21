@@ -84,6 +84,9 @@ function findDestructiveStatements(src: string): DestructiveHit[] {
  * Rows are preserved across the rebuild.
  */
 const ALLOWED_DESTRUCTIVE: Record<string, string> = {
+  'DROP TABLE roadtrip_day_boundaries': 'Upstream v4.3.0: rebuild CHECK constraint, copying all rows first.',
+  'DELETE FROM reservation_day_positions': 'Upstream v4.3.0: remove only invalid cross-trip links.',
+  'DELETE FROM hidden_regions': 'Upstream v4.3.0: remove only duplicate Guangdong tombstones after renaming.',
   // ── table rebuilds (data preserved) ──────────────────────────────────────
   'DROP TABLE budget_items':
     'Migration 12: rebuild to drop a stale NOT NULL DEFAULT on persons/days. Rows copied first.',

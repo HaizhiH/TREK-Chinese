@@ -1,4 +1,5 @@
 import {
+  mapsAutocompleteSuggestionSchema,
   mapsSearchRequestSchema,
   mapsAutocompleteRequestSchema,
   mapsReverseQuerySchema,
@@ -56,5 +57,18 @@ describe('mapsRouteRequestSchema', () => {
     expect(mapsRouteRequestSchema.safeParse({ waypoints: Array(101).fill(waypoint), profile: 'driving' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('mapsAutocompleteSuggestionSchema compatibility', () => {
+  const suggestion = { placeId: '123', mainText: 'Park', secondaryText: 'City' };
+  it('accepts upstream suggestions without a provider', () => {
+    expect(mapsAutocompleteSuggestionSchema.parse(suggestion)).toEqual(suggestion);
+  });
+  it.each(['google', 'openstreetmap', 'amap'])('preserves %s identity', (provider) => {
+    expect(mapsAutocompleteSuggestionSchema.parse({ ...suggestion, provider }).provider).toBe(provider);
+  });
+  it('rejects unknown providers', () => {
+    expect(mapsAutocompleteSuggestionSchema.safeParse({ ...suggestion, provider: 'unknown' }).success).toBe(false);
   });
 });

@@ -63,7 +63,7 @@ export const mapsAutocompleteSuggestionSchema = z.object({
   placeId: z.string(),
   mainText: z.string(),
   secondaryText: z.string(),
-  provider: geoProviderSchema,
+  provider: geoProviderSchema.optional(),
 });
 export const mapsAutocompleteResultSchema = z.object({
   suggestions: z.array(mapsAutocompleteSuggestionSchema),
