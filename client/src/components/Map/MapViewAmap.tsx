@@ -47,7 +47,8 @@ function markerNode(label: string, selected: boolean, color = '#2563eb'): HTMLDi
 
 function reservationMarkerNode(label: string, title: string): HTMLDivElement {
   const node = document.createElement('div');
-  node.style.cssText = 'min-width:26px;height:22px;padding:0 7px;border-radius:999px;background:#3b82f6;border:1.5px solid white;box-shadow:0 2px 6px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;color:white;font:600 11px sans-serif;white-space:nowrap;cursor:pointer;box-sizing:border-box;';
+  node.style.cssText =
+    'min-width:26px;height:22px;padding:0 7px;border-radius:999px;background:#3b82f6;border:1.5px solid white;box-shadow:0 2px 6px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;color:white;font:600 11px sans-serif;white-space:nowrap;cursor:pointer;box-sizing:border-box;';
   node.textContent = label;
   node.title = title;
   return node;
@@ -55,7 +56,8 @@ function reservationMarkerNode(label: string, title: string): HTMLDivElement {
 
 function reservationStatsNode(main: string | null, sub: string | null): HTMLDivElement {
   const node = document.createElement('div');
-  node.style.cssText = 'padding:5px 9px;border-radius:999px;background:rgba(17,24,39,.92);border:1px solid rgba(59,130,246,.67);box-shadow:0 2px 6px rgba(0,0,0,.25);color:white;font:600 10px sans-serif;white-space:nowrap;pointer-events:none;text-align:center;';
+  node.style.cssText =
+    'padding:5px 9px;border-radius:999px;background:rgba(17,24,39,.92);border:1px solid rgba(59,130,246,.67);box-shadow:0 2px 6px rgba(0,0,0,.25);color:white;font:600 10px sans-serif;white-space:nowrap;pointer-events:none;text-align:center;';
   node.textContent = [main, sub].filter(Boolean).join(' · ');
   return node;
 }
@@ -209,20 +211,16 @@ export function MapViewAmap({
           located.map((place) => ({ lat: place.lat, lng: place.lng }))
         );
         if (cancelled) return;
-        const markers = located.map((place, index) => {
-          const marker = new AMap.Marker({
-            position: coords[index],
-            content: markerNode(place.name, place.id === selectedPlaceId, (place as any).category_color || '#2563eb'),
-            anchor: 'center',
-            zIndex: place.id === selectedPlaceId ? 200 : 100,
-          });
-          marker.on('click', () => onMarkerClick?.(place.id));
-          return marker;
-        });
+        // JS API 2.0 clusters point data, not pre-created Marker overlays.
+        const clusterPoints = located.map((place, index) => ({
+          lnglat: Array.isArray(coords[index]) ? coords[index] : [coords[index].getLng(), coords[index].getLat()],
+          place,
+        }));
         const poiCoords = await wgs84ToAmap(
           AMap,
           pois.map((poi) => ({ lat: poi.lat, lng: poi.lng }))
         );
+        if (cancelled) return;
         const poiMarkers = pois.map((poi, index) => {
           const marker = new AMap.Marker({
             position: poiCoords[index],
@@ -233,7 +231,22 @@ export function MapViewAmap({
           marker.on('click', () => onPoiClick?.(poi));
           return marker;
         });
-        clusterRef.current = markers.length ? new AMap.MarkerCluster(map, markers, { gridSize: 60 }) : null;
+        clusterRef.current = clusterPoints.length
+          ? new AMap.MarkerCluster(map, clusterPoints, {
+              gridSize: 60,
+              renderMarker: ({ marker, data }: { marker: any; data: typeof clusterPoints }) => {
+                const { place } = data[0];
+                const selected = place.id === selectedPlaceId;
+                const node = markerNode(place.name, selected, (place as any).category_color || '#2563eb');
+                // The SDK may reuse markers on zoom; replacing the node avoids accumulating listeners.
+                node.onclick = () => onMarkerClick?.(place.id);
+                marker.setContent(node);
+                marker.setAnchor('center');
+                marker.setOffset(new AMap.Pixel(0, 0));
+                marker.setzIndex(selected ? 200 : 100);
+              },
+            })
+          : null;
         map.add(poiMarkers);
         overlaysRef.current.push(...poiMarkers);
 
@@ -333,7 +346,8 @@ export function MapViewAmap({
         if (located.length && lastFitKeyRef.current !== fitKey) {
           lastFitKeyRef.current = fitKey;
           const dayIds = new Set(dayPlaces.map((place) => place.id));
-          const fitMarkers = dayIds.size ? markers.filter((_, index) => dayIds.has(located[index].id)) : markers;
+          const fitPoints = dayIds.size ? clusterPoints.filter(({ place }) => dayIds.has(place.id)) : clusterPoints;
+          const fitMarkers = fitPoints.map(({ lnglat }) => new AMap.Marker({ position: lnglat }));
           map.setFitView(fitMarkers.length ? fitMarkers : undefined, false, [48, 48, 48, 48], 16);
         }
       } catch {
@@ -344,7 +358,22 @@ export function MapViewAmap({
     return () => {
       cancelled = true;
     };
-  }, [places, dayPlaces, pois, route, selectedPlaceId, onMarkerClick, onPoiClick, fitKey, ready, visibleReservations, transportRoutes, showEndpointLabels, showReservationStats, onReservationClick]);
+  }, [
+    places,
+    dayPlaces,
+    pois,
+    route,
+    selectedPlaceId,
+    onMarkerClick,
+    onPoiClick,
+    fitKey,
+    ready,
+    visibleReservations,
+    transportRoutes,
+    showEndpointLabels,
+    showReservationStats,
+    onReservationClick,
+  ]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
