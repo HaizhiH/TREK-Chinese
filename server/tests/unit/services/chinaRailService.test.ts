@@ -1,7 +1,14 @@
-import { queryChinaRailTrain } from '../../../src/services/chinaRailService';
+import { ChinaRailService } from '../../../src/nest/china-rail/china-rail.service';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const queryChinaRailTrain = (train: string, date: string) => new ChinaRailService().queryChinaRailTrain(train, date);
+
+vi.mock('node:dns/promises', () => ({
+  default: {
+    lookup: vi.fn(async (host: string) => ({ address: /^\d+\./.test(host) ? host : '123.125.10.1', family: 4 })),
+  },
+}));
 afterEach(() => vi.unstubAllGlobals());
 
 describe('queryChinaRailTrain', () => {
@@ -65,5 +72,24 @@ describe('queryChinaRailTrain', () => {
   it('reports a missing exact train as not found', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) }));
     await expect(queryChinaRailTrain('G1', '2026-08-26')).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('ChinaRail SSRF protection', () => {
+  it('blocks a redirect to loopback before making a second request', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/admin' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(queryChinaRailTrain('G1', '2026-08-26')).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
+  });
+
+  it.each(['2026-02-30', 'invalid'])('rejects invalid date %s', async (date) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(queryChinaRailTrain('G1', date)).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

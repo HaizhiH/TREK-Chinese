@@ -16,7 +16,7 @@ import { ReservationsService } from './reservations.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { pushReservationToAirtrail } from '../../services/airtrail/airtrailSync';
-import { queryChinaRailTrain } from '../../services/chinaRailService';
+import { ChinaRailService } from '../china-rail/china-rail.service';
 
 type ReservationBody = Record<string, unknown> & {
   title?: string;
@@ -36,7 +36,10 @@ type ReservationBody = Record<string, unknown> & {
 @Controller('api/trips/:tripId/reservations')
 @UseGuards(JwtAuthGuard)
 export class ReservationsController {
-  constructor(private readonly reservations: ReservationsService) {}
+  constructor(
+    private readonly reservations: ReservationsService,
+    private readonly chinaRail: ChinaRailService,
+  ) {}
 
   private requireTrip(tripId: string, user: User) {
     const trip = this.reservations.verifyTripAccess(tripId, user.id);
@@ -70,7 +73,7 @@ export class ReservationsController {
       throw new HttpException({ error: 'Train number and date are required' }, 400);
     }
     try {
-      return await queryChinaRailTrain(trainNumber, date);
+      return await this.chinaRail.queryChinaRailTrain(trainNumber, date);
     } catch (err: unknown) {
       const status = (err as { status?: number }).status || 502;
       throw new HttpException({ error: err instanceof Error ? err.message : '12306 lookup failed' }, status);

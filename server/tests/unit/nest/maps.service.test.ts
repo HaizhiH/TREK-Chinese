@@ -20,6 +20,11 @@ vi.mock('../../../src/services/placePhotoCache', () => ({ serveFilePath }));
 import { MapsService } from '../../../src/nest/maps/maps.service';
 import type { DatabaseService } from '../../../src/nest/database/database.service';
 
+import type { AmapConfigService } from '../../../src/nest/amap/amap-config.service';
+import { AmapProvider } from '../../../src/nest/amap/amap.provider';
+const amapConfig = { getAmapConfig: () => ({ enabled: false }) } as AmapConfigService;
+const amap = new AmapProvider(amapConfig);
+
 /** A DatabaseService stub whose get() returns the row the test wants. */
 function makeDb(row?: { value: string }) {
   const get = vi.fn(() => row);
@@ -28,7 +33,7 @@ function makeDb(row?: { value: string }) {
 }
 
 function svc(row?: { value: string }) {
-  return new MapsService(makeDb(row).db);
+  return new MapsService(makeDb(row).db, amap, amapConfig);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -56,7 +61,7 @@ describe('MapsService', () => {
 
     it('queries the matching app_settings key', () => {
       const { db, get } = makeDb({ value: 'true' });
-      const s = new MapsService(db);
+      const s = new MapsService(db, amap, amapConfig);
       s.autocompleteDisabled();
       expect(get).toHaveBeenCalledWith(expect.stringContaining('app_settings'), 'places_autocomplete_enabled');
       s.detailsDisabled();

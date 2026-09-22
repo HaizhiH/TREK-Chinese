@@ -1,4 +1,6 @@
-import { getAmapConfig } from './amapConfig';
+import { safeFetchFollow } from '../../utils/ssrfGuard';
+import { AmapConfigService } from './amap-config.service';
+import { Injectable } from '@nestjs/common';
 import type { GeoBounds, GeoPoint, GeoProvider, MapsRouteResult, RouteProfile } from '@trek/shared';
 import { isInChinaMainland } from '@trek/shared';
 
@@ -84,14 +86,16 @@ interface AmapPoi {
   business?: { tel?: string; rating?: string; business_area?: string };
 }
 
+@Injectable()
 export class AmapProvider {
+  constructor(private readonly config: AmapConfigService) {}
   readonly id: GeoProvider = 'amap';
 
   private async request<T>(path: string, params: Record<string, string>): Promise<T> {
-    const config = getAmapConfig();
+    const config = this.config.getAmapConfig();
     if (!config.enabled || !config.webServiceKey) throw providerError('Amap is not configured', 503);
     const search = new URLSearchParams({ ...params, key: config.webServiceKey });
-    const response = await fetch(`${AMAP_BASE}${path}?${search}`, { signal: AbortSignal.timeout(8000) });
+    const response = await safeFetchFollow(`${AMAP_BASE}${path}?${search}`, { signal: AbortSignal.timeout(8000) });
     const body = (await response.json()) as T & { status?: string; info?: string; infocode?: string };
     if (!response.ok || body.status !== '1')
       throw providerError(body.info || `Amap error ${body.infocode || response.status}`);

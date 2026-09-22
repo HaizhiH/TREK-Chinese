@@ -1,3 +1,4 @@
+import { ChinaRailModule } from '../china-rail/china-rail.module';
 import { Module } from '@nestjs/common';
 import { ReservationsController } from './reservations.controller';
 import { ReservationsService } from './reservations.service';
@@ -11,6 +12,7 @@ import { UpcomingReservationsController } from './upcoming-reservations.controll
  * /api/reservations/upcoming dashboard feed.
  */
 @Module({
+  imports: [ChinaRailModule],
   controllers: [ReservationsController, AccommodationsController, UpcomingReservationsController],
   providers: [ReservationsService, AccommodationsService],
 })

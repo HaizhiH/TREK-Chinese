@@ -23,8 +23,8 @@ import {
   searchOverpassPois,
 } from '../../services/mapsService';
 import { serveFilePath } from '../../services/placePhotoCache';
-import { AmapProvider, gcj02ToWgs84 } from '../../services/amapProvider';
-import { getAmapConfig } from '../../services/amapConfig';
+import { AmapProvider, gcj02ToWgs84 } from '../amap/amap.provider';
+import { AmapConfigService } from '../amap/amap-config.service';
 
 type LocationBias = { low: { lat: number; lng: number }; high: { lat: number; lng: number } };
 const MAX_PROVIDER_ROUTE_WAYPOINTS = 16;
@@ -41,8 +41,11 @@ const MAX_PROVIDER_ROUTE_WAYPOINTS = 16;
  */
 @Injectable()
 export class MapsService {
-  private readonly amap = new AmapProvider();
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly amap: AmapProvider,
+    private readonly amapConfig: AmapConfigService,
+  ) {}
 
   private isSettingDisabled(key: string): boolean {
     const row = this.database.get<{ value: string }>(
@@ -65,7 +68,7 @@ export class MapsService {
   }
 
   async search(userId: number, query: string, lang?: string, locationBias?: { lat: number; lng: number; radius?: number }): Promise<MapsSearchResult> {
-    const config = getAmapConfig();
+    const config = this.amapConfig.getAmapConfig();
     if (shouldPreferAmap({ point: locationBias, lang, configured: config.enabled, online: true })) {
       try {
         const places = await this.amap.search(query, locationBias);
@@ -82,7 +85,7 @@ export class MapsService {
       lat: (locationBias.low.lat + locationBias.high.lat) / 2,
       lng: (locationBias.low.lng + locationBias.high.lng) / 2,
     } : undefined;
-    if (shouldPreferAmap({ point, lang, configured: getAmapConfig().enabled, online: true })) {
+    if (shouldPreferAmap({ point, lang, configured: this.amapConfig.getAmapConfig().enabled, online: true })) {
       try {
         const suggestions = await this.amap.autocomplete(input, point);
         if (suggestions.length) return { suggestions, source: 'amap' };
@@ -126,7 +129,7 @@ export class MapsService {
 
   async reverse(lat: string, lng: string, lang?: string): Promise<MapsReverseResult> {
     const point = { lat: Number(lat), lng: Number(lng) };
-    if (getAmapConfig().enabled && isInChinaMainland(point)) {
+    if (this.amapConfig.getAmapConfig().enabled && isInChinaMainland(point)) {
       try {
         return await this.amap.reverse(point);
       } catch {
@@ -143,7 +146,7 @@ export class MapsService {
 
   // OSM-only POI search by category within a viewport bbox (never calls Google).
   async pois(category: string, bbox: { south: number; west: number; north: number; east: number }) {
-    if (getAmapConfig().enabled && isInChinaMainland(boundsCenter(bbox))) {
+    if (this.amapConfig.getAmapConfig().enabled && isInChinaMainland(boundsCenter(bbox))) {
       try {
         return await this.amap.pois(category, bbox);
       } catch {
@@ -154,7 +157,7 @@ export class MapsService {
   }
 
   providerConfig() {
-    const config = getAmapConfig();
+    const config = this.amapConfig.getAmapConfig();
     return {
       amap: {
         enabled: config.enabled,
@@ -165,12 +168,12 @@ export class MapsService {
   }
 
   amapPointsToWgs84(points: GeoPoint[]): GeoPoint[] {
-    if (!getAmapConfig().enabled) throw Object.assign(new Error('Amap is not enabled'), { status: 503 });
+    if (!this.amapConfig.getAmapConfig().enabled) throw Object.assign(new Error('Amap is not enabled'), { status: 503 });
     return points.map(gcj02ToWgs84);
   }
 
   async route(waypoints: GeoPoint[], profile: RouteProfile): Promise<MapsRouteResult> {
-    if (getAmapConfig().enabled && waypoints.every(isInChinaMainland)) {
+    if (this.amapConfig.getAmapConfig().enabled && waypoints.every(isInChinaMainland)) {
       try {
         return await this.routeInChunks(waypoints, (chunk) => this.amap.route(chunk, profile));
       } catch {

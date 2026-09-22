@@ -168,17 +168,6 @@ export function applyGlobalMiddleware(
   app.use(enforceGlobalMfaPolicy);
 
   // Request logging with sensitive field redaction
-  const SENSITIVE_KEYS = new Set(['password', 'new_password', 'current_password', 'token', 'jwt', 'authorization', 'cookie', 'client_secret', 'mfa_token', 'code', 'smtp_pass', 'js_key', 'security_code', 'web_service_key', 'amap_js_key', 'amap_security_code', 'amap_web_service_key']);
-  const redact = (value: unknown): unknown => {
-    if (!value || typeof value !== 'object') return value;
-    if (Array.isArray(value)) return (value as unknown[]).map(redact);
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : redact(v);
-    }
-    return out;
-  };
-
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path === '/api/health') return next();
     const startedAt = Date.now();
@@ -198,3 +187,34 @@ export function applyGlobalMiddleware(
     next();
   });
 }
+
+const SENSITIVE_KEYS = new Set([
+  'password',
+  'new_password',
+  'current_password',
+  'token',
+  'jwt',
+  'authorization',
+  'cookie',
+  'client_secret',
+  'mfa_token',
+  'code',
+  'smtp_pass',
+  'js_key',
+  'security_code',
+  'web_service_key',
+  'amap_js_key',
+  'amap_security_code',
+  'amap_web_service_key',
+  'securitycode',
+  'amapsecuritycode',
+]);
+export const redact = (value: unknown): unknown => {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return (value as unknown[]).map(redact);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : redact(v);
+  }
+  return out;
+};
