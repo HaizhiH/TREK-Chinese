@@ -17,13 +17,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  build:
     if: github.repository == 'HaizhiH/TREK-Chinese' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - name: Prepare platform tag-safe name
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
@@ -55,35 +66,95 @@ jobs:
           username: ${{ vars.ACR_USERNAME }}
           password: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
 
-      - name: Set image tags
-        id: tags
-        shell: bash
-        run: |
-          short_sha="${GITHUB_SHA::12}"
-          {
-            echo 'value<<EOF'
-            echo "$IMAGE_NAME:latest"
-            echo "$IMAGE_NAME:sha-$short_sha"
-            echo "$ACR_IMAGE:latest"
-            echo "$ACR_IMAGE:sha-$short_sha"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
       - name: Read application version
         id: version
         shell: bash
         run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push image
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
           provenance: false
           sbom: false
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.tags.outputs.value }}
           build-args: |
             APP_VERSION=${{ steps.version.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download build digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          # Deliberately NOT merged to preserve platform folder structures
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to Alibaba Cloud ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ACR_REGISTRY }}
+          username: ${{ vars.ACR_USERNAME }}
+          password: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
+
+      - name: Create and push multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::12}"
+          
+          # Build list of digests, enforcing amd64 first
+          declare -A platform_digests
+          for platform in linux-amd64 linux-arm64; do
+            dir="digests-$platform"
+            [ -d "$dir" ] || { echo "::error::missing digest artifact for $platform"; exit 1; }
+            for f in "$dir"/*; do
+              [ -e "$f" ] || { echo "::error::no digest file in $dir"; exit 1; }
+              platform_digests[$platform]="$(basename "$f")"
+            done
+          done
+
+          for image in "$IMAGE_NAME" "$ACR_IMAGE"; do
+            digests=()
+            for platform in linux-amd64 linux-arm64; do
+              digests+=("$image@sha256:${platform_digests[$platform]}")
+            done
+            
+            docker buildx imagetools create \
+              -t "$image:latest" \
+              -t "$image:sha-$short_sha" \
+              "${digests[@]}"
+          done
+
+      - name: Inspect manifests
+        run: |
+          docker buildx imagetools inspect "$IMAGE_NAME:latest"
+          docker buildx imagetools inspect "$ACR_IMAGE:latest"
