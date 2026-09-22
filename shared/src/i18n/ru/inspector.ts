@@ -14,6 +14,8 @@ const inspector: TranslationStrings = {
   'inspector.confirmedRes': 'Подтверждённое бронирование',
   'inspector.pendingRes': 'Ожидающее бронирование',
   'inspector.google': 'Google Maps',
+  'inspector.navigation': 'Навигация',
+  'inspector.openWith': 'Открыть в',
   'inspector.openStreetMap': 'OpenStreetMap',
   'inspector.website': 'Открыть сайт',
   'inspector.saveToCollection': 'Сохранить в коллекцию',
@@ -22,5 +24,8 @@ const inspector: TranslationStrings = {
   'inspector.editRes': 'Редактировать бронирование',
   'inspector.participants': 'Участники',
   'inspector.trackStats': 'Данные маршрута',
+  'inspector.trackColor': 'Цвет маршрута',
+  'inspector.trackColorAuto': 'Автоматический цвет',
+  'inspector.trackColorCustom': 'Выбрать свой цвет',
 };
 export default inspector;

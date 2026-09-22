@@ -7,16 +7,18 @@ import ConfirmDialog from '../components/shared/ConfirmDialog'
 import CopyTripDialog from '../components/shared/CopyTripDialog'
 import CustomSelect from '../components/shared/CustomSelect'
 import PlaceAvatar from '../components/shared/PlaceAvatar'
+import EmptyState from '../components/shared/EmptyState'
+import { Skeleton, SpotlightSkeleton, TripCardSkeleton } from '../components/shared/Skeleton'
 import MobileTopBar from '../components/Layout/MobileTopBar'
 import { useDashboard } from './dashboard/useDashboard'
 import {
   type DashboardTrip, type HeroBundle, type TravelStats, type UpcomingReservation,
-  MS_PER_DAY, daysUntil, getTripStatus,
+  MS_PER_DAY, daysUntil, getTripStatus, upcomingKey,
 } from './dashboard/dashboardModel'
 import {
-  Plus, Edit2, Trash2, Archive, Copy, ArrowRight, MapPin,
+  Plus, Edit2, Trash2, Archive, ArchiveRestore, Copy, ArrowRight, MapPin,
   Plane, Hotel, Utensils, Clock, RefreshCw, ArrowRightLeft, Calendar,
-  LayoutGrid, List, Ticket, X, CalendarPlus,
+  LayoutGrid, List, Ticket, X, CalendarPlus, ParkingSquare, LogIn, LogOut,
 } from 'lucide-react'
 import { IcsSubscribeModal } from '../components/Planner/IcsSubscribeModal'
 import CollectionsWidget from '../components/Dashboard/CollectionsWidget'
@@ -51,7 +53,7 @@ function tripGradient(id: number): string { return GRADIENTS[id % GRADIENTS.leng
 function splitDate(dateStr: string | null | undefined, locale: string): { d: string; m: string; y: string } | null {
   if (!dateStr) return null
   const date = new Date(dateStr + 'T00:00:00Z')
-  if (isNaN(date.getTime())) return null // malformed date — render a dash, never crash
+  if (Number.isNaN(date.getTime())) return null // malformed date — render a dash, never crash
   const otherYear = date.getUTCFullYear() !== new Date().getUTCFullYear()
   return {
     d: date.toLocaleDateString(locale, { day: 'numeric', timeZone: 'UTC' }),
@@ -66,7 +68,7 @@ function splitDate(dateStr: string | null | undefined, locale: string): { d: str
 function fullDate(dateStr: string | null | undefined, locale: string): string | null {
   if (!dateStr) return null
   const date = new Date(dateStr + 'T00:00:00Z')
-  if (isNaN(date.getTime())) return null
+  if (Number.isNaN(date.getTime())) return null
   const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', timeZone: 'UTC' }
   if (date.getUTCFullYear() !== new Date().getUTCFullYear()) opts.year = 'numeric'
   return date.toLocaleDateString(locale, opts)
@@ -89,23 +91,24 @@ function initials(name: string | null | undefined): string {
 }
 
 const RES_ICON: Record<string, React.ReactElement> = {
-  flight: <Plane size={16} />, hotel: <Hotel size={16} />, restaurant: <Utensils size={16} />,
+  flight: <Plane size={16} />, hotel: <Hotel size={16} />, restaurant: <Utensils size={16} />, parking: <ParkingSquare size={16} />,
+  // A stay's two moments (#1934) — the arrow says which way you are going, on
+  // the same green the hotel tile already uses.
+  checkin: <LogIn size={16} />, checkout: <LogOut size={16} />,
 }
-const RES_TYPE_CLASS: Record<string, string> = { flight: 'flight', hotel: 'hotel', restaurant: 'food' }
-
-// Mobile gets a different boarding-pass treatment (separate card under the hero).
-function useIsMobile(): boolean {
-  const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches)
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 720px)')
-    const onChange = () => setMobile(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return mobile
+const RES_TYPE_CLASS: Record<string, string> = {
+  flight: 'flight', hotel: 'hotel', restaurant: 'food', checkin: 'hotel', checkout: 'hotel',
 }
+/** The label a stay's moment carries in place of a location. */
+const MOMENT_LABEL: Record<string, string> = { checkin: 'day.checkIn', checkout: 'day.checkOut' }
 
 export default function DashboardPage(): React.ReactElement {
+  // ViewportRoute in App.tsx picks the branch now, so the phone screen is a
+  // chunk of its own instead of a dead limb in this one.
+  return <DashboardPageDesktop />
+}
+
+function DashboardPageDesktop(): React.ReactElement {
   // Page = wiring container: all state, data loading and mutations live in the
   // useDashboard data hook; this component only renders what it returns.
   const {
@@ -114,16 +117,16 @@ export default function DashboardPage(): React.ReactElement {
     loadError, retryLoad,
     tripFilter, setTripFilter, viewMode, toggleViewMode,
     showForm, setShowForm, editingTrip, setEditingTrip,
-    deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, setTrips,
+    deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, applyCoverUpdate,
     handleCreate, handleUpdate, confirmDelete, handleArchive, handleUnarchive, confirmCopy,
     allSubOpen, setAllSubOpen,
   } = useDashboard()
 
-  // Per-device dashboard widget visibility (from the appearance config).
-  const isMobile = useIsMobile()
+  // Dashboard widget visibility (from the appearance config). Phones never reach this
+  // component — DashboardPage routes them to MDashboard — so only the desktop set applies.
   const appearanceCfg = useSettingsStore(s => s.settings.appearance)
   const dashCfg = normalizeAppearance(appearanceCfg).dashboard
-  const sideWidgets = isMobile ? dashCfg.mobile : dashCfg.desktop
+  const sideWidgets = dashCfg.desktop
   const showCurrency = sideWidgets.currency
   const showTimezones = sideWidgets.timezones
   const showUpcoming = sideWidgets.upcomingReservations
@@ -134,7 +137,7 @@ export default function DashboardPage(): React.ReactElement {
   // Only true dashboard widgets belong here — hero mounts on the boarding pass, and
   // place-detail/day-detail widgets live inside the planner panels, not the sidebar.
   const widgetPlugins = usePluginStore(s => s.plugins).filter(p => p.type === 'widget' && p.slot !== 'hero' && p.slot !== 'place-detail' && p.slot !== 'day-detail' && p.slot !== 'reservation-detail')
-  const sidebarVisible = (isMobile || dashCfg.desktop.sidebar) && (showCurrency || showCollections || showTimezones || showUpcoming || widgetPlugins.length > 0)
+  const sidebarVisible = dashCfg.desktop.sidebar && (showCurrency || showCollections || showTimezones || showUpcoming || widgetPlugins.length > 0)
 
   // Plugin-contributed badges on the trip cards (tripCardProvider hook). One fetch for
   // all visible cards; only runs when at least one plugin is active. Fail-safe.
@@ -156,12 +159,17 @@ export default function DashboardPage(): React.ReactElement {
             {loadError && (
               <div className="dash-error" role="alert">
                 <span className="dash-error-txt">{t('dashboard.loadErrorBanner')}</span>
-                <button className="dash-error-retry" onClick={retryLoad}>
+                <button type="button" className="dash-error-retry" onClick={retryLoad}>
                   <RefreshCw size={15} />
                   {t('dashboard.retry')}
                 </button>
               </div>
             )}
+            {/* The hero and the cards below stand in for themselves while the trips load.
+                Without them the page rendered its finished empty state: no hero, no
+                cards, and a stats row reading zero, which reads as "your trips are
+                gone" rather than "not here yet" on a slow connection (#2115). */}
+            {isLoading && !spotlight && gridTrips.length === 0 && <SpotlightSkeleton />}
             {spotlight && (
               <BoardingPassHero
                 trip={spotlight}
@@ -182,11 +190,11 @@ export default function DashboardPage(): React.ReactElement {
                 <h3 className="sec-title">{t('dashboard.title')}</h3>
                 <div className="sec-tools">
                   <div className="seg">
-                    <button className={tripFilter === 'planned' ? 'on' : ''} onClick={() => setTripFilter('planned')}>{t('dashboard.filter.planned')}</button>
-                    <button className={tripFilter === 'archive' ? 'on' : ''} onClick={() => setTripFilter('archive')}>{t('dashboard.archived')}</button>
-                    <button className={tripFilter === 'completed' ? 'on' : ''} onClick={() => setTripFilter('completed')}>{t('dashboard.mobile.completed')}</button>
+                    <button type="button" className={tripFilter === 'planned' ? 'on' : ''} onClick={() => setTripFilter('planned')}>{t('dashboard.filter.planned')}</button>
+                    <button type="button" className={tripFilter === 'archive' ? 'on' : ''} onClick={() => setTripFilter('archive')}>{t('dashboard.archived')}</button>
+                    <button type="button" className={tripFilter === 'completed' ? 'on' : ''} onClick={() => setTripFilter('completed')}>{t('dashboard.mobile.completed')}</button>
                   </div>
-                  <button
+                  <button type="button"
                     className="tool-action"
                     aria-label="Subscribe to all trips calendar"
                     title="Subscribe to all trips"
@@ -195,7 +203,7 @@ export default function DashboardPage(): React.ReactElement {
                   >
                     <CalendarPlus size={17} />
                   </button>
-                  <button className="tool-action" aria-label={t('dashboard.aria.toggleView')} onClick={toggleViewMode} style={{ width: 38, height: 38, borderRadius: 11 }}>
+                  <button type="button" className="tool-action" aria-label={t('dashboard.aria.toggleView')} onClick={toggleViewMode} style={{ width: 38, height: 38, borderRadius: 11 }}>
                     {viewMode === 'grid' ? <List size={17} /> : <LayoutGrid size={17} />}
                   </button>
                 </div>
@@ -209,10 +217,12 @@ export default function DashboardPage(): React.ReactElement {
                 />
               )}
 
-              {gridTrips.length === 0 && tripFilter === 'planned' && !isLoading && !loadError && (
+              {/* "No trips yet" only when there really are none — a user whose trips are
+                  all finished has a hero, and telling them to create their first trip is
+                  simply wrong (#1706). Same condition the mobile dashboard already uses. */}
+              {gridTrips.length === 0 && !spotlight && tripFilter === 'planned' && !isLoading && !loadError && (
                 <div className="trips-empty">
-                  <h4>{t('dashboard.emptyTitle')}</h4>
-                  <p>{t('dashboard.emptyText')}</p>
+                  <EmptyState scene="dashboard" title={t('dashboard.emptyTitle')} />
                 </div>
               )}
 
@@ -230,8 +240,15 @@ export default function DashboardPage(): React.ReactElement {
                     onDelete={() => setDeleteTrip(trip)}
                   />
                 ))}
+                {isLoading && gridTrips.length === 0 && (
+                  <>
+                    <TripCardSkeleton />
+                    <TripCardSkeleton />
+                    <TripCardSkeleton />
+                  </>
+                )}
                 {tripFilter === 'planned' && !isLoading && (
-                  <button className="add-trip-card" onClick={() => { setEditingTrip(null); setShowForm(true) }}>
+                  <button type="button" className="add-trip-card" onClick={() => { setEditingTrip(null); setShowForm(true) }}>
                     <div>
                       <div className="circ"><Plus size={20} /></div>
                       <div className="ttl">{t('dashboard.newTrip')}</div>
@@ -255,7 +272,7 @@ export default function DashboardPage(): React.ReactElement {
         </main>
       </div>
 
-      <button
+      <button type="button"
         className="fab-new-trip"
         onClick={() => { setEditingTrip(null); setShowForm(true) }}
         aria-label={t('dashboard.newTrip')}
@@ -271,7 +288,7 @@ export default function DashboardPage(): React.ReactElement {
           trip={editingTrip}
           onClose={() => { setShowForm(false); setEditingTrip(null) }}
           onSave={editingTrip ? handleUpdate : handleCreate}
-          onCoverUpdate={(tripId, coverUrl) => setTrips(prev => prev.map(t => t.id === tripId ? { ...t, cover_image: coverUrl } : t))}
+          onCoverUpdate={applyCoverUpdate}
         />
       )}
       {deleteTrip && (
@@ -304,10 +321,10 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
   onEdit: () => void; onCopy: () => void; onArchive: () => void; onDelete: () => void
 }): React.ReactElement {
   const { t } = useTranslation()
-  const mobile = useIsMobile()
   const heroPlugins = usePluginStore(s => s.plugins).filter(p => p.type === 'widget' && p.slot === 'hero')
   const stop = (e: React.MouseEvent, fn: () => void) => { e.stopPropagation(); fn() }
   const status = getTripStatus(trip)
+  const archiveLabel = trip.is_archived ? t('dashboard.restore') : t('dashboard.archive')
   const start = splitDate(trip.start_date, locale)
   const end = splitDate(trip.end_date, locale)
 
@@ -384,7 +401,7 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
         <div className="places-preview">
           {places.slice(0, 3).map(p => (
             <div key={p.id} className="place-av">
-              <PlaceAvatar place={p} size={mobile ? 24 : 32} category={{ color: p.category_color ?? undefined, icon: p.category_icon ?? undefined }} />
+              <PlaceAvatar place={p} size={32} category={{ color: p.category_color ?? undefined, icon: p.category_icon ?? undefined }} />
             </div>
           ))}
           {places.length === 0 && <div className="place-more"><MapPin size={15} /></div>}
@@ -396,8 +413,16 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
   )
 
   return (
-    <>
-    <section className="hero-trip" onClick={onOpen}>
+    <div
+      className="hero-trip"
+      onClick={onOpen}
+      role="button"
+      // No press-scale on composite cards: shrinking the surface mid-click slides
+      // the inner menu buttons out from under the pointer (#2158).
+      data-no-press
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen() } }}
+    >
       {trip.cover_image
         ? <img className="bg" src={trip.cover_image} alt={trip.title} />
         : <div className="bg" style={{ background: tripGradient(trip.id) }} />}
@@ -409,10 +434,10 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
             {badge}
           </div>
           <div className="hero-tools">
-            <button className="hero-tool" aria-label={t('common.edit')} onClick={(e) => stop(e, onEdit)}><Edit2 size={16} /></button>
-            <button className="hero-tool" aria-label={t('dashboard.aria.duplicate')} onClick={(e) => stop(e, onCopy)}><Copy size={16} /></button>
-            <button className="hero-tool" aria-label={trip.is_archived ? t('dashboard.restore') : t('dashboard.archive')} onClick={(e) => stop(e, onArchive)}><Archive size={16} /></button>
-            <button className="hero-tool" aria-label={t('common.delete')} onClick={(e) => stop(e, onDelete)}><Trash2 size={16} /></button>
+            <button type="button" className="hero-tool" aria-label={t('common.edit')} title={t('common.edit')} onClick={(e) => stop(e, onEdit)}><Edit2 size={17} strokeWidth={2.2} /></button>
+            <button type="button" className="hero-tool" aria-label={t('dashboard.aria.duplicate')} title={t('dashboard.aria.duplicate')} onClick={(e) => stop(e, onCopy)}><Copy size={17} strokeWidth={2.2} /></button>
+            <button type="button" className="hero-tool" aria-label={archiveLabel} title={archiveLabel} onClick={(e) => stop(e, onArchive)}>{trip.is_archived ? <ArchiveRestore size={17} strokeWidth={2.2} /> : <Archive size={17} strokeWidth={2.2} />}</button>
+            <button type="button" className="hero-tool" aria-label={t('common.delete')} title={t('common.delete')} onClick={(e) => stop(e, onDelete)}><Trash2 size={17} strokeWidth={2.2} /></button>
           </div>
         </div>
 
@@ -420,24 +445,20 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
           <h2 className="hero-title">{trip.title}</h2>
         </div>
 
-        {!mobile && (
-          <div className="hero-pass-wrap">
-            {heroPlugins.length > 0 && (
-              <div className="hero-pass-overlay" aria-hidden="true">
-                {heroPlugins.map(p => (
-                  <PluginFrame key={p.id} pluginId={p.id} tripId={String(trip.id)} title={p.name} className="hero-overlay-frame" />
-                ))}
-              </div>
-            )}
-            <div className="hero-pass" onClick={(e) => { e.stopPropagation(); onOpen() }}>
-              <div className="hero-pass-inner">{passCells}</div>
+        <div className="hero-pass-wrap">
+          {heroPlugins.length > 0 && (
+            <div className="hero-pass-overlay" aria-hidden="true">
+              {heroPlugins.map(p => (
+                <PluginFrame key={p.id} pluginId={p.id} tripId={String(trip.id)} title={p.name} surface="dashboard-widget" className="hero-overlay-frame" />
+              ))}
             </div>
+          )}
+          <div className="hero-pass" role="presentation" onClick={(e) => { e.stopPropagation(); onOpen() }}>
+            <div className="hero-pass-inner">{passCells}</div>
           </div>
-        )}
+        </div>
       </div>
-    </section>
-    {mobile && <section className="pass-card" onClick={onOpen}>{passCells}</section>}
-    </>
+    </div>
   )
 }
 
@@ -457,14 +478,13 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
   const { t } = useTranslation()
   const distanceUnit = useSettingsStore(s => s.settings.distance_unit) || 'metric'
   const appearance = useSettingsStore(s => s.settings.appearance)
-  const isMobile = useIsMobile()
   const dash = normalizeAppearance(appearance).dashboard
 
-  // Per-device widget visibility. Atlas + distance are desktop-only tiles.
-  const showAtlas = !isMobile && dash.desktop.atlas
-  const showTrips = isMobile ? dash.mobile.tripsTotal : dash.desktop.tripsTotal
-  const showDays = isMobile ? dash.mobile.daysTraveled : dash.desktop.daysTraveled
-  const showDistance = !isMobile && dash.desktop.distanceFlown
+  // Widget visibility — this row only ever renders on the desktop page.
+  const showAtlas = dash.desktop.atlas
+  const showTrips = dash.desktop.tripsTotal
+  const showDays = dash.desktop.daysTraveled
+  const showDistance = dash.desktop.distanceFlown
   if (!showAtlas && !showTrips && !showDays && !showDistance) return null
 
   // Reflow: the grid spreads the visible tiles to full width (the passport stays
@@ -475,6 +495,11 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
   const atlasTemplateM =
     [dash.mobile.tripsTotal && '1fr', dash.mobile.daysTraveled && '1fr'].filter(Boolean).join(' ') || '1fr'
 
+  // stats stays null until travelStats() answers, and that call carries no loading
+  // flag of its own, so every tile below used to render its zero fallback in the
+  // meantime. On a slow connection that reads as "no trips", which is the whole of
+  // #2115. A dash placeholder says "not yet" where a 0 says "none".
+  const statsPending = stats === null
   const countries = stats?.countries || []
   const distanceKm = stats?.totalDistanceKm || 0
   const distance = convertDistance(distanceKm, distanceUnit)
@@ -488,7 +513,10 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
       {showAtlas && (
         <div className="atlas-card passport">
           <div className="label">{t('dashboard.atlas.countriesVisited')}</div>
-          <div className="value mono">{countries.length} <span className="unit text-[oklch(1_0_0_/_.55)]">{t('dashboard.atlas.ofTotal', { total: 195 })}</span></div>
+          <div className="value mono">
+            {statsPending ? <Skeleton width={44} height={30} radius={6} /> : countries.length}
+            {' '}<span className="unit text-[oklch(1_0_0_/_.55)]">{t('dashboard.atlas.ofTotal', { total: 195 })}</span>
+          </div>
           <div className="passport-flags">
             {countries.slice(0, 5).map((c, i) => (
               <span key={i} className="flag" title={c}>
@@ -504,8 +532,8 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
       {showTrips && (
         <div className="atlas-card">
           <div className="label">{t('dashboard.atlas.tripsTotal')}</div>
-          <div className="value mono">{stats?.totalTrips ?? 0}</div>
-          <div className="delta">{t('dashboard.atlas.placesMapped', { count: stats?.totalPlaces ?? 0 })}</div>
+          <div className="value mono">{statsPending ? <Skeleton width={44} height={30} radius={6} /> : stats.totalTrips ?? 0}</div>
+          <div className="delta">{statsPending ? <Skeleton width={90} height={12} /> : t('dashboard.atlas.placesMapped', { count: stats.totalPlaces ?? 0 })}</div>
           <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
             <polyline points="0,30 12,26 22,28 32,18 44,22 56,10 68,14 80,4" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -515,7 +543,10 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
       {showDays && (
         <div className="atlas-card">
           <div className="label">{t('dashboard.atlas.daysTraveled')}</div>
-          <div className="value mono">{stats?.totalDays ?? 0} <span className="unit">{t('dashboard.atlas.daysUnit')}</span></div>
+          <div className="value mono">
+            {statsPending ? <Skeleton width={44} height={30} radius={6} /> : stats.totalDays ?? 0}
+            {' '}<span className="unit">{t('dashboard.atlas.daysUnit')}</span>
+          </div>
           <div className="delta">{t('dashboard.atlas.acrossAllTrips')}</div>
           <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
             <path d="M0 30 Q10 24 20 26 T40 20 T60 14 T80 10" fill="none" strokeWidth="2" strokeLinecap="round" />
@@ -526,8 +557,11 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
       {showDistance && (
         <div className="atlas-card">
           <div className="label">{t('dashboard.atlas.distanceFlown')}</div>
-          <div className="value mono">{distanceText} <span className="unit">{distanceLabel}</span></div>
-          <div className="delta">{t('dashboard.atlas.aroundEquator', { count: equatorTimes })}</div>
+          <div className="value mono">
+            {statsPending ? <Skeleton width={60} height={30} radius={6} /> : distanceText}
+            {' '}<span className="unit">{distanceLabel}</span>
+          </div>
+          <div className="delta">{statsPending ? <Skeleton width={110} height={12} /> : t('dashboard.atlas.aroundEquator', { count: equatorTimes })}</div>
           <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
             <circle cx="40" cy="18" r="14" fill="none" stroke="oklch(0.88 0.01 70)" strokeWidth="2" />
             <circle cx="40" cy="18" r="14" fill="none" strokeWidth="2" strokeDasharray="58 88" strokeLinecap="round" transform="rotate(-90 40 18)" />
@@ -545,6 +579,7 @@ function TripCard({ trip, locale, badges, onOpen, onEdit, onCopy, onArchive, onD
 }): React.ReactElement {
   const { t } = useTranslation()
   const status = getTripStatus(trip)
+  const archiveLabel = trip.is_archived ? t('dashboard.restore') : t('dashboard.archive')
   const start = splitDate(trip.start_date, locale)
   const end = splitDate(trip.end_date, locale)
   const until = daysUntil(trip.start_date)
@@ -560,17 +595,25 @@ function TripCard({ trip, locale, badges, onOpen, onEdit, onCopy, onArchive, onD
   const stop = (e: React.MouseEvent, fn: () => void) => { e.stopPropagation(); fn() }
 
   return (
-    <article className="trip-card" onClick={onOpen}>
+    <div
+      className="trip-card"
+      onClick={onOpen}
+      role="button"
+      // Same press-scale opt-out as the hero card (#2158).
+      data-no-press
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen() } }}
+    >
       <div className="trip-cover">
         {trip.cover_image
           ? <img src={trip.cover_image} alt={trip.title} />
           : <div style={{ width: '100%', height: '100%', background: tripGradient(trip.id) }} />}
         <div className={`trip-status ${statusClass}`}><span className="indicator" /> {statusLabel}</div>
         <div className="trip-actions">
-          <button className="trip-action-btn" aria-label={t('common.edit')} onClick={(e) => stop(e, onEdit)}><Edit2 size={16} /></button>
-          <button className="trip-action-btn" aria-label={t('dashboard.aria.duplicate')} onClick={(e) => stop(e, onCopy)}><Copy size={16} /></button>
-          <button className="trip-action-btn" aria-label={trip.is_archived ? t('dashboard.restore') : t('dashboard.archive')} onClick={(e) => stop(e, onArchive)}><Archive size={16} /></button>
-          <button className="trip-action-btn" aria-label={t('common.delete')} onClick={(e) => stop(e, onDelete)}><Trash2 size={16} /></button>
+          <button type="button" className="trip-action-btn" aria-label={t('common.edit')} title={t('common.edit')} onClick={(e) => stop(e, onEdit)}><Edit2 size={17} strokeWidth={2.2} /></button>
+          <button type="button" className="trip-action-btn" aria-label={t('dashboard.aria.duplicate')} title={t('dashboard.aria.duplicate')} onClick={(e) => stop(e, onCopy)}><Copy size={17} strokeWidth={2.2} /></button>
+          <button type="button" className="trip-action-btn" aria-label={archiveLabel} title={archiveLabel} onClick={(e) => stop(e, onArchive)}>{trip.is_archived ? <ArchiveRestore size={17} strokeWidth={2.2} /> : <Archive size={17} strokeWidth={2.2} />}</button>
+          <button type="button" className="trip-action-btn" aria-label={t('common.delete')} title={t('common.delete')} onClick={(e) => stop(e, onDelete)}><Trash2 size={17} strokeWidth={2.2} /></button>
         </div>
         <div className="trip-cover-content">
           <h3 className="trip-name">{trip.title}</h3>
@@ -593,7 +636,7 @@ function TripCard({ trip, locale, badges, onOpen, onEdit, onCopy, onArchive, onD
         </div>
         <TripCardBadges items={badges ?? []} />
       </div>
-    </article>
+    </div>
   )
 }
 
@@ -641,10 +684,10 @@ function CurrencyTool(): React.ReactElement {
     }).catch(() => { /* keep localStorage; retry on next load */ })
   }, [isLoaded, updateSetting])
 
-  const currencies = rates ? Object.keys(rates).sort() : CURRENCIES
+  const currencies = rates ? Object.keys(rates).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) : CURRENCIES
   const ccyOptions = currencies.map(c => ({ value: c, label: c }))
   const rate = rates?.[to] ?? null
-  const converted = rate != null ? (parseFloat(amount.replace(',', '.')) || 0) * rate : null
+  const converted = rate != null ? (Number.parseFloat(amount.replace(',', '.')) || 0) * rate : null
 
   const swap = () => { setFrom(to); setTo(from) }
 
@@ -652,7 +695,7 @@ function CurrencyTool(): React.ReactElement {
     <div className="tool">
       <div className="tool-head">
         <div className="tool-title"><RefreshCw size={14} /> {t('dashboard.currency')}</div>
-        <button className="tool-action" aria-label={t('dashboard.aria.refreshRates')} onClick={fetchRate}><RefreshCw size={14} /></button>
+        <button type="button" className="tool-action" aria-label={t('dashboard.aria.refreshRates')} onClick={fetchRate}><RefreshCw size={14} /></button>
       </div>
       <div className="fx-input">
         <div className="fx-field">
@@ -660,7 +703,7 @@ function CurrencyTool(): React.ReactElement {
           <input className="amt mono" value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" />
           <CustomSelect value={from} onChange={v => setFrom(String(v))} options={ccyOptions} searchable size="sm" style={{ marginTop: 6 }} />
         </div>
-        <button className="fx-swap" aria-label={t('dashboard.aria.swapCurrencies')} onClick={swap}><ArrowRightLeft size={14} /></button>
+        <button type="button" className="fx-swap" aria-label={t('dashboard.aria.swapCurrencies')} onClick={swap}><ArrowRightLeft size={14} /></button>
         <div className="fx-field">
           <div className="lbl">{t('dashboard.fx.to')}</div>
           <input className="amt mono" value={converted != null ? converted.toFixed(2) : '—'} readOnly />
@@ -747,7 +790,7 @@ function TimezoneTool({ locale }: { locale: string }): React.ReactElement {
     <div className="tool">
       <div className="tool-head">
         <div className="tool-title"><Clock size={14} /> {t('dashboard.timezone')}</div>
-        <button className="tool-action" aria-label={t('dashboard.aria.addTimezone')} onClick={() => setAdding(a => !a)}>
+        <button type="button" className="tool-action" aria-label={t('dashboard.aria.addTimezone')} onClick={() => setAdding(a => !a)}>
           {adding ? <X size={14} /> : <Plus size={14} />}
         </button>
       </div>
@@ -765,7 +808,7 @@ function TimezoneTool({ locale }: { locale: string }): React.ReactElement {
               <div className="tz-sub">{offsetLabel(tz)}</div>
             </div>
             <div className="tz-time mono">{timeIn(tz)}</div>
-            <button className="tz-del" aria-label={t('dashboard.aria.removeTimezone', { city: shortZone(tz) })} onClick={() => removeZone(tz)}><X size={13} /></button>
+            <button type="button" className="tz-del" aria-label={t('dashboard.aria.removeTimezone', { city: shortZone(tz) })} onClick={() => removeZone(tz)}><X size={13} /></button>
           </div>
         ))}
         {zones.length === 0 && (
@@ -800,14 +843,20 @@ function UpcomingTool({ items, locale, onOpen }: {
             const dateStr = datePart ? splitDate(datePart, locale) : null
             const timeStr = parsed.time ? formatTime(parsed.time, locale, timeFormat) : null
             const typeClass = RES_TYPE_CLASS[r.type] || 'other'
+            const moment = MOMENT_LABEL[r.type]
             return (
-              <div className="upc-item" key={r.id} onClick={() => onOpen(r.trip_id)}>
+              <div className="upc-item" key={upcomingKey(r)} onClick={() => onOpen(r.trip_id)}
+                role="button" data-no-press tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(r.trip_id) } }}>
                 <div className="upc-date"><div className="d mono">{dateStr?.d ?? '–'}</div><div className="m">{dateStr?.m ?? ''}</div></div>
                 <div className="upc-info">
-                  <div className="t">{r.title}</div>
+                  <div className="t">
+                    {r.title}
+                    {r.status === 'pending' && <span className="upc-pending">{t('reservations.pending')}</span>}
+                  </div>
                   <div className="s">
                     {timeStr && <><Clock size={11} /> {timeStr} · </>}
-                    {r.location || r.place_name || r.trip_title}
+                    {moment ? t(moment) : (r.location || r.place_name || r.trip_title)}
                   </div>
                 </div>
                 <div className={`upc-type ${typeClass}`}>{RES_ICON[r.type] || <Ticket size={16} />}</div>

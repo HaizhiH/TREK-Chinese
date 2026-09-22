@@ -14,6 +14,8 @@ const inspector: TranslationStrings = {
   'inspector.confirmedRes': 'Potvrzená rezervace',
   'inspector.pendingRes': 'Čekající rezervace',
   'inspector.google': 'Google Maps',
+  'inspector.navigation': 'Navigace',
+  'inspector.openWith': 'Otevřít v',
   'inspector.openStreetMap': 'OpenStreetMap',
   'inspector.website': 'Otevřít webové stránky',
   'inspector.saveToCollection': 'Uložit do sbírky',
@@ -22,5 +24,8 @@ const inspector: TranslationStrings = {
   'inspector.editRes': 'Upravit rezervaci',
   'inspector.participants': 'Účastníci',
   'inspector.trackStats': 'Data trasy',
+  'inspector.trackColor': 'Barva trasy',
+  'inspector.trackColorAuto': 'Automatická barva',
+  'inspector.trackColorCustom': 'Vybrat vlastní barvu',
 };
 export default inspector;

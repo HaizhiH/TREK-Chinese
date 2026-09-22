@@ -7,9 +7,14 @@ import { getApiErrorMessage } from '../types'
 import { tripSyncManager } from '../sync/tripSyncManager'
 import { reopenForUser, deleteCurrentUserDb } from '../db/offlineDb'
 import { setAuthed } from '../sync/authGate'
-import { unregisterSyncTriggers } from '../sync/syncTriggers'
+import { setForcedOffline } from '../sync/networkMode'
+import { registerSyncTriggers, unregisterSyncTriggers } from '../sync/syncTriggers'
 import { useSystemNoticeStore } from './systemNoticeStore.js'
 import { clearAppearanceSnapshot } from '../theme/applyAppearance'
+import { clearAllPluginSessions } from './pluginStore'
+import { forgetStartDestination } from '../utils/startDestination'
+import { forgetServerLanguage } from './settingsStore'
+import { markSignedOut, clearSignedOut } from '../utils/signedOut'
 
 interface AuthResponse {
   user: User
@@ -31,12 +36,22 @@ interface AuthState {
    *  outage doesn't render as a blank, error-free page that looks like lost data.
    *  Transient, never persisted. #1283 */
   authCheckFailed: boolean
+  /** The user pressed "log out" — as opposed to a session that simply ended.
+   *  Read by ProtectedRoute: a deliberate sign-out should not leave a
+   *  ?redirect= pointing back at the page they just left. Transient. */
+  loggingOut: boolean
   error: string | null
+  /** The operator of this install owns its configuration, not the admin. */
+  managed: boolean
   demoMode: boolean
   devMode: boolean
   isPrerelease: boolean
   appVersion: string
   hasMapsKey: boolean
+  /** The same question for Amap. Kept apart from hasMapsKey rather than folded
+   *  into one "has a search key": which of the two is missing decides what the
+   *  admin has to go and do. */
+  hasAmapKey: boolean
   serverTimezone: string
   /** Server policy: all users must enable MFA */
   appRequireMfa: boolean
@@ -44,6 +59,9 @@ interface AuthState {
   placesPhotosEnabled: boolean
   placesAutocompleteEnabled: boolean
   placesDetailsEnabled: boolean
+  placesEnrichEnabled: boolean
+  /** Server records which search result was picked (admin switch, default off). */
+  placeShadowEnabled: boolean
 
   login: (email: string, password: string, rememberMe?: boolean) => Promise<LoginResult>
   completeMfaLogin: (mfaToken: string, code: string, rememberMe?: boolean) => Promise<AuthResponse>
@@ -56,17 +74,21 @@ interface AuthState {
   updateProfile: (profileData: Partial<User>) => Promise<void>
   uploadAvatar: (file: File) => Promise<AvatarResponse>
   deleteAvatar: () => Promise<void>
+  setManaged: (val: boolean) => void
   setDemoMode: (val: boolean) => void
   setDevMode: (val: boolean) => void
   setIsPrerelease: (val: boolean) => void
   setAppVersion: (val: string) => void
   setHasMapsKey: (val: boolean) => void
+  setHasAmapKey: (val: boolean) => void
   setServerTimezone: (tz: string) => void
   setAppRequireMfa: (val: boolean) => void
   setTripRemindersEnabled: (val: boolean) => void
   setPlacesPhotosEnabled: (val: boolean) => void
   setPlacesAutocompleteEnabled: (val: boolean) => void
   setPlacesDetailsEnabled: (val: boolean) => void
+  setPlacesEnrichEnabled: (val: boolean) => void
+  setPlaceShadowEnabled: (val: boolean) => void
   demoLogin: () => Promise<AuthResponse>
 }
 
@@ -79,11 +101,19 @@ let authSequence = 0
  */
 async function onAuthSuccess(userId: number): Promise<void> {
   setAuthed(true)
+  // Whatever brought them back in - password, SSO, MFA, demo, a restored
+  // session - the tab is no longer "just signed out", so the login page may
+  // auto-SSO again next time.
+  clearSignedOut()
   try {
     await reopenForUser(userId)
   } catch (err) {
     console.error('[auth] failed to open user-scoped offline DB', err)
   }
+  // logout() tears the triggers down, and App's mount effect never runs again in
+  // an SPA session, so a second login in the same tab would leave the mutation
+  // queue without a flush trigger. Re-registering is a no-op while they are up.
+  registerSyncTriggers()
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -93,18 +123,24 @@ export const useAuthStore = create<AuthState>()(
   isAuthenticated: false,
   isLoading: true,
   authCheckFailed: false,
+  loggingOut: false,
   error: null,
+  managed: false,
   demoMode: localStorage.getItem('demo_mode') === 'true',
   devMode: false,
   isPrerelease: false,
   appVersion: '',
   hasMapsKey: false,
+  hasAmapKey: false,
   serverTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   appRequireMfa: false,
   tripRemindersEnabled: false,
   placesPhotosEnabled: true,
   placesAutocompleteEnabled: true,
   placesDetailsEnabled: true,
+  placesEnrichEnabled: true,
+  // Fail-closed: an old server sends no flag and nothing is logged.
+  placeShadowEnabled: false,
 
   login: async (email: string, password: string, rememberMe?: boolean) => {
     authSequence++
@@ -118,6 +154,7 @@ export const useAuthStore = create<AuthState>()(
       set({
         user: data.user,
         isAuthenticated: true,
+        loggingOut: false,
         isLoading: false,
         error: null,
       })
@@ -143,6 +180,7 @@ export const useAuthStore = create<AuthState>()(
       set({
         user: data.user,
         isAuthenticated: true,
+        loggingOut: false,
         isLoading: false,
         error: null,
       })
@@ -168,6 +206,7 @@ export const useAuthStore = create<AuthState>()(
       set({
         user: data.user,
         isAuthenticated: true,
+        loggingOut: false,
         isLoading: false,
         error: null,
       })
@@ -186,7 +225,16 @@ export const useAuthStore = create<AuthState>()(
   logout: async () => {
     // 1. Gate first so any in-flight flush/syncAll bails before we wipe the DB.
     setAuthed(false)
-    set({ isAuthenticated: false })
+    // Flagged in the same update that drops the session: clearing isAuthenticated
+    // re-renders ProtectedRoute for whatever page is still on screen, and without
+    // this it would stamp a ?redirect= back to it — which then beats the user's
+    // startup destination on the next login.
+    set({ isAuthenticated: false, loggingOut: true })
+    // The same fact, in the one place that survives ProtectedRoute's stateless
+    // <Navigate replace> and a full document load — without it an OIDC-only
+    // install silently signs the user straight back in (#2123). Set here rather
+    // than at the call sites so all seven are covered at once.
+    markSignedOut()
     // 2. Stop background sync triggers (30s interval, WS pre-reconnect hook, listeners).
     unregisterSyncTriggers()
     // 3. Tear down the live connection.
@@ -195,6 +243,21 @@ export const useAuthStore = create<AuthState>()(
     // Drop the per-device appearance snapshot so the next user on a shared
     // browser doesn't get a pre-paint flash of this user's theme.
     clearAppearanceSnapshot()
+    // Same reason for the brokered plugin session state: it is keyed by user id,
+    // but sessionStorage outlives a logout within the tab.
+    clearAllPluginSessions()
+    // And the startup-destination mirror, or the next account on this browser
+    // gets bounced into a trip it may not even be able to see.
+    forgetStartDestination()
+    // Likewise the language mirror: the login page only overrides it when the
+    // browser language is one TREK ships, so otherwise the next user here stays
+    // in the previous account's language, launch after launch.
+    forgetServerLanguage()
+    // And work-offline, for the same reason with sharper teeth: the switch lives
+    // in localStorage, step 6 below deletes the offline database it reads from,
+    // and the next account would come up believing it is offline over a working
+    // connection, with nothing cached to answer from.
+    setForcedOffline(false)
     // 4. Tell server to clear the httpOnly cookie (best-effort).
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
     // 5. Clear service worker caches containing sensitive data.
@@ -225,6 +288,7 @@ export const useAuthStore = create<AuthState>()(
       set({
         user: data.user,
         isAuthenticated: true,
+        loggingOut: false,
         isLoading: false,
         authCheckFailed: false,
       })
@@ -247,12 +311,27 @@ export const useAuthStore = create<AuthState>()(
         // Genuinely offline — keep the persisted session so the PWA serves cached
         // data without a scary error. This is the offline-first happy path.
         set({ isLoading: false })
+        // ...but the session still has to be marked live. onAuthSuccess is the
+        // only caller of setAuthed(true), and every repair path (the mutation
+        // queue's flush, syncAll, prepareForOffline) is gated on it. Skipping
+        // it here left a session that launched without network unable to sync
+        // for the rest of its life, even after the signal came back: the offline
+        // settings buttons spun and returned instantly having done nothing, and
+        // queued edits never uploaded (#2228). It also points the offline DB at
+        // this user's scoped database, so cached data is read from the right
+        // one rather than the anonymous fallback.
+        const cachedUser = get().user
+        if (cachedUser && get().isAuthenticated) await onAuthSuccess(cachedUser.id)
       } else {
         // Server erroring (5xx) or unreachable while we're online: keep the session
         // (don't eject the user over a transient outage), but flag it so the UI can
         // say "couldn't reach the server" instead of showing a blank, error-free
         // page that looks like the user's trips were lost. #1283
         set({ isLoading: false, authCheckFailed: true })
+        // Same reasoning as the offline branch: the session is kept, so it must
+        // be marked live or the sync layer stays dead until the next full login.
+        const cachedUser = get().user
+        if (cachedUser && get().isAuthenticated) await onAuthSuccess(cachedUser.id)
       }
     }
   },
@@ -275,6 +354,9 @@ export const useAuthStore = create<AuthState>()(
       set({ user: data.user })
       if ('maps_api_key' in keys) {
         set({ hasMapsKey: !!keys.maps_api_key })
+      }
+      if ('amap_api_key' in keys) {
+        set({ hasAmapKey: !!keys.amap_api_key })
       }
     } catch (err: unknown) {
       throw new Error(getApiErrorMessage(err, 'Error saving API keys'))
@@ -303,6 +385,12 @@ export const useAuthStore = create<AuthState>()(
     set((state) => ({ user: state.user ? { ...state.user, avatar_url: null } : null }))
   },
 
+  // Not persisted, unlike demoMode above: two installs can share a browser
+  // profile, and a stale 'this one is managed' would then take settings away
+  // from an admin on an install that never set the flag. Re-read on every boot
+  // from app-config, which is one request the app makes anyway.
+  setManaged: (val: boolean) => set({ managed: val }),
+
   setDemoMode: (val: boolean) => {
     if (val) localStorage.setItem('demo_mode', 'true')
     else localStorage.removeItem('demo_mode')
@@ -313,12 +401,15 @@ export const useAuthStore = create<AuthState>()(
   setIsPrerelease: (val: boolean) => set({ isPrerelease: val }),
   setAppVersion: (val: string) => set({ appVersion: val }),
   setHasMapsKey: (val: boolean) => set({ hasMapsKey: val }),
+  setHasAmapKey: (val: boolean) => set({ hasAmapKey: val }),
   setServerTimezone: (tz: string) => set({ serverTimezone: tz }),
   setAppRequireMfa: (val: boolean) => set({ appRequireMfa: val }),
   setTripRemindersEnabled: (val: boolean) => set({ tripRemindersEnabled: val }),
   setPlacesPhotosEnabled: (val: boolean) => set({ placesPhotosEnabled: val }),
   setPlacesAutocompleteEnabled: (val: boolean) => set({ placesAutocompleteEnabled: val }),
   setPlacesDetailsEnabled: (val: boolean) => set({ placesDetailsEnabled: val }),
+  setPlacesEnrichEnabled: (val: boolean) => set({ placesEnrichEnabled: val }),
+  setPlaceShadowEnabled: (val: boolean) => set({ placeShadowEnabled: val }),
 
   demoLogin: async () => {
     authSequence++
@@ -328,6 +419,7 @@ export const useAuthStore = create<AuthState>()(
       set({
         user: data.user,
         isAuthenticated: true,
+        loggingOut: false,
         isLoading: false,
         demoMode: true,
         error: null,

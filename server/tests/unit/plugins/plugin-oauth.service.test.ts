@@ -6,14 +6,19 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('../../../src/services/apiKeyCrypto', () => ({
+vi.mock('../../../src/nest/common/crypto/apiKeyCrypto', () => ({
   encrypt_api_key: (v: unknown) => (typeof v === 'string' ? `enc:${v}` : v),
   decrypt_api_key: (v: unknown) => (typeof v === 'string' && v.startsWith('enc:') ? v.slice(4) : v),
 }));
-vi.mock('../../../src/services/notifications', () => ({ getAppUrl: () => 'https://trek.example' }));
+vi.mock('../../../src/app-config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/app-config')>();
+  return { ...actual, getAppUrl: () => 'https://trek.example' };
+});
 
 const { getDb } = vi.hoisted(() => ({ getDb: { current: null as unknown } }));
 vi.mock('../../../src/db/database', () => ({ get db() { return getDb.current; } }));
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 
 // The token POST now runs through the SSRF guard (ssrfGuard.safeFetchLlm), which
 // resolves the host before fetching. Stub DNS so the fake provider.example host
@@ -25,7 +30,7 @@ vi.mock('node:dns/promises', () => {
 });
 
 import Database from 'better-sqlite3';
-import { PluginOAuthService } from '../../../src/nest/plugins/plugin-oauth.service';
+import { PluginOAuthService } from '../../../src/nest/plugins/oauth/plugin-oauth.service';
 
 const CFG = {
   oauth_authorize_url: 'https://provider.example/authorize',
@@ -39,6 +44,7 @@ function freshDb(cfg: Record<string, unknown> = CFG) {
   const d = new Database(':memory:');
   d.exec(`
     CREATE TABLE plugins (id TEXT PRIMARY KEY, config TEXT, status TEXT);
+    CREATE TABLE plugin_settings_fields (plugin_id TEXT, field_key TEXT, scope TEXT, secret INTEGER, default_value TEXT);
     CREATE TABLE plugin_oauth_tokens (plugin_id TEXT, user_id INTEGER, access_token TEXT, refresh_token TEXT, expires_at INTEGER, scope TEXT, updated_at TEXT, PRIMARY KEY (plugin_id, user_id));
     CREATE TABLE plugin_oauth_state (state TEXT PRIMARY KEY, plugin_id TEXT, user_id INTEGER, verifier TEXT, created_at INTEGER);
   `);
@@ -50,12 +56,32 @@ const NOW = 1_700_000_000_000;
 
 describe('PluginOAuthService', () => {
   let svc: PluginOAuthService;
-  beforeEach(() => { getDb.current = freshDb(); svc = new PluginOAuthService(); vi.restoreAllMocks(); dnsState.address = '93.184.216.34'; dnsState.family = 4; });
+  beforeEach(() => { getDb.current = freshDb(); svc = new PluginOAuthService(new DatabaseService(dbConn)); vi.restoreAllMocks(); dnsState.address = '93.184.216.34'; dnsState.family = 4; });
 
   it('providerConfig returns null unless every piece is present, decrypting the secrets', () => {
     expect(svc.providerConfig('p')).toMatchObject({ clientId: 'client-123', clientSecret: 'secret-abc', scopes: 'read write' });
     getDb.current = freshDb({ ...CFG, oauth_client_secret: '' });
-    expect(new PluginOAuthService().providerConfig('p')).toBeNull();
+    expect(new PluginOAuthService(new DatabaseService(dbConn)).providerConfig('p')).toBeNull();
+  });
+
+  it('providerConfig falls back to the manifest defaults for the endpoints the admin left unset', () => {
+    // A provider plugin ships its authorize/token URLs as defaults; the admin only ever
+    // types the client id/secret. Those two are secrets and can never carry a default.
+    const { oauth_authorize_url: _a, oauth_token_url: _t, oauth_scopes: _s, ...stored } = CFG;
+    getDb.current = freshDb(stored);
+    const d = getDb.current as import('better-sqlite3').Database;
+    const ins = d.prepare("INSERT INTO plugin_settings_fields (plugin_id, field_key, scope, secret, default_value) VALUES ('p', ?, 'instance', 0, ?)");
+    ins.run('oauth_authorize_url', JSON.stringify('https://provider.example/authorize'));
+    ins.run('oauth_token_url', JSON.stringify('https://provider.example/token'));
+    ins.run('oauth_scopes', JSON.stringify('read'));
+    svc = new PluginOAuthService(new DatabaseService(dbConn));
+    expect(svc.providerConfig('p')).toEqual({
+      authorizeUrl: 'https://provider.example/authorize',
+      tokenUrl: 'https://provider.example/token',
+      scopes: 'read',
+      clientId: 'client-123',
+      clientSecret: 'secret-abc',
+    });
   });
 
   it('startConnect builds a PKCE authorize URL + persists a single fresh state per user', () => {
@@ -76,18 +102,18 @@ describe('PluginOAuthService', () => {
 
   it('rejects a non-https / loopback / metadata / internal authorize endpoint', () => {
     getDb.current = freshDb({ ...CFG, oauth_authorize_url: 'http://provider.example/authorize' });
-    expect(() => new PluginOAuthService().startConnect('p', 42, NOW)).toThrow(/https/);
+    expect(() => new PluginOAuthService(new DatabaseService(dbConn)).startConnect('p', 42, NOW)).toThrow(/https/);
     getDb.current = freshDb({ ...CFG, oauth_token_url: 'https://127.0.0.1/token' });
-    expect(() => new PluginOAuthService().startConnect('p', 42, NOW)).toThrow(/loopback|private/);
+    expect(() => new PluginOAuthService(new DatabaseService(dbConn)).startConnect('p', 42, NOW)).toThrow(/loopback|private/);
     // IPv6-literal loopback must not slip past the fast-fail
     getDb.current = freshDb({ ...CFG, oauth_token_url: 'https://[::1]/token' });
-    expect(() => new PluginOAuthService().startConnect('p', 42, NOW)).toThrow(/loopback/);
+    expect(() => new PluginOAuthService(new DatabaseService(dbConn)).startConnect('p', 42, NOW)).toThrow(/loopback/);
     // cloud-metadata by literal is refused too
     getDb.current = freshDb({ ...CFG, oauth_token_url: 'https://169.254.169.254/token' });
-    expect(() => new PluginOAuthService().startConnect('p', 42, NOW)).toThrow(/loopback|metadata/);
+    expect(() => new PluginOAuthService(new DatabaseService(dbConn)).startConnect('p', 42, NOW)).toThrow(/loopback|metadata/);
     // an internal name suffix is refused
     getDb.current = freshDb({ ...CFG, oauth_token_url: 'https://idp.internal/token' });
-    expect(() => new PluginOAuthService().startConnect('p', 42, NOW)).toThrow(/local/);
+    expect(() => new PluginOAuthService(new DatabaseService(dbConn)).startConnect('p', 42, NOW)).toThrow(/local/);
   });
 
   it('completeCallback verifies state (single-use, user-bound, TTL), exchanges the code, encrypts tokens', async () => {

@@ -4,10 +4,11 @@ const { broadcastToUser } = vi.hoisted(() => ({ broadcastToUser: vi.fn() }));
 vi.mock('../../../../src/websocket', () => ({ broadcastToUser }));
 
 import { ImportJobsService } from '../../../../src/nest/booking-import/import-jobs.service';
+import { RealtimeService } from '../../../../src/nest/realtime/realtime.service';
 
 type Preview = ReturnType<typeof vi.fn>;
 function makeService(preview: Preview) {
-  return new ImportJobsService({ preview } as never);
+  return new ImportJobsService({ preview } as never, new RealtimeService());
 }
 const files = (n: number) => Array.from({ length: n }, (_, i) => ({ originalname: `f${i}.pdf` })) as never;
 const eventsFor = (jobId: string) => broadcastToUser.mock.calls.map((c) => c[1]).filter((p) => p.jobId === jobId);
@@ -71,5 +72,32 @@ describe('ImportJobsService', () => {
     expect(svc.get(a, 5)?.status).toBe('done');
     // B must not start before A finished — the per-user chain serializes them.
     expect(order).toEqual(['start:A.pdf', 'end:A.pdf', 'start:B.pdf', 'end:B.pdf']);
+  });
+
+  it('reports a parse failure as an error job rather than losing it', async () => {
+    // The catch arm had no case: a throw inside the off-request parse would have
+    // left the job stuck on 'running' and the widget spinning forever.
+    const preview = vi.fn(async () => { throw new Error('kitinerary exploded'); });
+    const svc = makeService(preview);
+
+    const id = svc.start('7', files(1), 'no-ai', 42);
+    await vi.waitFor(() => expect(svc.get(id, 42)?.status).toBe('error'));
+    expect(svc.get(id, 42)?.error).toBe('kitinerary exploded');
+    expect(eventsFor(id).some((p) => p.message === 'kitinerary exploded')).toBe(true);
+  });
+
+  it('turns a non-Error throw into a readable message', async () => {
+    const preview = vi.fn(async () => { throw 'just a string'; });
+    const svc = makeService(preview);
+
+    const id = svc.start('7', files(1), 'no-ai', 42);
+    await vi.waitFor(() => expect(svc.get(id, 42)?.status).toBe('error'));
+    expect(svc.get(id, 42)?.error).toBe('just a string');
+  });
+
+  it('hides a job from a different user', () => {
+    const svc = makeService(vi.fn(async () => ({ items: [] })));
+    const id = svc.start('7', files(1), 'no-ai', 42);
+    expect(svc.get(id, 99)).toBeUndefined();
   });
 });

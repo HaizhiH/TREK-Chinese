@@ -54,6 +54,7 @@ const journey: TranslationStrings = {
   'journey.frontpage.subtitle': '将旅行变成永远不会忘记的故事',
   'journey.frontpage.createJourney': '创建旅程',
   'journey.frontpage.activeJourney': '进行中的旅程',
+  'journey.frontpage.latestJourney': '最新的旅程',
   'journey.frontpage.allJourneys': '所有旅程',
   'journey.frontpage.journeys': '个旅程',
   'journey.frontpage.createNew': '创建新旅程',
@@ -75,6 +76,8 @@ const journey: TranslationStrings = {
   'journey.detail.backToJourney': '返回旅程',
   'journey.detail.syncedWithTrips': '已与旅行同步',
   'journey.detail.addEntry': '添加条目',
+  'journey.detail.jumpToTop': '回到顶部',
+  'journey.detail.jumpToLast': '跳到最后一条',
   'journey.detail.newEntry': '新建条目',
   'journey.detail.editEntry': '编辑条目',
   'journey.detail.noEntries': '还没有条目',
@@ -124,6 +127,11 @@ const journey: TranslationStrings = {
   'journey.editor.photoFirst': '第1张',
   'journey.editor.makeFirst': '设为第1张',
   'journey.editor.searching': '搜索中...',
+  'journey.editor.useCurrentLocation': '使用我的当前位置',
+  'journey.editor.locationPermissionDenied': '位置访问被拒绝。请在浏览器设置中允许后重试。',
+  'journey.editor.locationTimeout': '获取位置超时，请重试。',
+  'journey.editor.locationUnavailable': '无法确定您的位置。',
+  'journey.editor.locationInsecureContext': '定位需要安全连接（HTTPS）。',
   'journey.mood.amazing': '太棒了',
   'journey.mood.good': '不错',
   'journey.mood.neutral': '一般',
@@ -180,6 +188,9 @@ const journey: TranslationStrings = {
   'journey.settings.name': '名称',
   'journey.settings.subtitle': '副标题',
   'journey.settings.subtitlePlaceholder': '例如 泰国、越南和柬埔寨',
+  'journey.settings.tracks': 'GPX 轨迹',
+  'journey.settings.showTripTracks': '显示所有行程的 GPX 轨迹',
+  'journey.settings.showTripTracksHint': '在地图上绘制关联行程中的已记录路线。',
   'journey.settings.endJourney': '归档旅程',
   'journey.settings.reopenJourney': '恢复旅程',
   'journey.settings.archived': '旅程已归档',
@@ -226,5 +237,405 @@ const journey: TranslationStrings = {
   'journey.contributors.removeConfirm': '要将 {username} 从此旅程中移除吗？',
   'journey.contributors.removed': '已移除贡献者',
   'journey.contributors.removeFailed': '移除贡献者失败',
+  'journey.editor.externalPhotos': 'External photos', // en-fallback
+  'journey.editor.externalPhotosFor': 'Photos for {date}', // en-fallback
+  'journey.editor.externalPhotosNearby': 'Nearby photos first', // en-fallback
+  'journey.editor.externalPhotosNoLocation': 'All photos from this day', // en-fallback
+  'journey.editor.externalPhotosQueued': 'queued', // en-fallback
+  'journey.editor.externalPhotosUnavailable': 'No connected photo providers are available.', // en-fallback
+  'journey.editor.externalPhotosPartialFailed': '{failed} photo groups failed — save again to retry', // en-fallback
+  'journey.picker.day': 'This day', // en-fallback
+  'journey.studio.title': 'TREK Studio', // en-fallback
+  'journey.studio.open': 'Studio', // en-fallback
+  'journey.studio.openAria': 'Open the photo book studio', // en-fallback
+  'journey.studio.backToJourney': 'Back to the journey', // en-fallback
+  'journey.studio.format': 'Page format', // en-fallback
+  'journey.studio.formatA4Landscape': 'A4 landscape', // en-fallback
+  'journey.studio.formatA4Portrait': 'A4 portrait', // en-fallback
+  'journey.studio.formatSquare21': 'Square 21 × 21 cm', // en-fallback
+  'journey.studio.formatSquare30': 'Square 30 × 30 cm', // en-fallback
+  'journey.studio.pages': 'Pages', // en-fallback
+  'journey.studio.cover': 'Cover', // en-fallback
+  'journey.studio.inspector': 'Properties', // en-fallback
+  'journey.studio.inspectorEmpty': 'Select something on the page to edit it.', // en-fallback
+  'journey.studio.emptySpread': 'This spread is still empty', // en-fallback
+  'journey.studio.autoLayout': 'Auto layout', // en-fallback
+  'journey.studio.export': 'Export', // en-fallback
+  'journey.studio.day': '第',
+  'journey.studio.stations': '途经地',
+  'journey.studio.peersHere': '在线',
+  'journey.studio.folioAuto': '自动',
+  'journey.studio.exportLayout': '版式',
+  'journey.studio.exportPages': '单页',
+  'journey.studio.exportPagesHint': '每页一张，按阅读顺序排列。印厂要的就是这种。',
+  'journey.studio.exportSpreads': '跨页',
+  'journey.studio.exportSpreadsHint': '一次两页，和翻开书时一样。用来浏览。',
+  'journey.studio.exportFinishing': '后期',
+  'journey.studio.exportMarks': '裁切标记',
+  'journey.studio.exportMarksHint': '每条边加 {bleed} 毫米出血，并标出裁切位置',
+  'journey.studio.exportNote': '{sheets} 张 {width} × {height} 毫米。浏览器会把打印视图转成 PDF。',
+  'journey.studio.exportOpen': '打印视图',
+  'journey.studio.exportSave': '另存为 PDF',
+  'journey.studio.exportPreparing': '正在准备',
+  'journey.studio.exportSheetCount': '{count} 张',
+  'journey.studio.undo': 'Undo', // en-fallback
+  'journey.studio.redo': 'Redo', // en-fallback
+  'journey.studio.zoomIn': 'Zoom in', // en-fallback
+  'journey.studio.zoomOut': 'Zoom out', // en-fallback
+  'journey.studio.zoomFit': 'Fit to view', // en-fallback
+  'journey.studio.downloadSpread': '下载此跨页',
+  'journey.studio.downloadSpreadHint': '将此跨页的设计保存为文件（不含照片），便于分享或再次使用',
+  'journey.studio.importSpread': '导入',
+  'journey.studio.importSpreadHint': '从下载的设计文件添加一个跨页',
+  'journey.studio.importSpreadFailed': '该文件不是 TREK Studio 的跨页',
+  'journey.studio.desktopOnly': 'Studio needs a bigger screen', // en-fallback
+  'journey.studio.desktopOnlyHint': '排一本书需要足够的地方，所以 Studio 只在电脑上使用，生成 PDF 也是。旅程的其他功能在这里照常可用。', // en-fallback
+  'journey.studio.formatA5Landscape': 'A5 landscape', // en-fallback
+  'journey.studio.bookView': 'Book view', // en-fallback
+  'journey.studio.multiple': 'Several', // en-fallback
+  'journey.studio.kind.photo': 'Photo', // en-fallback
+  'journey.studio.kind.text': 'Text', // en-fallback
+  'journey.studio.kind.shape': 'Shape', // en-fallback
+  'journey.studio.position': 'Position', // en-fallback
+  'journey.studio.width': 'W', // en-fallback
+  'journey.studio.height': 'H', // en-fallback
+  'journey.studio.text': 'Text', // en-fallback
+  'journey.studio.typography': 'Type', // en-fallback
+  'journey.studio.leading': 'Line', // en-fallback
+  'journey.studio.colour': 'Colour', // en-fallback
+  'journey.studio.autoColour': '自动',
+  'journey.studio.countryNames': '名称',
+  'journey.studio.crop': 'Crop', // en-fallback
+  'journey.studio.look': 'Look', // en-fallback
+  'journey.studio.radius': 'Corner', // en-fallback
+  'journey.studio.shape': 'Shape', // en-fallback
+  'journey.studio.arrange': 'Arrange', // en-fallback
+  'journey.studio.toFront': 'Bring to front', // en-fallback
+  'journey.studio.forward': 'Bring forward', // en-fallback
+  'journey.studio.backward': 'Send backward', // en-fallback
+  'journey.studio.toBack': 'Send to back', // en-fallback
+  'journey.studio.lock': 'Lock', // en-fallback
+  'journey.studio.unlock': 'Unlock', // en-fallback
+  'journey.studio.delete': 'Delete', // en-fallback
+  'journey.studio.pageHint': 'Page', // en-fallback
+  'journey.studio.boundHint': 'Follows the journal entry. Editing it here breaks that link.', // en-fallback
+  'journey.studio.fit.cover': 'Fill', // en-fallback
+  'journey.studio.fit.contain': 'Fit', // en-fallback
+  'journey.studio.filter.none': 'Original', // en-fallback
+  'journey.studio.filter.bw': 'Black & white', // en-fallback
+  'journey.studio.filter.warm': 'Warm', // en-fallback
+  'journey.studio.shapeKind.rect': 'Rectangle', // en-fallback
+  'journey.studio.shapeKind.ellipse': 'Ellipse', // en-fallback
+  'journey.studio.focalHint': 'Drag the point to choose what stays in frame.', // en-fallback
+  'journey.studio.backCover': 'Back cover', // en-fallback
+  'journey.studio.sections': 'Sections', // en-fallback
+  'journey.studio.content': 'Content', // en-fallback
+  'journey.studio.elements': 'Elements', // en-fallback
+  'journey.studio.templates': 'Layouts', // en-fallback
+  'journey.studio.photos': 'Photos', // en-fallback
+  'journey.studio.entries': 'Entries', // en-fallback
+  'journey.studio.addToPage': 'Add to this page', // en-fallback
+  'journey.studio.noPhotos': 'This journey has no photos yet.', // en-fallback
+  'journey.studio.untitled': 'Untitled', // en-fallback
+  'journey.studio.addTitle': 'Title', // en-fallback
+  'journey.studio.addStory': 'Story', // en-fallback
+  'journey.studio.addPlace': 'Place', // en-fallback
+  'journey.studio.shapes': 'Shapes', // en-fallback
+  'journey.studio.frames': '相框', // en-fallback
+  'journey.studio.emptyFrame': 'Empty frame', // en-fallback
+  'journey.studio.frameHint': 'An empty frame marks where a picture goes. Drop one on it from Content.', // en-fallback
+  'journey.studio.shapeKind.line': 'Line', // en-fallback
+  'journey.studio.styleTitle': 'Heading', // en-fallback
+  'journey.studio.styleSubtitle': 'Subheading', // en-fallback
+  'journey.studio.styleBody': 'Body text', // en-fallback
+  'journey.studio.styleCaption': 'Caption', // en-fallback
+  'journey.studio.sampleHeading': 'A heading', // en-fallback
+  'journey.studio.sampleSubheading': 'A subheading', // en-fallback
+  'journey.studio.sampleBody': 'Write something about this day.', // en-fallback
+  'journey.studio.sampleCaption': 'Caption', // en-fallback
+  'journey.studio.templatesCoverHint': 'Layouts apply to the inside spreads. The cover and the back are designed on their own.', // en-fallback
+  'journey.studio.tpl.heroStory': 'Hero and story', // en-fallback
+  'journey.studio.tpl.fullBleed': 'One picture, full spread', // en-fallback
+  'journey.studio.tpl.twoUp': 'Two full pages', // en-fallback
+  'journey.studio.tpl.grid4': 'Four up', // en-fallback
+  'journey.studio.tpl.grid6': 'Six up', // en-fallback
+  'journey.studio.tpl.strip': 'Strip and text', // en-fallback
+  'journey.studio.tpl.quietText': 'Text only', // en-fallback
+  'journey.studio.tpl.portraitPair': 'A pair', // en-fallback
+  'journey.studio.dropPhotoHere': '将照片拖放\n到这里',
+  'journey.studio.searchContent': 'Search photos and entries', // en-fallback
+  'journey.studio.noMatches': 'Nothing matches that.', // en-fallback
+  'journey.studio.decorations': 'Decoration', // en-fallback
+  'journey.studio.quoteMark': 'Quotation mark', // en-fallback
+  'journey.studio.circleOutline': 'Outlined circle', // en-fallback
+  'journey.studio.roundFrame': 'Rounded frame', // en-fallback
+  'journey.studio.shapeKind.rounded': 'Rounded rectangle', // en-fallback
+  'journey.studio.shapeKind.triangle': 'Triangle', // en-fallback
+  'journey.studio.shapeKind.outline': 'Outline only', // en-fallback
+  'journey.studio.travel': '旅程',
+  'journey.studio.travelEmpty': '这次旅程的数据尚未就绪。',
+  'journey.studio.grids': '网格',
+  'journey.studio.gridHint': '网格会放置一组空相框。从“内容”中拖照片到上面。',
+  'journey.studio.lines': '线条',
+  'journey.studio.frameStyles': '相框样式',
+  'journey.studio.frameShapes': '相框形状',
+  'journey.studio.plainFrame': '无',
+  'journey.studio.polaroidFrame': '拍立得',
+  'journey.studio.whiteFrame': '白边',
+  'journey.studio.shadowFrame': '投影',
+  'journey.studio.filmFrame': '胶片',
+  'journey.studio.tapeFrame': '胶带',
+  'journey.studio.shapeGroup.basic': '基本',
+  'journey.studio.shapeGroup.polygons': '多边形',
+  'journey.studio.shapeGroup.stars': '星形',
+  'journey.studio.shapeGroup.arrows': '箭头',
+  'journey.studio.shapeGroup.speech': '对话框',
+  'journey.studio.shapeGroup.travel': '旅行',
+  'journey.studio.shapeGroup.decor': '装饰',
+  'journey.studio.shapeGroup.banners': '横幅',
+  'journey.studio.summary': '概览',
+  'journey.studio.tripSummary': '旅程概览',
+  'journey.studio.statsRow': '一行',
+  'journey.studio.statsFull': '全部',
+  'journey.studio.routeMap': '路线地图',
+  'journey.studio.mapStyle.minimal': '极简',
+  'journey.studio.mapStyle.outline': '轮廓',
+  'journey.studio.mapStyle.paper': '纸质',
+  'journey.studio.mapStyle.dark': '深色',
+  'journey.studio.countries': '国家',
+  'journey.studio.countryList': '国家列表',
+  'journey.studio.countryGrid': '国家网格',
+  'journey.studio.noCountries': '尚未确定这次旅程的国家。',
+  'journey.studio.noRoute': '尚无带坐标的停留点。',
+  'journey.studio.marks': '标记',
+  'journey.studio.dateMark': '日期',
+  'journey.studio.dayMark': '天数计数',
+  'journey.studio.dayWord': 'DAY',
+  'journey.studio.coordsMark': '坐标',
+  'journey.studio.coordsDms': '度分秒',
+  'journey.studio.coordsDecimal': '十进制',
+  'journey.studio.flagMark': '国旗',
+  'journey.studio.distanceMark': '距离',
+  'journey.studio.metric.distance': '距离',
+  'journey.studio.metric.days': '天数',
+  'journey.studio.metric.steps': '停留点',
+  'journey.studio.metric.photos': '照片',
+  'journey.studio.metric.countries': '国家',
+  'journey.studio.metric.places': '地点',
+  'journey.studio.metric.furthest': '最远',
+  'journey.studio.kind.map': '地图',
+  'journey.studio.kind.stats': '数据',
+  'journey.studio.kind.countries': '国家',
+  'journey.studio.kind.badge': '标记',
+  'journey.studio.kind.list': '列表',
+  'journey.studio.kind.icon': '图标',
+  'journey.studio.duplicate': '复制',
+  'journey.studio.style': '样式',
+  'journey.studio.shows': '显示',
+  'journey.studio.size': '字号',
+  'journey.studio.weight': '字重',
+  'journey.studio.italic': '斜体',
+  'journey.studio.tracking': '字距',
+  'journey.studio.rotation': '旋转',
+  'journey.studio.opacity': '不透明度',
+  'journey.studio.fill': '填充色',
+  'journey.studio.fillOn': '填充',
+  'journey.studio.stroke': '描边色',
+  'journey.studio.strokeWidth': '粗细',
+  'journey.studio.gradient': '渐隐',
+  'journey.studio.gradientDown': '向下',
+  'journey.studio.gradientUp': '向上',
+  'journey.studio.showIcons': '图标',
+  'journey.studio.mapFit': '范围',
+  'journey.studio.mapPadding': '留白',
+  'journey.studio.mapShape': '形状',
+  'journey.studio.align.left': '靠左',
+  'journey.studio.align.center': '居中',
+  'journey.studio.align.right': '靠右',
+  'journey.studio.markStyle.plain': '普通',
+  'journey.studio.markStyle.chip': '实心',
+  'journey.studio.markStyle.outline': '线框',
+  'journey.studio.markStyle.stacked': '堆叠',
+  'journey.studio.icon': '图标',
+  'journey.studio.iconAndLabel': '图标和文字',
+  'journey.studio.iconOnly': '仅图标',
+  'journey.studio.labelOnly': '仅文字',
+  'journey.studio.icons': '图标',
+  'journey.studio.iconsForTravel': '旅行常用',
+  'journey.studio.iconsAll': '全部图标',
+  'journey.studio.searchIcons': '搜索图标',
+  'journey.studio.lineWidth': '粗细',
+  'journey.studio.mask': '按形状裁剪',
+  'journey.studio.maskNone': '无',
+  'journey.studio.frameStyle': '相框',
+  'journey.studio.mapLayers': '图层',
+  'journey.studio.showLand': '国家',
+  'journey.studio.showRoute': '路线',
+  'journey.studio.showPins': '停留点',
+  'journey.studio.showLabels': '标签',
+  'journey.studio.units': '单位',
+  'journey.studio.metrics': '数据',
+  'journey.studio.layout': '布局',
+  'journey.studio.layoutGrid': '网格',
+  'journey.studio.layoutRow': '行',
+  'journey.studio.layoutColumn': '列',
+  'journey.studio.layoutList': '列表',
+  'journey.studio.showOutline': '轮廓',
+  'journey.studio.showFlag': '国旗',
+  'journey.studio.showName': '名称',
+  'journey.studio.textScale': '文字大小',
+  'journey.studio.accent': '强调色',
+  'journey.studio.refresh': '从旅程更新',
+  'journey.studio.staleHint': '自这些数据生成以来，旅程已发生变化。',
+  'journey.studio.align': '对齐',
+  'journey.studio.filter.cool': '冷色',
+  'journey.studio.filter.fade': '褪色',
+  'journey.studio.filter.contrast': '浓烈',
+  'journey.studio.strokeStyle': '描边',
+  'journey.studio.strokeSolid': '实线',
+  'journey.studio.strokeDashed': '虚线',
+  'journey.studio.strokeDotted': '点线',
+  'journey.studio.singleFigures': '单个数据',
+  'journey.studio.addPage': '添加页面',
+  'journey.studio.addPageAfter': '在此后插入页面',
+  'journey.studio.duplicatePage': '复制页面',
+  'journey.studio.deletePage': '删除页面',
+  'journey.studio.movePageUp': '前移',
+  'journey.studio.movePageDown': '后移',
+  'journey.studio.beta': 'Beta',
+  'journey.studio.addProsCons': '优缺点',
+  'journey.studio.showMarks': '符号',
+  'journey.studio.formatCustom': '自定义尺寸',
+  'journey.studio.document': '文档',
+  'journey.studio.pageNumbers': '页码',
+  'journey.studio.pageNumbersOn': '开',
+  'journey.studio.pageNumbersOff': '关',
+  'journey.studio.folio.outer': '外侧',
+  'journey.studio.folio.inner': '内侧',
+  'journey.studio.folio.centre': '居中',
+  'journey.studio.folioStart': '起始页码',
+  'journey.studio.folioMargin': '页边距',
+  'journey.studio.relayoutSpread': '本页',
+  'journey.studio.relayoutSpreadHint': '根据条目重新排版',
+  'journey.studio.relayoutSpreadNone': '此页不是由条目生成的',
+  'journey.studio.relayoutBook': '整本书',
+  'journey.studio.relayoutBookHint': '替换所有页面 — 可撤销',
+  'journey.studio.tpl.coverFull': '出血满版',
+  'journey.studio.tpl.coverBand': '图片加色带',
+  'journey.studio.tpl.coverWindow': '加框',
+  'journey.studio.tpl.coverQuiet': '纯文字',
+  'journey.studio.tpl.coverHalf': '上下两半',
+  'journey.studio.tpl.fullText': '图片与故事',
+  'journey.studio.tpl.grid9': '九宫格',
+  'journey.studio.tpl.mosaic': '马赛克',
+  'journey.studio.tpl.bandQuote': '文字居中',
+  'journey.studio.tpl.staggerFour': '四张错落',
+  'journey.studio.weightMissing': '该字体没有此字重',
+  'journey.studio.mapSource': '地图来源',
+  'journey.studio.mapSourceVector': '轮廓',
+  'journey.studio.mapSourceRelief': '地形晕渲',
+  'journey.studio.mapSourceSatellite': '卫星影像',
+  'journey.studio.mapSourceSatelliteHint': '无云的 Sentinel-2 影像，标注来源即可免费打印。清晰到城市街道。',
+  'journey.studio.routeLook': '路线线条',
+  'journey.studio.routeStyle': '画法',
+  'journey.studio.routePlain': '单线',
+  'journey.studio.routeDrawn': '地图册',
+  'journey.studio.routeArc': '长途路段',
+  'journey.studio.routeStraight': '直线',
+  'journey.studio.routeBow': '弧线',
+  'journey.studio.routeDashArcs': '弧线段用虚线',
+  'journey.studio.mapStops': '停留点',
+  'journey.studio.pinDot': '圆点',
+  'journey.studio.pinPhoto': '照片',
+  'journey.studio.pinPhotoNone': '这些停留点还没有照片，因此以圆点显示。',
+  'journey.studio.roads': '道路',
+  'journey.studio.roadsFetch': '沿道路绘制',
+  'journey.studio.roadsFollow': '沿道路',
+  'journey.studio.roadsDirect': '直连',
+  'journey.studio.recommended': '推荐',
+  'journey.studio.bleed': '出血',
+  'journey.studio.safeArea': '安全区',
+  'journey.studio.roadsAgain': '重新获取',
+  'journey.studio.roadsClear': '清除',
+  'journey.studio.roadsBusy': '获取中',
+  'journey.studio.roadsHint': '向路线服务查询每段行程实际行驶的路线。长途路段保持原样。',
+  'journey.studio.roadsHave': '道路数据已保存在这本书里，离线也能打印出同样的线条。',
+  'journey.studio.mapSourceReliefHint': 'NASA 地形晕渲影像，可免费打印。适合国家或大洲，用于单个城市则过于粗糙。',
+  'journey.studio.mapPrintDpi': '打印分辨率约',
+  'journey.studio.mapPrintDpiLow': '这个尺寸下会发虚，可扩大取景范围或改用其他来源',
+  'journey.studio.mapPerTrip': '按旅行分开',
+  'journey.studio.mapWholeJourney': '整个旅程',
+  'journey.studio.mapScope': '显示',
+  'journey.studio.mapSourceTiles': '地图瓦片',
+  'journey.studio.mapSourceStatic': 'Mapbox',
+  'journey.studio.mapSourceHint': '渲染时获取，并附带来源标注打印',
+  'journey.studio.mapZoom': '缩放',
+  'journey.studio.mapFraming': '取景',
+  'journey.studio.mapFitStops': '停留点',
+  'journey.studio.mapFitCountry': '整个国家',
+  'journey.studio.mapPadTight': '紧凑',
+  'journey.studio.mapPadNormal': '普通',
+  'journey.studio.mapPadWide': '宽松',
+  'journey.studio.mapPadFar': '很宽松',
+  'journey.studio.mapClipRect': '带边框',
+  'journey.studio.mapClipCountry': '按形状裁切',
+  'journey.studio.mapClipNeedsCountry': '需要一个国家来裁切',
+  'journey.studio.mapCutVector': '裁切',
+  'journey.studio.mapCutTiles': '裁切地图',
+  'journey.studio.mapZoomAuto': '自适应',
+  'journey.studio.saving': '正在保存',
+  'journey.studio.saved': '已保存',
+  'journey.studio.saveFailed': '未保存',
+  'journey.studio.saveRetry': '重试',
+  'journey.studio.saveConflict': '其他人保存了这本书',
+  'journey.studio.saveTakeTheirs': '用他们的',
+  'journey.studio.saveKeepMine': '用我的',
+  'journey.studio.rotate': '旋转',
+  'journey.studio.rotateLeft': '向左旋转',
+  'journey.studio.rotateRight': '向右旋转',
+  'journey.studio.saveReadOnly': '只读，不会保存',
+  'journey.studio.filterPhotos': '筛选照片',
+  'journey.studio.filterAll': '全部照片',
+  'journey.studio.filterLoose': '不属于任何条目',
+  'journey.studio.filterRecent': '刚刚上传',
+  'journey.studio.filterThisPage': '当前页',
+  'journey.studio.entryPhotos': '照片',
+  'journey.studio.noEntryPhotos': '这个条目还没有照片。',
+  'journey.studio.noLoosePhotos': '这里的每张照片都属于某个条目。',
+  'journey.studio.uploadPhotos': '上传照片',
+  'journey.studio.uploadHint': '将图片拖放到这里，或点击选择',
+  'journey.studio.uploadToEntry': '新图片会加入这个条目',
+  'journey.studio.uploadToGallery': '新图片会加入图库',
+  'journey.studio.uploading': '正在上传第 {done} 张，共 {total} 张',
+  'journey.studio.dropFilesHere': '松开以添加图片',
+  'journey.studio.videosSkipped': '已跳过 {count} 个视频。书里只放图片。',
+  'journey.studio.fillPage': '铺满页面',
+  'journey.studio.fillSpread': '铺满跨页',
+  'journey.studio.fillHint': '将图片拉伸至整页（含出血），并置于所有内容之后。',
+  'journey.studio.stops': '停留点',
+  'journey.studio.stopsHint': '每个停留点都会计入路线、距离和国家。关掉某个停留点即可将其排除，例如你的出发机场。',
+  'journey.studio.stopOn': '计入',
+  'journey.studio.stopOff': '已排除',
+  'journey.studio.stopToggle': '计入此停留点',
+  'journey.studio.stopsFailed': '无法更改该停留点。',
+  'journey.editor.statsExcluded': '不计入路线',
+  'journey.editor.statsExcludedHint': '该停留点仍保留在日志中，但不计入 Studio 中的距离、国家和地图。',
+  'journey.entry.offRoute': '不在路线内',
+  'journey.suggestions.dismiss': '忽略这条建议',
+  'journey.suggestions.dismissed': '已忽略该建议',
+  'journey.suggestions.restore': '找回已忽略的建议',
+  'journey.suggestions.restoreCount': '已忽略的建议（{count}）',
+  'journey.suggestions.restored': '{count} 条建议已找回',
+  'journey.detail.addOnThisDay': '在这一天添加记录',
+  'journey.detail.jumpToDay': '跳转到 {date}',
+  'journey.detail.searchPlaceholder': '在这段旅程中搜索',
+  'journey.detail.searchEmpty': '没有记录匹配“{query}”',
+  'journey.settings.entryFields': '记录字段',
+  'journey.settings.entryFieldsHint': '关掉这段旅程用不到的部分。已经写下的内容不会丢失。',
+  'journey.settings.showVerdict': '优点与不足',
+  'journey.settings.showMood': '心情',
+  'journey.settings.showWeather': '天气',
+  'journey.entry.suggestion': '建议',
+  'journey.editor.addDetails': '＋详情',
 };
 export default journey;

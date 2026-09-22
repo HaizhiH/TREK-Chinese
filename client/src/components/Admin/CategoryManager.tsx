@@ -56,8 +56,8 @@ export default function CategoryManager() {
     setEditingId(null)
   }
 
+  // The Save button carries disabled={… || !form.name.trim()}, so the name is set here.
   const handleSave = async () => {
-    if (!form.name.trim()) { toast.error(t('categories.toast.nameRequired')); return }
     setIsSaving(true)
     try {
       if (editingId) {
@@ -192,9 +192,9 @@ export default function CategoryManager() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="font-semibold text-content">{t('categories.title')}</h2>
-          <p className="text-xs mt-1 text-content-muted">{t('categories.subtitle')}</p>
+          <p className="mt-1 text-caption text-content-faint">{t('categories.subtitle')}</p>
         </div>
-        <button onClick={handleStartCreate}
+        <button type="button" onClick={handleStartCreate}
           className="flex items-center gap-2 bg-slate-900 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-slate-700 text-sm font-medium">
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">{t('categories.new')}</span>
@@ -235,11 +235,11 @@ export default function CategoryManager() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => handleStartEdit(cat)}
+                      <button type="button" onClick={() => handleStartEdit(cat)}
                         className="p-1.5 text-gray-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(cat.id)}
+                      <button type="button" onClick={() => handleDelete(cat.id)}
                         className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
                         <Trash2 className="w-4 h-4" />
                       </button>

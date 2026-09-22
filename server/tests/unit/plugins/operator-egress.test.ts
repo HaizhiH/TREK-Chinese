@@ -20,13 +20,17 @@ const { testDb, dbMock } = vi.hoisted(() => {
   return { testDb: db, dbMock: { db, closeDb: () => {}, reinitialize: () => {}, canAccessTrip: () => null } };
 });
 vi.mock('../../../src/db/database', () => dbMock);
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 vi.mock('../../../src/config', () => ({ JWT_SECRET: 'x'.repeat(40), ENCRYPTION_KEY: 'a'.repeat(64), updateJwtSecret: () => {} }));
 
 import { createTables } from '../../../src/db/schema';
 import { runMigrations } from '../../../src/db/migrations';
 import { PluginRuntimeService } from '../../../src/nest/plugins/plugin-runtime.service';
+import { createPluginRuntime } from '../../helpers/plugin-host';
 import { parseManifest, ManifestError } from '../../../src/nest/plugins/install/manifest';
 import { makeHostAllow } from '../../../src/nest/plugins/runtime/egress-policy';
+import { AddonsService } from '../../../src/nest/addons/addons.service';
 
 function install(id: string, operatorEgress: boolean, perms: string[] = ['http:outbound:gotify.net']) {
   testDb.prepare(
@@ -42,7 +46,7 @@ beforeEach(() => {
   testDb.prepare('DELETE FROM plugins').run();
   testDb.prepare('DELETE FROM plugin_egress_hosts').run();
   testDb.prepare('DELETE FROM plugin_actions').run();
-  rt = new PluginRuntimeService();
+  rt = createPluginRuntime(new DatabaseService(dbConn));
 });
 
 describe('operator-supplied egress hosts', () => {
@@ -123,15 +127,17 @@ describe('operator-supplied egress hosts', () => {
 });
 
 describe('settings-page actions (runtime)', () => {
-  function declareAction(id: string, key: string) {
-    testDb.prepare('INSERT OR REPLACE INTO plugin_actions (plugin_id, action_key, label, hint, danger, sort_order) VALUES (?, ?, ?, NULL, 0, 0)')
-      .run(id, key, key);
+  function declareAction(id: string, key: string, scope: 'user' | 'instance' = 'user') {
+    testDb.prepare('INSERT OR REPLACE INTO plugin_actions (plugin_id, action_key, label, hint, danger, scope, sort_order) VALUES (?, ?, ?, NULL, 0, ?, 0)')
+      .run(id, key, key, scope);
   }
 
-  it('ACT-001 — actionsOf returns the declared descriptors', () => {
+  it('ACT-001 — actionsOf returns the declared descriptors of ONE scope', () => {
     install('p', false);
     declareAction('p', 'testConnection');
-    expect(rt.actionsOf('p')).toEqual([{ key: 'testConnection', label: 'testConnection', hint: undefined, danger: false }]);
+    declareAction('p', 'purge', 'instance');
+    expect(rt.actionsOf('p', 'user')).toEqual([{ key: 'testConnection', label: 'testConnection', hint: undefined, danger: false, scope: 'user' }]);
+    expect(rt.actionsOf('p', 'instance')).toEqual([{ key: 'purge', label: 'purge', hint: undefined, danger: false, scope: 'instance' }]);
   });
 
   it('ACT-002 — invoking an action the plugin never declared is REFUSED', async () => {
@@ -139,13 +145,21 @@ describe('settings-page actions (runtime)', () => {
     declareAction('p', 'testConnection');
     // The key is caller-supplied (it comes off the URL), so the host must check it
     // against the manifest rather than forwarding whatever it is handed to the child.
-    await expect(rt.invokeAction('p', 'somethingElse', 1)).rejects.toThrow(/did not declare action/);
-    await expect(rt.invokeAction('p', '__proto__', 1)).rejects.toThrow(/did not declare action/);
+    await expect(rt.invokeAction('p', 'somethingElse', 1, 'user')).rejects.toThrow(/did not declare action/);
+    await expect(rt.invokeAction('p', '__proto__', 1, 'user')).rejects.toThrow(/did not declare action/);
   });
 
   it('ACT-003 — a plugin with no actions can never be invoked', async () => {
     install('p', false);
-    await expect(rt.invokeAction('p', 'testConnection', 1)).rejects.toThrow(/did not declare action/);
+    await expect(rt.invokeAction('p', 'testConnection', 1, 'user')).rejects.toThrow(/did not declare action/);
+  });
+
+  it('ACT-004 — a key declared in the OTHER scope is refused (the user route cannot fire an admin button)', async () => {
+    install('p', false);
+    declareAction('p', 'purge', 'instance');
+    declareAction('p', 'testConnection', 'user');
+    await expect(rt.invokeAction('p', 'purge', 1, 'user')).rejects.toThrow(/did not declare action "purge" in scope user/);
+    await expect(rt.invokeAction('p', 'testConnection', 1, 'instance')).rejects.toThrow(/did not declare action "testConnection" in scope instance/);
   });
 });
 
@@ -156,13 +170,20 @@ describe('the admin list surfaces operator egress (so the chip can be shown)', (
     install('gotify', true);
     install('plain', false);
 
-    const before = new PluginsService().list().plugins;
+    // list() resolves required-addon dependencies through AddonsService, so it gets a real
+    // one over the same DB. These fixtures declare no dependencies, so it is never consulted.
+    const listPlugins = () => {
+      const dbs = new DatabaseService(dbConn);
+      return new PluginsService(dbs, new AddonsService(dbs)).list().plugins;
+    };
+
+    const before = listPlugins();
     expect(before.find(p => p.id === 'gotify')).toMatchObject({ operatorEgress: true, egressHostCount: 0 });
     // A plugin that never asked for it must never invite the admin to add hosts.
     expect(before.find(p => p.id === 'plain')).toMatchObject({ operatorEgress: false, egressHostCount: 0 });
 
     await rt.setOperatorEgressHosts('gotify', ['a.example.com', 'b.example.com']);
-    const after = new PluginsService().list().plugins;
+    const after = listPlugins();
     expect(after.find(p => p.id === 'gotify')!.egressHostCount).toBe(2);
     delete process.env.TREK_PLUGINS_ENABLED;
   });

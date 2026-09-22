@@ -69,6 +69,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': '크루즈',
   'reservations.type.event': '이벤트',
   'reservations.type.tour': '투어',
+  'reservations.type.parking': '주차',
   'reservations.type.other': '기타',
   'reservations.type.bus': '버스',
   'reservations.type.ferry': '페리',
@@ -126,6 +127,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': '도착',
   'reservations.span.inTransit': '이동 중',
   'reservations.span.pickup': '픽업',
+  'reservations.span.dropOff': '입차',
   'reservations.span.return': '반납',
   'reservations.span.active': '활성',
   'reservations.span.start': '시작',
@@ -160,6 +162,8 @@ const reservations: TranslationStrings = {
   'reservations.airtrail.syncedHint': 'AirTrail에서 동기화됨 — 수정 사항이 양방향으로 동기화됩니다.',
   'reservations.airtrail.notSynced': '동기화되지 않음',
   'reservations.airtrail.notSyncedHint': '이 항공편은 AirTrail에서 삭제되어 더 이상 동기화되지 않습니다.',
+  'reservations.airtrail.layoverHint':
+    'AirTrail에서 가져왔습니다. 경유가 있는 여러 구간 항공편은 동기화할 단일 AirTrail 항공편이 없으므로 일회성 가져오기로 유지됩니다.',
   'reservations.airtrail.loadError': 'AirTrail 항공편을 불러올 수 없습니다.',
   'reservations.airtrail.imported': '{count}개 항공편을 가져왔습니다',
   'reservations.airtrail.skippedDuplicate': '{count}개는 이미 이 여행에 있어 건너뛰었습니다',
@@ -179,5 +183,8 @@ const reservations: TranslationStrings = {
   'reservations.removeExpense': 'Remove expense',
   'reservations.urlLabel': '링크',
   'reservations.urlPlaceholder': 'https://...',
+  'reservations.travelers.label': '동행자',
+  'reservations.travelers.assign': '동행자 지정',
+  'reservations.travelers.none': '아직 여행 멤버가 없습니다.',
 };
 export default reservations;

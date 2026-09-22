@@ -6,15 +6,49 @@ import { z } from 'zod';
  * Place API contract — single source of truth for the /api/trips/:tripId/places
  * endpoints (place pool CRUD, GPX/map/list imports, image search, bulk delete).
  *
- * Trip-scoped; mutations use the 'place_edit' permission. The legacy route
- * (server/src/routes/places.ts) wraps placeService and fires the journey
+ * Trip-scoped; mutations use the 'place_edit' permission.
+ * server/src/nest/places/places.controller.ts fires the journey
  * place-created/updated/deleted hooks. Place rows are wide and provider-derived,
  * so create/update payloads stay mostly open with `name` pinned; string fields
- * are capped (name 200, description 2000, address 500, notes 2000) by the legacy
- * validateStringLengths, reproduced in the controller.
+ * are capped (name 200, description 2000, address 500, notes 2000) in the
+ * controller.
  */
 
 const open = z.record(z.string(), z.unknown());
+
+/** `#rgb` / `#rrggbb`, the form both map renderers and CSS accept. */
+export const hexColorSchema = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+
+/**
+ * The four shapes a place thumbnail is ever allowed to take: a file we stored, a
+ * photo-proxy path, an inline thumbnail, or a remote https image.
+ *
+ * The map markers build their HTML as a string, so what lands here is one input
+ * away from a renderer that forgets to escape. Pinning the scheme on the way in
+ * means a stored value cannot carry anything a future consumer has to defend
+ * against — the escaping in the marker builders stops being the only thing
+ * standing between the database and the DOM.
+ */
+export const placeImageUrlSchema = z
+  .string()
+  .max(2048)
+  .refine(
+    (v) =>
+      v.startsWith('/uploads/') ||
+      v.startsWith('/api/maps/place-photo/') ||
+      /^data:image\/(png|jpe?g|webp|gif|avif);base64,/i.test(v) ||
+      /^https:\/\//i.test(v),
+    { message: 'must be an uploaded path, a photo-proxy path, an inline image or an https URL' },
+  );
+
+/**
+ * A place's homepage. It reaches window.open() on the client, where a
+ * javascript: value would run in this origin rather than opening a page.
+ */
+export const placeWebsiteSchema = z
+  .string()
+  .max(500)
+  .refine((v) => /^https?:\/\//i.test(v), { message: 'must be an http or https URL' });
 
 /**
  * Embedded category as returned on a place — a trimmed projection of the
@@ -33,11 +67,52 @@ export type PlaceCategory = z.infer<typeof placeCategorySchema>;
 
 /**
  * Full place entity as returned by the place list / get / create / update
- * endpoints (server/src/services/placeService.ts -> getPlaceWithTags). All
+ * endpoints (server/src/nest/places/places.service.ts -> getPlaceWithTags). All
  * columns of the `places` table (see server/data DB) plus the joined `category`
  * projection and `tags` array. Numbers (lat/lng/price) are SQLite REAL, ids are
  * INTEGER; provider-derived columns are nullable.
  */
+// One member's star vote on a place (#1435), with display info for the tooltip.
+export const placeRatingVoteSchema = z.object({
+  user_id: z.number(),
+  username: z.string(),
+  avatar: z.string().nullable().optional(),
+  rating: z.number(),
+});
+export type PlaceRatingVote = z.infer<typeof placeRatingVoteSchema>;
+
+/**
+ * The kinds of stop a drive has.
+ *
+ * The client reads the same six out of one table (`client/src/components/Roadtrip/
+ * stopKinds.ts`), which carries their icon, colour and usual length; that table is pinned
+ * against this enum by its own test, because it cannot import from here without dragging
+ * React into the shared package.
+ *
+ * A closed list, and enforced as one on both write routes below. It was not: the request
+ * schemas are open objects, so a POST with an invented kind used to be written straight
+ * to the column, where `isServiceStopType` then read it as false and the stop quietly
+ * counted as a destination.
+ */
+export const roadtripStopTypeSchema = z.enum([
+  'fuel',
+  'charging',
+  'rest_area',
+  'campsite',
+  'restaurant',
+  'sights',
+  'hotel',
+]);
+export type RoadtripStopType = z.infer<typeof roadtripStopTypeSchema>;
+
+/**
+ * A percentage of a tank, 1 to 100, or null for "no opinion, use the setting".
+ *
+ * Integer because a tenth of a percent of a tank is not a thing anybody knows about
+ * their own car, and bounded away from zero because a fill of nothing is not a fill.
+ */
+const fillPercentSchema = z.number().int().min(1).max(100).nullable().optional();
+
 export const placeSchema = z.object({
   id: z.number(),
   trip_id: z.number(),
@@ -62,7 +137,37 @@ export const placeSchema = z.object({
   osm_id: z.string().nullable().optional(),
   geo_provider: z.enum(['google', 'openstreetmap', 'amap']).nullable().optional(),
   provider_place_id: z.string().nullable().optional(),
+  // The Amap (高德) POI id a place was found by, `amap:`-prefixed. null for every
+  // place that came from another provider.
+  amap_poi_id: z.string().nullable().optional(),
+  /**
+   * Where the place came from when it was not typed by a person — currently
+   * only `'dawarich'`, for a stay accepted out of someone's own recordings.
+   * null on every place added by hand, which is nearly all of them.
+   */
+  source: z.string().nullable().optional(),
   route_geometry: z.string().nullable().optional(),
+  // Manual track colour (#776). null = inherit the category colour like before.
+  route_color: hexColorSchema.nullable().optional(),
+  /**
+   * What kind of stop this place is on a drive (#1797). null is an ordinary place, which
+   * is every place that predates the road trip addon.
+   *
+   * Separate from `category_id` on purpose: categories are the traveller's own editable,
+   * instance-wide list, while this is a fact about the place that the corridor search
+   * already knows and that owns its own icon and colour.
+   */
+  stop_type: roadtripStopTypeSchema.nullable().optional(),
+  /**
+   * How full THIS stop fills the tank, 1-100 (#1797). null follows the traveller's own
+   * setting, which is every place that predates the field.
+   *
+   * A property of the stop rather than of the person: a motorway rapid charger is worth
+   * 80 % because the last fifth costs as long again, while the one at the hotel is worth
+   * 100 % because the car stands there all night. One figure for the whole trip cannot
+   * say both, and the difference between them is a leg.
+   */
+  fill_percent: fillPercentSchema,
   website: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   transport_mode: z.string().nullable().optional(),
@@ -70,6 +175,11 @@ export const placeSchema = z.object({
   updated_at: z.string().optional(),
   category: placeCategorySchema.optional(),
   tags: z.array(tagSchema.partial()).optional(),
+  // Collaborative ratings (#1435): every member's vote (for the who-voted
+  // tooltip) plus the aggregate the UI displays.
+  ratings: z.array(placeRatingVoteSchema).optional(),
+  rating_avg: z.number().nullable().optional(),
+  rating_count: z.number().optional(),
 });
 export type Place = z.infer<typeof placeSchema>;
 
@@ -99,18 +209,53 @@ export const assignmentPlaceSchema = z.object({
   google_ftid: z.string().nullable().optional(),
   geo_provider: z.enum(['google', 'openstreetmap', 'amap']).nullable().optional(),
   provider_place_id: z.string().nullable().optional(),
+  // Carried on the embedded place so the day-plan thumbnail can auto-fetch an
+  // OSM photo the same way the sidebar/inspector do (#1136 follow-up).
+  osm_id: z.string().nullable().optional(),
+  amap_poi_id: z.string().nullable().optional(),
   website: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
+  // Carried through so the road-trip rail can mark a fuel stop as one without a
+  // second request per stop.
+  stop_type: roadtripStopTypeSchema.nullable().optional(),
+  // Carried for the same reason as stop_type: the rail resets a range budget at this
+  // stop and needs to know how far it fills without a request per stop.
+  fill_percent: fillPercentSchema,
   category: placeCategorySchema.optional(),
   tags: z.array(tagSchema.partial()).optional(),
 });
 export type AssignmentPlace = z.infer<typeof assignmentPlaceSchema>;
 
-export const placeCreateRequestSchema = open.and(z.object({ name: z.string().min(1) }));
+/**
+ * Additive on one field, deliberately not a closed object.
+ *
+ * Both request schemas stay open because roughly 190 call sites still post whatever the
+ * form happens to hold, and closing them would reject all of them at once. Naming
+ * `stop_type` on top of the open object validates that one key and leaves every other
+ * untouched, which is the only part of the body with a fixed vocabulary.
+ *
+ * Nullable: an explicit null is how a fuel stop becomes an ordinary place again, and the
+ * service already reads it that way rather than as "leave alone".
+ */
+const stopTypeField = z.object({
+  stop_type: roadtripStopTypeSchema.nullable().optional(),
+  // Named for the same reason: a bounded vocabulary on an otherwise open body. Zero is
+  // outside it on purpose — a stop that fills nothing is not a stop, and letting one
+  // through would leave a range budget that never resets.
+  fill_percent: fillPercentSchema,
+});
+
+export const placeCreateRequestSchema = open.and(z.object({ name: z.string().min(1) })).and(stopTypeField);
 export type PlaceCreateRequest = z.infer<typeof placeCreateRequestSchema>;
 
-export const placeUpdateRequestSchema = open;
+export const placeUpdateRequestSchema = open.and(stopTypeField);
 export type PlaceUpdateRequest = z.infer<typeof placeUpdateRequestSchema>;
+
+// Collaborative ratings (#1435): one 1-5 star vote per user and place.
+export const placeRatingRequestSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+});
+export type PlaceRatingRequest = z.infer<typeof placeRatingRequestSchema>;
 
 export const placeBulkDeleteRequestSchema = z.object({
   ids: z.array(z.number()),
@@ -118,7 +263,10 @@ export const placeBulkDeleteRequestSchema = z.object({
 export type PlaceBulkDeleteRequest = z.infer<typeof placeBulkDeleteRequestSchema>;
 
 export const placeBulkUpdateRequestSchema = z.object({
-  ids: z.array(z.number()).min(1),
+  // Deliberately unbounded: the endpoint answers an empty list with
+  // `{ updated: [], count: 0 }` rather than a 400, so a `.min(1)` here would
+  // change that contract once the body validates through the Zod pipe.
+  ids: z.array(z.number()),
   // null clears the category ("No category"); a number sets it. Optional so the
   // field can be omitted, but the endpoint requires it to be present to act.
   category_id: z.number().nullable().optional(),
@@ -132,6 +280,39 @@ export const placeImportListRequestSchema = z.object({
   enrich: z.boolean().optional(),
 });
 export type PlaceImportListRequest = z.infer<typeof placeImportListRequestSchema>;
+
+/**
+ * GPX import (multipart/form-data alongside the `file` part). Form fields arrive
+ * as strings — the client sends `String(boolean)` — so they stay `z.string()`
+ * and the route keeps its own `'true'`-comparison coercion (same shape as
+ * fileUploadRequestSchema). Every field optional: an omitted flag defaults to
+ * true server-side.
+ */
+export const placeImportGpxRequestSchema = z.object({
+  importWaypoints: z.string().optional(),
+  importRoutes: z.string().optional(),
+  importTracks: z.string().optional(),
+});
+export type PlaceImportGpxRequest = z.infer<typeof placeImportGpxRequestSchema>;
+
+/**
+ * GPX export (query string), the mirror of the import flags. Every field optional
+ * and string-typed because these arrive as query parameters; an omitted flag
+ * defaults to true server-side, so a bare `export.gpx` returns everything.
+ */
+export const placeExportGpxRequestSchema = z.object({
+  waypoints: z.string().optional(),
+  tracks: z.string().optional(),
+  dayRoutes: z.string().optional(),
+});
+export type PlaceExportGpxRequest = z.infer<typeof placeExportGpxRequestSchema>;
+
+/** KML/KMZ import (multipart/form-data); same string-field contract as GPX. */
+export const placeImportMapRequestSchema = z.object({
+  importPoints: z.string().optional(),
+  importPaths: z.string().optional(),
+});
+export type PlaceImportMapRequest = z.infer<typeof placeImportMapRequestSchema>;
 
 /** Query filters for the place list. */
 export const placeListQuerySchema = z.object({

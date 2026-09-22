@@ -4,49 +4,28 @@ import { NotFoundException } from '@nestjs/common';
 // --- hoisted mock fns so the vi.mock factories can reference them -----------------
 const h = vi.hoisted(() => ({
   verifyJwtAndLoadUser: vi.fn(),
-  isAddonEnabled: vi.fn(),
-  getMcpSafeUrl: vi.fn(() => 'https://trek.example.test'),
   dbPrepare: vi.fn(),
-  existsSync: vi.fn(),
-  // SDK middleware spies — each returns a tagged handler so we can identify which
-  // app.use call received it.
-  metaRouter: vi.fn(),
-  authorizeHandler: vi.fn(),
-  registerHandler: vi.fn(),
-  mcpHandler: vi.fn(),
+  exists: vi.fn(),
+  sendToResponse: vi.fn(),
 }));
 
-vi.mock('../../../src/middleware/auth', () => ({ verifyJwtAndLoadUser: h.verifyJwtAndLoadUser }));
+vi.mock('../../../src/nest/auth/jwt-verify', () => ({ verifyJwtAndLoadUser: h.verifyJwtAndLoadUser }));
 vi.mock('../../../src/db/database', () => ({ db: { prepare: h.dbPrepare } }));
-vi.mock('../../../src/mcp', () => ({ mcpHandler: h.mcpHandler }));
-vi.mock('../../../src/mcp/oauthProvider', () => ({ trekOAuthProvider: {}, trekClientsStore: {} }));
-vi.mock('../../../src/services/adminService', () => ({ isAddonEnabled: h.isAddonEnabled }));
-vi.mock('../../../src/services/notifications', () => ({ getMcpSafeUrl: h.getMcpSafeUrl }));
-
-// SDK router/handler factories return distinct tagged middleware so we never hit
-// real new URL(...) wiring during registration.
-vi.mock('@modelcontextprotocol/sdk/server/auth/router', () => ({
-  mcpAuthMetadataRouter: vi.fn(() => h.metaRouter),
-}));
-vi.mock('@modelcontextprotocol/sdk/server/auth/handlers/authorize', () => ({
-  authorizationHandler: vi.fn(() => h.authorizeHandler),
-}));
-vi.mock('@modelcontextprotocol/sdk/server/auth/handlers/register', () => ({
-  clientRegistrationHandler: vi.fn(() => h.registerHandler),
-}));
-
-vi.mock('node:fs', async (orig) => {
-  const real = (await orig()) as Record<string, unknown>;
-  return { ...real, default: { ...(real.default as object), existsSync: h.existsSync }, existsSync: h.existsSync };
-});
 
 import {
   applyPlatformUploads,
-  applyPlatformTransport,
   applyPlatformSpa,
   applyPlatformStatic,
+  storageStaticHandler,
 } from '../../../src/nest/platform/platform.routes';
 import { SpaFallbackFilter } from '../../../src/nest/platform/spa-fallback.filter';
+import { StorageNotFoundError, StorageInvalidKeyError } from '../../../src/nest/storage/storage.types';
+import type { StorageService } from '../../../src/nest/storage/storage.service';
+
+// The serving swap addresses files as (category, name) on the injected facade;
+// these unit tests only assert routing/auth/error mapping, so a two-method stub
+// is the whole storage surface.
+const storage = { exists: h.exists, sendToResponse: h.sendToResponse } as unknown as StorageService;
 
 // Tagged sentinel for express.static — we only need to know it was registered on
 // the right path, not run it.
@@ -98,22 +77,27 @@ function makeRes() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  h.getMcpSafeUrl.mockReturnValue('https://trek.example.test');
 });
 
 describe('applyPlatformUploads', () => {
-  it('registers the static avatar/cover/journey mounts + the files block', () => {
+  it('registers the four static mounts + the files block', () => {
     const { app, calls } = fakeApp();
-    applyPlatformUploads(app);
+    applyPlatformUploads(app, storage);
     const paths = calls.filter((c) => c.method === 'use').map((c) => c.path);
     expect(paths).toEqual(
-      expect.arrayContaining(['/uploads/avatars', '/uploads/covers', '/uploads/journey', '/uploads/files']),
+      expect.arrayContaining([
+        '/uploads/avatars',
+        '/uploads/covers',
+        '/uploads/journey',
+        '/uploads/places',
+        '/uploads/files',
+      ]),
     );
   });
 
   it('the /uploads/files block always answers 401', () => {
     const { app, calls } = fakeApp();
-    applyPlatformUploads(app);
+    applyPlatformUploads(app, storage);
     const filesBlock = calls.find((c) => c.path === '/uploads/files')!.handlers[0];
     const res = makeRes();
     filesBlock({}, res);
@@ -124,289 +108,248 @@ describe('applyPlatformUploads', () => {
   describe('GET /uploads/photos/:filename', () => {
     function photoHandler() {
       const { app, calls } = fakeApp();
-      applyPlatformUploads(app);
+      applyPlatformUploads(app, storage);
       return calls.find((c) => c.method === 'get' && c.path === '/uploads/photos/:filename')!.handlers[0];
     }
+    const next = vi.fn();
 
-    it('403 when the resolved path escapes the photos dir', () => {
-      // basename() strips the traversal, but feed a name that resolves outside by
-      // stubbing path indirectly is hard — instead exercise the existsSync 404 etc.
-      // The startsWith guard is defensive; cover it via a filename of '..'.
-      const handler = photoHandler();
+    it('403 when the basename is a bare traversal segment', async () => {
+      // Parity pin: the old resolve()+startsWith guard could only fire after
+      // basename() when the remaining segment was '..'.
       const res = makeRes();
-      // path.basename('..') === '..' -> join(photos,'..') resolves to uploads -> not under photos
-      handler({ params: { filename: '..' }, headers: {}, query: {} }, res);
+      await photoHandler()({ params: { filename: '..' }, headers: {}, query: {} }, res, next);
       expect(res.statusCode).toBe(403);
       expect(res.body).toBe('Forbidden');
+      expect(h.exists).not.toHaveBeenCalled();
     });
 
-    it('404 when the file does not exist', () => {
-      h.existsSync.mockReturnValue(false);
+    it('404 when the object does not exist — checked before auth', async () => {
+      h.exists.mockResolvedValue(false);
       const res = makeRes();
-      photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: {} }, res);
+      await photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: {} }, res, next);
+      expect(h.exists).toHaveBeenCalledWith('photos', 'a.jpg');
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toBe('Not found');
+      expect(h.verifyJwtAndLoadUser).not.toHaveBeenCalled();
+    });
+
+    it('404 when the key is invalid (exists rejects) — still before auth', async () => {
+      h.exists.mockRejectedValue(new StorageInvalidKeyError('photos/.'));
+      const res = makeRes();
+      await photoHandler()({ params: { filename: '.' }, headers: {}, query: {} }, res, next);
       expect(res.statusCode).toBe(404);
       expect(res.body).toBe('Not found');
     });
 
-    it('401 when no token is supplied', () => {
-      h.existsSync.mockReturnValue(true);
+    it('401 when no token is supplied', async () => {
+      h.exists.mockResolvedValue(true);
       const res = makeRes();
-      photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: {} }, res);
+      await photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: {} }, res, next);
       expect(res.statusCode).toBe(401);
       expect(res.body).toBe('Authentication required');
     });
 
-    it('serves the file for a valid JWT session (Bearer header)', () => {
-      h.existsSync.mockReturnValue(true);
+    it('serves the file for a valid JWT session (Bearer header)', async () => {
+      h.exists.mockResolvedValue(true);
+      h.sendToResponse.mockResolvedValue(undefined);
       h.verifyJwtAndLoadUser.mockReturnValue({ id: 1 });
       const res = makeRes();
-      photoHandler()(
+      await photoHandler()(
         { params: { filename: 'a.jpg' }, headers: { authorization: 'Bearer jwt123' }, query: {} },
         res,
+        next,
       );
       expect(h.verifyJwtAndLoadUser).toHaveBeenCalledWith('jwt123');
-      expect(String(res.body)).toContain('FILE:');
+      expect(h.sendToResponse).toHaveBeenCalledWith('photos', 'a.jpg', res);
     });
 
-    it('reads the token from the query string when there is no Bearer header', () => {
-      h.existsSync.mockReturnValue(true);
+    it('reads the token from the query string when there is no Bearer header', async () => {
+      h.exists.mockResolvedValue(true);
+      h.sendToResponse.mockResolvedValue(undefined);
       h.verifyJwtAndLoadUser.mockReturnValue({ id: 1 });
       const res = makeRes();
-      photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'qtok' } }, res);
+      await photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'qtok' } }, res, next);
       expect(h.verifyJwtAndLoadUser).toHaveBeenCalledWith('qtok');
-      expect(String(res.body)).toContain('FILE:');
+      expect(h.sendToResponse).toHaveBeenCalledWith('photos', 'a.jpg', res);
     });
 
-    it('401 when the token is not a session and the photo row is missing', () => {
-      h.existsSync.mockReturnValue(true);
+    it('401 when the token is not a session and the photo row is missing', async () => {
+      h.exists.mockResolvedValue(true);
       h.verifyJwtAndLoadUser.mockReturnValue(null);
       h.dbPrepare.mockReturnValue({ get: vi.fn().mockReturnValue(undefined) });
       const res = makeRes();
-      photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'share1' } }, res);
+      await photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'share1' } }, res, next);
       expect(res.statusCode).toBe(401);
     });
 
-    it('401 when a share token does not cover the photo trip', () => {
-      h.existsSync.mockReturnValue(true);
+    it('401 when a share token does not cover the photo trip', async () => {
+      h.exists.mockResolvedValue(true);
       h.verifyJwtAndLoadUser.mockReturnValue(null);
       const photoStmt = { get: vi.fn().mockReturnValue({ trip_id: 7 }) };
       const shareStmt = { get: vi.fn().mockReturnValue({ trip_id: 8 }) };
       h.dbPrepare.mockImplementationOnce(() => photoStmt).mockImplementationOnce(() => shareStmt);
       const res = makeRes();
-      photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'share1' } }, res);
+      await photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'share1' } }, res, next);
       expect(res.statusCode).toBe(401);
     });
 
-    it('401 when there is no matching share token at all', () => {
-      h.existsSync.mockReturnValue(true);
+    it('401 when there is no matching share token at all', async () => {
+      h.exists.mockResolvedValue(true);
       h.verifyJwtAndLoadUser.mockReturnValue(null);
       const photoStmt = { get: vi.fn().mockReturnValue({ trip_id: 7 }) };
       const shareStmt = { get: vi.fn().mockReturnValue(undefined) };
       h.dbPrepare.mockImplementationOnce(() => photoStmt).mockImplementationOnce(() => shareStmt);
       const res = makeRes();
-      photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'share1' } }, res);
+      await photoHandler()({ params: { filename: 'a.jpg' }, headers: {}, query: { token: 'share1' } }, res, next);
       expect(res.statusCode).toBe(401);
     });
 
-    it('serves the file when the share token covers the photo trip', () => {
-      h.existsSync.mockReturnValue(true);
+    it('serves the file when the share token covers the photo trip', async () => {
+      h.exists.mockResolvedValue(true);
+      h.sendToResponse.mockResolvedValue(undefined);
       h.verifyJwtAndLoadUser.mockReturnValue(null);
       const photoStmt = { get: vi.fn().mockReturnValue({ trip_id: 7 }) };
       const shareStmt = { get: vi.fn().mockReturnValue({ trip_id: 7 }) };
       h.dbPrepare.mockImplementationOnce(() => photoStmt).mockImplementationOnce(() => shareStmt);
       const res = makeRes();
-      photoHandler()(
+      await photoHandler()(
         { params: { filename: 'a.jpg' }, headers: { authorization: 'Bearer share1' }, query: {} },
         res,
+        next,
       );
-      expect(String(res.body)).toContain('FILE:');
+      expect(h.sendToResponse).toHaveBeenCalledWith('photos', 'a.jpg', res);
+    });
+
+    it('404 when the object vanishes between the exists check and the send', async () => {
+      // Approved deviation D7: the delete race maps to the same 404 text.
+      h.exists.mockResolvedValue(true);
+      h.verifyJwtAndLoadUser.mockReturnValue({ id: 1 });
+      h.sendToResponse.mockRejectedValue(new StorageNotFoundError('photos/a.jpg'));
+      const res = makeRes();
+      const resAny = res as unknown as { headersSent?: boolean };
+      resAny.headersSent = false;
+      await photoHandler()(
+        { params: { filename: 'a.jpg' }, headers: { authorization: 'Bearer jwt123' }, query: {} },
+        res,
+        next,
+      );
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toBe('Not found');
+    });
+
+    it('rethrows a non-miss send failure to the route error handler', async () => {
+      h.exists.mockResolvedValue(true);
+      h.verifyJwtAndLoadUser.mockReturnValue({ id: 1 });
+      const boom = new Error('disk on fire');
+      h.sendToResponse.mockRejectedValue(boom);
+      const res = makeRes();
+      const localNext = vi.fn();
+      await photoHandler()(
+        { params: { filename: 'a.jpg' }, headers: { authorization: 'Bearer jwt123' }, query: {} },
+        res,
+        localNext,
+      );
+      expect(localNext).toHaveBeenCalledWith(boom);
+      expect(res.statusCode).toBe(200); // untouched — finalhandler owns it now
+    });
+
+    it('does not write a second 404 when the send fails after headers were flushed', async () => {
+      h.exists.mockResolvedValue(true);
+      h.verifyJwtAndLoadUser.mockReturnValue({ id: 1 });
+      h.sendToResponse.mockRejectedValue(new StorageNotFoundError('photos/a.jpg'));
+      const res = makeRes();
+      (res as unknown as { headersSent: boolean }).headersSent = true;
+      const localNext = vi.fn();
+      await photoHandler()(
+        { params: { filename: 'a.jpg' }, headers: { authorization: 'Bearer jwt123' }, query: {} },
+        res,
+        localNext,
+      );
+      expect(res.status).not.toHaveBeenCalled();
+      expect(localNext).toHaveBeenCalledWith(expect.any(StorageNotFoundError));
     });
   });
 });
 
-describe('applyPlatformTransport', () => {
-  function build() {
-    const { app, calls } = fakeApp();
-    applyPlatformTransport(app);
-    return calls;
-  }
+describe('storageStaticHandler', () => {
+  const req = (over: Record<string, unknown> = {}) => ({ method: 'GET', path: '/x.png', ...over });
 
-  it('GET /api/health sets no-store and returns ok', () => {
-    const calls = build();
-    const health = calls.find((c) => c.method === 'get' && c.path === '/api/health')!.handlers[0];
-    const res = makeRes();
-    health({}, res);
-    expect(res.headers['Cache-Control']).toBe('no-store, must-revalidate');
-    expect(res.body).toEqual({ status: 'ok' });
-  });
-
-  describe('the /.well-known metadata middleware', () => {
-    function wellKnownMw(calls: ReturnType<typeof build>) {
-      // first app.use with no path, registered right after /api/health
-      return calls.find((c) => c.method === 'use' && c.path === undefined)!.handlers[0];
-    }
-
-    it('404s a /.well-known path when MCP is disabled', () => {
-      h.isAddonEnabled.mockReturnValue(false);
-      const mw = wellKnownMw(build());
-      const res = makeRes();
-      const next = vi.fn();
-      mw({ path: '/.well-known/oauth-authorization-server' }, res, next);
-      expect(res.statusCode).toBe(404);
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('delegates to the SDK meta router for a non-well-known path', () => {
-      h.isAddonEnabled.mockReturnValue(true);
-      const mw = wellKnownMw(build());
-      const res = makeRes();
-      const next = vi.fn();
-      mw({ path: '/anything' }, res, next);
-      expect(h.metaRouter).toHaveBeenCalled();
-    });
-
-    it('delegates to the SDK meta router for a well-known path when MCP is enabled', () => {
-      h.isAddonEnabled.mockReturnValue(true);
-      const mw = wellKnownMw(build());
-      const res = makeRes();
-      const next = vi.fn();
-      mw({ path: '/.well-known/oauth-authorization-server' }, res, next);
-      expect(h.metaRouter).toHaveBeenCalled();
-    });
-  });
-
-  it('GET /.well-known/openid-configuration returns AS metadata + userinfo_endpoint', () => {
-    const calls = build();
-    const handler = calls.find((c) => c.path === '/.well-known/openid-configuration')!.handlers[0];
-    const res = makeRes();
-    handler({}, res);
-    const body = res.body as { issuer: string; userinfo_endpoint: string };
-    expect(body.issuer).toBe('https://trek.example.test');
-    expect(body.userinfo_endpoint).toBe('https://trek.example.test/oauth/userinfo');
-  });
-
-  it('trims trailing slashes off the configured base URL', () => {
-    h.getMcpSafeUrl.mockReturnValue('https://trek.example.test///');
-    const calls = build();
-    const handler = calls.find((c) => c.path === '/.well-known/openid-configuration')!.handlers[0];
-    const res = makeRes();
-    handler({}, res);
-    expect((res.body as { issuer: string }).issuer).toBe('https://trek.example.test');
-  });
-
-  describe('GET /.well-known/oauth-protected-resource (flat)', () => {
-    function handler() {
-      return build().find((c) => c.method === 'get' && c.path === '/.well-known/oauth-protected-resource')!.handlers[0];
-    }
-
-    it('404 when MCP is disabled', () => {
-      h.isAddonEnabled.mockReturnValue(false);
-      const res = makeRes();
-      handler()({}, res);
-      expect(res.statusCode).toBe(404);
-    });
-
-    it('returns the PRM document when MCP is enabled', () => {
-      h.isAddonEnabled.mockReturnValue(true);
-      const res = makeRes();
-      handler()({}, res);
-      const body = res.body as { resource: string; authorization_servers: string[] };
-      expect(body.resource).toBe('https://trek.example.test/mcp');
-      expect(body.authorization_servers).toEqual(['https://trek.example.test']);
-    });
-  });
-
-  describe('mcpAddonGate (used on /oauth/authorize + /oauth/register)', () => {
-    function gate() {
-      // The gate is the first handler on the /oauth/authorize use registration.
-      return build().find((c) => c.method === 'use' && c.path === '/oauth/authorize')!.handlers[0];
-    }
-
-    it('404 when MCP is disabled', () => {
-      h.isAddonEnabled.mockReturnValue(false);
-      const res = makeRes();
-      const next = vi.fn();
-      gate()({}, res, next);
-      expect(res.statusCode).toBe(404);
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('calls next() when MCP is enabled', () => {
-      h.isAddonEnabled.mockReturnValue(true);
-      const res = makeRes();
-      const next = vi.fn();
-      gate()({}, res, next);
-      expect(next).toHaveBeenCalled();
-    });
-  });
-
-  it('wires the SDK authorize + register handlers behind the gate', () => {
-    const calls = build();
-    const authorize = calls.find((c) => c.path === '/oauth/authorize')!;
-    const register = calls.find((c) => c.path === '/oauth/register')!;
-    expect(authorize.handlers).toContain(h.authorizeHandler);
-    expect(register.handlers).toContain(h.registerHandler);
-  });
-
-  it('mounts the MCP handler on POST/GET/DELETE /mcp', () => {
-    const calls = build();
-    expect(calls.find((c) => c.method === 'post' && c.path === '/mcp')!.handlers[0]).toBe(h.mcpHandler);
-    expect(calls.find((c) => c.method === 'get' && c.path === '/mcp')!.handlers[0]).toBe(h.mcpHandler);
-    expect(calls.find((c) => c.method === 'delete' && c.path === '/mcp')!.handlers[0]).toBe(h.mcpHandler);
-  });
-
-  describe('the terminal /.well-known JSON-404 middleware', () => {
-    function mw() {
-      // The pathless app.use registered after the /mcp routes.
-      const calls = build();
-      const pathless = calls.filter((c) => c.method === 'use' && c.path === undefined);
-      // first pathless = meta router; second = the JSON 404.
-      return pathless[1].handlers[0];
-    }
-
-    it('404 JSON for an unhandled /.well-known path', () => {
-      const res = makeRes();
-      const next = vi.fn();
-      mw()({ path: '/.well-known/unknown' }, res, next);
-      expect(res.statusCode).toBe(404);
-      expect(res.body).toEqual({ error: 'not_found' });
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('calls next() for any non-well-known path', () => {
-      const res = makeRes();
-      const next = vi.fn();
-      mw()({ path: '/dashboard' }, res, next);
-      expect(next).toHaveBeenCalled();
-    });
-  });
-
-  it('the /oauth/consent middleware relaxes COOP then continues', () => {
-    const calls = build();
-    const mw = calls.find((c) => c.method === 'use' && c.path === '/oauth/consent')!.handlers[0];
+  function run(over: Record<string, unknown> = {}) {
+    const handler = storageStaticHandler(storage, 'avatars');
     const res = makeRes();
     const next = vi.fn();
-    mw({}, res, next);
-    expect(res.headers['Cross-Origin-Opener-Policy']).toBe('unsafe-none');
-    expect(next).toHaveBeenCalled();
+    const out = handler(req(over) as never, res as never, next as never);
+    return { res, next, out };
+  }
+
+  it('serves a hit through sendToResponse with the decoded name', async () => {
+    h.sendToResponse.mockResolvedValue(undefined);
+    const { res, next, out } = run({ path: '//caf%C3%A9.png' });
+    await out;
+    expect(h.sendToResponse).toHaveBeenCalledWith('avatars', 'café.png', res);
+    expect(next).not.toHaveBeenCalled();
   });
 
-  it('caches the OAuth metadata + SDK router across requests (lazy init runs once)', async () => {
-    const router = await import('@modelcontextprotocol/sdk/server/auth/router');
-    const calls = build();
-    const openid = calls.find((c) => c.path === '/.well-known/openid-configuration')!.handlers[0];
-    h.getMcpSafeUrl.mockClear();
-    openid({}, makeRes());
-    openid({}, makeRes());
-    // getMcpSafeUrl is only consulted on the first lazy build of the metadata.
-    expect(h.getMcpSafeUrl).toHaveBeenCalledTimes(1);
+  it('non-GET/HEAD methods fall through without touching storage', async () => {
+    const { next } = run({ method: 'POST' });
+    expect(next).toHaveBeenCalledWith();
+    expect(h.sendToResponse).not.toHaveBeenCalled();
+  });
 
-    // Trigger the meta router lazy build twice; the SDK factory runs once.
-    const metaMw = calls.find((c) => c.method === 'use' && c.path === undefined)!.handlers[0];
-    h.isAddonEnabled.mockReturnValue(true);
-    metaMw({ path: '/x' }, makeRes(), vi.fn());
-    metaMw({ path: '/y' }, makeRes(), vi.fn());
-    expect(router.mcpAuthMetadataRouter).toHaveBeenCalledTimes(1);
+  it('undecodable percent-encoding falls through', async () => {
+    const { next } = run({ path: '/%ZZ' });
+    expect(next).toHaveBeenCalledWith();
+    expect(h.sendToResponse).not.toHaveBeenCalled();
+  });
+
+  it('a miss calls next() with no args', async () => {
+    h.sendToResponse.mockRejectedValue(new StorageNotFoundError('avatars/x.png'));
+    const { next, out } = run();
+    await out;
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('an invalid key calls next() with no args', async () => {
+    h.sendToResponse.mockRejectedValue(new StorageInvalidKeyError('avatars/..'));
+    const { next, out } = run();
+    await out;
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('a send-layer 404 (stat→send race) falls through', async () => {
+    h.sendToResponse.mockRejectedValue(Object.assign(new Error('ENOENT'), { status: 404 }));
+    const { next, out } = run();
+    await out;
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('EISDIR falls through', async () => {
+    h.sendToResponse.mockRejectedValue(Object.assign(new Error('dir'), { code: 'EISDIR' }));
+    const { next, out } = run();
+    await out;
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('a client abort is swallowed', async () => {
+    h.sendToResponse.mockRejectedValue(Object.assign(new Error('aborted'), { code: 'ECONNABORTED' }));
+    const { next, out } = run();
+    await out;
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('a mid-stream write error is swallowed', async () => {
+    h.sendToResponse.mockRejectedValue(Object.assign(new Error('write EPIPE'), { syscall: 'write' }));
+    const { next, out } = run();
+    await out;
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('anything else goes to next(err) for finalhandler', async () => {
+    const boom = new Error('boom');
+    h.sendToResponse.mockRejectedValue(boom);
+    const { next, out } = run();
+    await out;
+    expect(next).toHaveBeenCalledWith(boom);
   });
 });
 

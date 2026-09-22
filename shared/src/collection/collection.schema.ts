@@ -1,4 +1,4 @@
-import { placeCategorySchema } from '../place/place.schema';
+import { placeCategorySchema, placeImageUrlSchema, placeRatingVoteSchema, placeWebsiteSchema } from '../place/place.schema';
 import { tagSchema } from '../tag/tag.schema';
 
 import { z } from 'zod';
@@ -53,6 +53,9 @@ export const collectionPlaceSchema = z.object({
   price: z.number().nullable().optional(),
   currency: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
+  // Deliberately open on the way out, pinned on the way in (see the save/update
+  // request schemas below): rows written before the request-side check existed
+  // still have to round-trip.
   image_url: z.string().nullable().optional(),
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),
@@ -72,6 +75,10 @@ export const collectionPlaceSchema = z.object({
   tags: z.array(tagSchema.partial()).optional(),
   /** Ids of the per-collection labels assigned to this place. */
   label_ids: z.array(z.number()).optional(),
+  // Collaborative ratings (#1435): every member's vote + the displayed aggregate.
+  ratings: z.array(placeRatingVoteSchema).optional(),
+  rating_avg: z.number().nullable().optional(),
+  rating_count: z.number().optional(),
 });
 export type CollectionPlace = z.infer<typeof collectionPlaceSchema>;
 
@@ -126,6 +133,14 @@ export const collectionUpdateRequestSchema = collectionCreateRequestSchema.parti
 });
 export type CollectionUpdateRequest = z.infer<typeof collectionUpdateRequestSchema>;
 
+/** Reorder the caller's lists — every visible collection id in the desired order.
+ *  Plain z.number() (no .min/.int) mirrors the legacy hand-rolled check the DTO
+ *  ratchet replaced: any array of numbers, empty included. */
+export const collectionReorderRequestSchema = z.object({
+  orderedIds: z.array(z.number()),
+});
+export type CollectionReorderRequest = z.infer<typeof collectionReorderRequestSchema>;
+
 /** Save a place into a list from a raw maps/manual payload (or carrying provenance). */
 export const collectionSavePlaceRequestSchema = z.object({
   collection_id: z.number(),
@@ -140,13 +155,13 @@ export const collectionSavePlaceRequestSchema = z.object({
   price: z.number().nullable().optional(),
   currency: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
-  image_url: z.string().nullable().optional(),
+  image_url: placeImageUrlSchema.nullable().optional(),
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),
   osm_id: z.string().nullable().optional(),
   geo_provider: z.enum(['google', 'openstreetmap', 'amap']).nullable().optional(),
   provider_place_id: z.string().nullable().optional(),
-  website: z.string().nullable().optional(),
+  website: placeWebsiteSchema.nullable().optional(),
   phone: z.string().nullable().optional(),
   status: collectionStatusSchema.optional(),
   links: collectionLinksSchema.optional(),
@@ -177,6 +192,13 @@ export const collectionPlaceUpdateRequestSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
+  // Editable coordinates so a place added by GPS can be corrected later (#1435).
+  lat: z.number().nullable().optional(),
+  lng: z.number().nullable().optional(),
+  // Free-text address, correctable after saving (#1870): the add dialog always
+  // offered it, the edit form did not. Deliberately uncapped, exactly like
+  // collectionSavePlaceRequestSchema.address, so save and update stay in step.
+  address: z.string().nullable().optional(),
   // .removeDefault() strips the inner .default('idea') so an ABSENT status parses to
   // undefined (left unchanged) instead of being injected as 'idea' (see #1437). The
   // .catch('idea') guard against invalid values is preserved.
@@ -187,11 +209,45 @@ export const collectionPlaceUpdateRequestSchema = z.object({
   tag_ids: z.array(z.number()).optional(),
   // Replace the place's per-collection label assignments (omit to leave unchanged).
   label_ids: z.array(z.number()).optional(),
+  // Custom thumbnail (#1136): null clears it (falls back to the auto-fetched photo).
+  image_url: placeImageUrlSchema.nullable().optional(),
 });
 export type CollectionPlaceUpdateRequest = z.infer<typeof collectionPlaceUpdateRequestSchema>;
 
 export const collectionSetStatusRequestSchema = z.object({ status: collectionStatusSchema });
 export type CollectionSetStatusRequest = z.infer<typeof collectionSetStatusRequestSchema>;
+
+/** Set one status on several saved places at once — the place dialog's "mark
+ *  visited everywhere it is saved" (#1469). Ids are collection_places ids. */
+export const collectionSetStatusManyRequestSchema = z.object({
+  ids: z.array(z.number()).min(1).max(1000),
+  status: collectionStatusSchema,
+});
+export type CollectionSetStatusManyRequest = z.infer<typeof collectionSetStatusManyRequestSchema>;
+
+/** Same, but naming the places by their TRIP ids: the server resolves each one to
+ *  the lists it is saved in. Drives the planner's bulk "mark as visited" (#1469). */
+export const collectionSetStatusFromTripRequestSchema = z.object({
+  trip_id: z.number(),
+  place_ids: z.array(z.number()).min(1).max(1000),
+  status: collectionStatusSchema,
+});
+export type CollectionSetStatusFromTripRequest = z.infer<typeof collectionSetStatusFromTripRequestSchema>;
+
+export const collectionSetStatusManyResponseSchema = z.object({
+  /** Saved places whose status actually changed. */
+  updated: z.number(),
+  /** Trip places that were found in at least one list (from-trip form only). */
+  places: z.number().optional(),
+});
+export type CollectionSetStatusManyResponse = z.infer<typeof collectionSetStatusManyResponseSchema>;
+
+/** Bulk-delete saved places. Plain z.number() (no .min/.int) mirrors the legacy
+ *  hand-rolled check the DTO ratchet replaced (same shape as placeBulkDeleteRequestSchema). */
+export const collectionDeleteManyRequestSchema = z.object({
+  ids: z.array(z.number()),
+});
+export type CollectionDeleteManyRequest = z.infer<typeof collectionDeleteManyRequestSchema>;
 
 /** Copy one or many saved places INTO a trip (dedup precheck on server). */
 export const collectionCopyToTripRequestSchema = z.object({
@@ -291,6 +347,39 @@ export type CollectionSaveResult = z.infer<typeof collectionSaveResultSchema>;
 /** Library-wide "is this place already saved anywhere I can see?" lookup (inspector indicator). */
 export const collectionMembershipSchema = z.object({
   saved: z.boolean(),
-  lists: z.array(z.object({ collection_id: z.number(), name: z.string(), place_id: z.number() })),
+  lists: z.array(z.object({
+    collection_id: z.number(),
+    name: z.string(),
+    place_id: z.number(),
+    /** Per-list status, so the picker can show and change it without a second round trip (#1469). */
+    status: collectionStatusSchema,
+    /** False for a list the viewer may read but not edit — its status pill stays read-only. */
+    can_edit: z.boolean().default(true),
+  })),
 });
 export type CollectionMembership = z.infer<typeof collectionMembershipSchema>;
+
+/** One trip place as offered by the import preview. `already_in_list` is the SAME dedup
+ *  verdict the bulk import applies (name, or coordinates within tolerance), resolved on the
+ *  server so the dialog can never disagree with what the write path then does. `scheduled`
+ *  is false for a place no day holds — the ones a trip left behind, which is exactly what
+ *  the import is for, so the dialog pre-selects them. */
+export const collectionImportablePlaceSchema = z.object({
+  place_id: z.number(),
+  name: z.string(),
+  address: z.string().nullable(),
+  lat: z.number().nullable(),
+  lng: z.number().nullable(),
+  category_id: z.number().nullable(),
+  image_url: z.string().nullable(),
+  already_in_list: z.boolean(),
+  scheduled: z.boolean(),
+  day_number: z.number().nullable(),
+  date: z.string().nullable(),
+});
+export type CollectionImportablePlace = z.infer<typeof collectionImportablePlaceSchema>;
+
+export const collectionImportablesResponseSchema = z.object({
+  places: z.array(collectionImportablePlaceSchema),
+});
+export type CollectionImportablesResponse = z.infer<typeof collectionImportablesResponseSchema>;

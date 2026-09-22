@@ -46,6 +46,8 @@ export const COST_CATEGORIES = [
   'fees',
   'health',
   'tips',
+  'fuel',
+  'parking',
   'other',
 ] as const;
 export type CostCategory = (typeof COST_CATEGORIES)[number];
@@ -70,6 +72,7 @@ const RESERVATION_TYPE_TO_COST_CATEGORY: Record<string, CostCategory> = {
   hotel: 'accommodation',
   accommodation: 'accommodation',
   lodging: 'accommodation',
+  parking: 'parking',
   restaurant: 'food',
   activity: 'activities',
 };
@@ -94,10 +97,20 @@ export const budgetItemPayerSchema = z.object({
 });
 export type BudgetItemPayer = z.infer<typeof budgetItemPayerSchema>;
 
+export const budgetItemReceiptSchema = z.object({
+  id: z.number(),
+  filename: z.string(),
+  original_name: z.string(),
+  file_size: z.number().nullable().optional(),
+  mime_type: z.string().nullable().optional(),
+  url: z.string(),
+});
+export type BudgetItemReceipt = z.infer<typeof budgetItemReceiptSchema>;
+
 /**
  * Budget item entity as returned by the budget list/create/update endpoints
  * (server/src/services/budgetService.ts). Columns of the `budget_items` table
- * plus the embedded `members` (equal-split participants) and `payers` arrays.
+ * plus the embedded `members` (equal-split participants), `payers` and `receipts` arrays.
  * total_price is the sum of payer amounts in `currency`; `exchange_rate` converts
  * that to the trip base currency (NULL currency + rate 1 = base currency).
  */
@@ -112,13 +125,19 @@ export const budgetItemSchema = z.object({
   persons: z.number().nullable().optional(),
   days: z.number().nullable().optional(),
   note: z.string().nullable().optional(),
+  /** Itemized receipt behind a per-item split, as JSON. Its own column since #1658. */
+  ticket_json: z.string().nullable().optional(),
   reservation_id: z.number().nullable().optional(),
+  /** Set when the expense was created from a place (#1298) — the same link
+   *  reservation_id is for a booking, on the other side of the planner. */
+  place_id: z.number().nullable().optional(),
   paid_by_user_id: z.number().nullable().optional(),
   expense_date: z.string().nullable().optional(),
   sort_order: z.number().optional(),
   created_at: z.string().optional(),
   members: z.array(budgetItemMemberSchema).optional(),
   payers: z.array(budgetItemPayerSchema).optional(),
+  receipts: z.array(budgetItemReceiptSchema).optional(),
 });
 export type BudgetItem = z.infer<typeof budgetItemSchema>;
 
@@ -147,10 +166,16 @@ export const budgetCreateItemRequestSchema = z.object({
   persons: z.number().nullable().optional(),
   days: z.number().nullable().optional(),
   note: z.string().nullable().optional(),
+  ticket_json: z.string().nullable().optional(),
   expense_date: z.string().nullable().optional(),
   // Link this expense to a reservation (e.g. created from a booking's
   // "add expense" flow). The server stores it on budget_items.reservation_id.
   reservation_id: z.number().optional(),
+  // The same for a place: the place form's "add expense" flow saves the place
+  // first, then creates the expense against it (#1298).
+  place_id: z.number().optional(),
+  // Receipt files to link to this expense
+  receipt_file_ids: z.array(z.number()).optional(),
 });
 export type BudgetCreateItemRequest = z.infer<typeof budgetCreateItemRequestSchema>;
 
@@ -167,7 +192,9 @@ export const budgetUpdateItemRequestSchema = z.object({
   persons: z.number().nullable().optional(),
   days: z.number().nullable().optional(),
   note: z.string().nullable().optional(),
+  ticket_json: z.string().nullable().optional(),
   expense_date: z.string().nullable().optional(),
+  receipt_file_ids: z.array(z.number()).optional(),
 });
 export type BudgetUpdateItemRequest = z.infer<typeof budgetUpdateItemRequestSchema>;
 
@@ -194,6 +221,11 @@ export const budgetSettlementSchema = z.object({
   currency: z.string().nullable().optional(),
   exchange_rate: z.number().optional(),
   created_at: z.string().optional(),
+  // The calendar day the transfer actually happened (YYYY-MM-DD), independent of
+  // `created_at` (when it was recorded) — same split as budget_items' expense_date
+  // vs. created_at. Null/absent on rows recorded before this column existed; the
+  // ledger falls back to `created_at`'s date for those.
+  settled_at: z.string().nullable().optional(),
   created_by_user_id: z.number().nullable().optional(),
   from_username: z.string().optional(),
   from_avatar_url: z.string().nullable().optional(),
@@ -208,6 +240,9 @@ export const budgetCreateSettlementRequestSchema = z.object({
   amount: z.number(),
   // The display currency the amount was entered in; the server freezes its FX rate.
   currency: z.string().nullable().optional(),
+  // The day the transfer happened. Null when the caller sets none; the ledger then
+  // uses the day it was recorded, which is where every older payment already sits.
+  settled_at: z.string().nullable().optional(),
 });
 export type BudgetCreateSettlementRequest = z.infer<typeof budgetCreateSettlementRequestSchema>;
 
@@ -217,8 +252,57 @@ export const budgetUpdateSettlementRequestSchema = z.object({
   to_user_id: z.number(),
   amount: z.number(),
   currency: z.string().nullable().optional(),
+  settled_at: z.string().nullable().optional(),
 });
 export type BudgetUpdateSettlementRequest = z.infer<typeof budgetUpdateSettlementRequestSchema>;
+
+/**
+ * What the trip actually costs one participant, as GET …/budget/settlement
+ * returns it alongside the balances and the suggested flows.
+ *
+ * `final = expenses - reimbursed - pending`, and the identity holds to the cent
+ * in whatever display currency was asked for: the server derives all four
+ * figures from the one integer-cent ledger the balances come from, so a
+ * breakdown can never disagree with the balance shown next to it. Every amount
+ * is in that display currency.
+ *
+ * A participant who fronted nothing and owes nothing is absent, exactly like
+ * they are from `balances` — a client listing the trip's roster fills the gap
+ * with zeroes rather than expecting a row per member.
+ *
+ * `sources` lists the rows each of the three figures is made of, in whole cents
+ * of the same display currency. The server spreads a figure over its rows with
+ * the same largest-remainder split the figure itself came from, so every list
+ * sums to its figure exactly; a client that converted the expense list on its
+ * own, with whatever rate it has today, would not land on the same number.
+ */
+export const budgetParticipantFinalSchema = z.object({
+  user_id: z.number(),
+  username: z.string(),
+  avatar_url: z.string().nullable(),
+  /** Gross outlay: what this participant fronted as a payer on split expenses. */
+  expenses: z.number(),
+  /** Recorded settle-up transfers, netted: received minus sent. */
+  reimbursed: z.number(),
+  /** Still to be squared up — the participant's current balance, positive when owed. */
+  pending: z.number(),
+  /** What the trip leaves them out of pocket once everything has been settled. */
+  final: z.number(),
+  sources: z.object({
+    /** Per expense they paid on: what they fronted, negative for a refund they received. Σ = expenses. */
+    fronted: z.array(z.object({ item_id: z.number(), cents: z.number().int() })),
+    /** Per recorded transfer on their side: positive when received, negative when sent. Σ = reimbursed. */
+    moved: z.array(z.object({
+      settlement_id: z.number(),
+      from_user_id: z.number(),
+      to_user_id: z.number(),
+      cents: z.number().int(),
+    })),
+    /** Per suggested flow on their side: positive when it comes to them, negative when they owe it. Σ = pending. */
+    outstanding: z.array(z.object({ from_user_id: z.number(), to_user_id: z.number(), cents: z.number().int() })),
+  }),
+});
+export type BudgetParticipantFinal = z.infer<typeof budgetParticipantFinalSchema>;
 
 export const budgetUpdateMembersRequestSchema = z.object({
   user_ids: z.array(z.number()),

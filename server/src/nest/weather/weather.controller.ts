@@ -2,7 +2,7 @@ import { Controller, Get, HttpException, Query, UseGuards } from '@nestjs/common
 import type { WeatherResult } from '@trek/shared';
 import { WeatherService } from './weather.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { ApiError } from '../../services/weatherService';
+import { ApiError } from './weather.impl';
 
 /**
  * /api/weather — first migrated leaf module (the pilot).
@@ -27,12 +27,14 @@ export class WeatherController {
     @Query('lng') lng?: string,
     @Query('date') date?: string,
     @Query('lang') lang?: string,
+    /** HH:MM — lets a past date answer for that hour rather than the day (#1614). */
+    @Query('time') time?: string,
   ): Promise<WeatherResult> {
     if (!lat || !lng) {
       throw new HttpException({ error: 'Latitude and longitude are required' }, 400);
     }
     try {
-      return await this.weather.get(lat, lng, date, lang ?? 'de');
+      return await this.weather.get(lat, lng, date, lang ?? 'de', time);
     } catch (err: unknown) {
       throw toHttp(err, 'Weather error:', 'Error fetching weather data');
     }

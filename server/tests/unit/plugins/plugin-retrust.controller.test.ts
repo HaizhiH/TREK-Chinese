@@ -20,6 +20,7 @@ import { PluginRuntimeService } from '../../../src/nest/plugins/plugin-runtime.s
 import { PluginRegistryService, RegistryError } from '../../../src/nest/plugins/registry/registry.service';
 import { PluginsService } from '../../../src/nest/plugins/plugins.service';
 import { TrekExceptionFilter } from '../../../src/nest/common/trek-exception.filter';
+import type { RuntimeEnvService } from '../../../src/nest/app-config/runtime-env.service';
 
 const ADMIN = { id: 1 } as { id: number };
 const REQ = { headers: {}, socket: {} } as never;
@@ -48,11 +49,14 @@ let runtime: PluginRuntimeService;
 let registry: PluginRegistryService;
 let controller: PluginsController;
 
+let plugins: PluginsService;
+
 beforeEach(() => {
   process.env.TREK_PLUGINS_ENABLED = 'true';
   runtime = { update: vi.fn(), retrust: vi.fn() } as unknown as PluginRuntimeService;
-  registry = { install: vi.fn() } as unknown as PluginRegistryService;
-  controller = new PluginsController({} as PluginsService, runtime, registry);
+  registry = { install: vi.fn(), installWithDependencies: vi.fn(), recomputeUpdateHold: vi.fn() } as unknown as PluginRegistryService;
+  plugins = { resumeUpdates: vi.fn(() => true) } as unknown as PluginsService;
+  controller = new PluginsController(plugins, runtime, registry, { isManaged: () => false } as unknown as RuntimeEnvService);
 });
 
 describe('signature refusal codes survive to the client', () => {
@@ -94,6 +98,87 @@ describe('signature refusal codes survive to the client', () => {
     const { status, body } = await wireFailure(() => controller.update('flight-tracker'));
     expect(status).toBe(400);
     expect(body).toEqual({ error: 'network unreachable' });
+  });
+});
+
+// The rollback path: an admin picks a specific (possibly older) version, and the runtime
+// must install exactly that one — the compat gate stays server-side in selectVersion.
+describe('POST :id/update — explicit version', () => {
+  it('forwards the requested version to the runtime', async () => {
+    vi.mocked(runtime.update).mockResolvedValue({ version: '1.2.0', activated: true, newPermissions: [], newEgress: [], trekRangeBypassed: null });
+
+    const res = await controller.update('flight-tracker', { version: '1.2.0' });
+
+    expect(vi.mocked(runtime.update).mock.calls[0]).toEqual(['flight-tracker', { version: '1.2.0' }]);
+    expect(res).toEqual({ version: '1.2.0', activated: true, newPermissions: [], newEgress: [], trekRangeBypassed: null });
+  });
+
+  it('an omitted body keeps the default newest-compatible resolution', async () => {
+    vi.mocked(runtime.update).mockResolvedValue({ version: '2.0.0', activated: true, newPermissions: [], newEgress: [], trekRangeBypassed: null });
+
+    await controller.update('flight-tracker');
+
+    expect(vi.mocked(runtime.update).mock.calls[0]).toEqual(['flight-tracker', { version: undefined }]);
+  });
+});
+
+// The update hold: only a DELIBERATE version pick may set it, every successful
+// install/update recomputes it (so landing back on the newest clears a stale one),
+// and dependency resolution — which pins versions too, but never deliberately —
+// must not touch it.
+describe('update hold wiring', () => {
+  it('an explicit-version update recomputes the hold as deliberate', async () => {
+    vi.mocked(runtime.update).mockResolvedValue({ version: '1.2.0', activated: true, newPermissions: [], newEgress: [], trekRangeBypassed: null });
+
+    await controller.update('flight-tracker', { version: '1.2.0' });
+
+    expect(registry.recomputeUpdateHold).toHaveBeenCalledWith('flight-tracker', '1.2.0', true);
+  });
+
+  it('a default update recomputes as non-deliberate (clears a stale hold)', async () => {
+    vi.mocked(runtime.update).mockResolvedValue({ version: '2.0.0', activated: true, newPermissions: [], newEgress: [], trekRangeBypassed: null });
+
+    await controller.update('flight-tracker');
+
+    expect(registry.recomputeUpdateHold).toHaveBeenCalledWith('flight-tracker', '2.0.0', false);
+  });
+
+  it('an explicit-version install recomputes the hold as deliberate', async () => {
+    vi.mocked(registry.install).mockResolvedValue({ id: 'flight-tracker', version: '1.2.0', trekRangeBypassed: null });
+
+    await controller.install({ id: 'flight-tracker', version: '1.2.0' });
+
+    expect(registry.recomputeUpdateHold).toHaveBeenCalledWith('flight-tracker', '1.2.0', true);
+  });
+
+  it('a dependency-resolution install does NOT touch the hold', async () => {
+    vi.mocked(registry.installWithDependencies).mockResolvedValue({ installed: ['flight-tracker'], requiredAddons: [], trekRangeBypassed: null });
+
+    await controller.install({ id: 'flight-tracker', withDependencies: true });
+
+    expect(registry.recomputeUpdateHold).not.toHaveBeenCalled();
+  });
+
+  it('a failed update leaves the hold untouched', async () => {
+    vi.mocked(runtime.update).mockRejectedValue(new Error('network unreachable'));
+
+    await expect(controller.update('flight-tracker', { version: '1.2.0' })).rejects.toThrow(HttpException);
+
+    expect(registry.recomputeUpdateHold).not.toHaveBeenCalled();
+  });
+
+  it('POST :id/resume-updates clears the hold', async () => {
+    const res = await controller.resumeUpdates('flight-tracker');
+
+    expect(plugins.resumeUpdates).toHaveBeenCalledWith('flight-tracker');
+    expect(res).toEqual({ updateHold: false });
+  });
+
+  it('POST :id/resume-updates is a 404 for an unknown plugin', async () => {
+    vi.mocked(plugins.resumeUpdates).mockReturnValue(false);
+
+    const { status } = await wireFailure(async () => controller.resumeUpdates('ghost'));
+    expect(status).toBe(404);
   });
 });
 

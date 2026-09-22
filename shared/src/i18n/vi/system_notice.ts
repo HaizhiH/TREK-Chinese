@@ -55,5 +55,39 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': 'Vào thông báo {n}',
   'system_notice.pager.position': 'Thông báo {current} của {total}',
+  // The release modal. One stable set of keys: each big release swaps the copy in place.
+  'system_notice.release_notes.eyebrow': 'Đã cập nhật',
+  'system_notice.release_notes.headline': 'Bốn điều TREK giờ tự làm được.',
+  'system_notice.release_notes.intro': 'API địa điểm riêng, chuyến đi đường bộ được lên kế hoạch từ đầu đến cuối, lịch sử vị trí trong tay bạn, và tài liệu được đồng bộ.',
+  'system_notice.release_notes.features_label': 'Những điểm nhấn',
+  'system_notice.release_notes.features_aside': 'Chưa phải tất cả',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'Trình lập kế hoạch du lịch mã nguồn mở đầu tiên có API địa điểm riêng. 73,6 triệu địa điểm, không cần khóa, không giới hạn.',
+  'system_notice.release_notes.feature_roadtrip_title': 'Tiện ích Chuyến đi đường bộ',
+  'system_notice.release_notes.feature_roadtrip_body': 'Tự lên kế hoạch chuyến lái: tuyến đường, quãng đường, số giờ và điểm dừng. Tắt cho đến khi quản trị viên bật.',
+  'system_notice.release_notes.feature_dawarich_title': 'Tích hợp Dawarich',
+  'system_notice.release_notes.feature_dawarich_body': 'Lựa chọn tự lưu trữ thay cho Google Timeline, giờ đã đọc được ngay trong TREK. TREK chỉ đọc, và chỉ đọc mà thôi.',
+  'system_notice.release_notes.footnote':
+    'Và còn cả một danh sách dài những thay đổi nhỏ hơn ở khắp phần còn lại của TREK.',
+  'system_notice.release_notes.notes_label': 'Ghi chú phát hành',
+  'system_notice.release_notes.note_eyebrow': 'Lời nhắn từ người bảo trì',
+  'system_notice.release_notes.note_title': 'Bạn là lý do tôi tiếp tục xây dựng TREK.',
+  'system_notice.release_notes.note_body':
+    'TREK bắt đầu là một công cụ nhỏ cho những chuyến đi của riêng tôi, viết sau giờ làm vì tôi muốn có một cách lên kế hoạch tốt hơn. Từ đó đến giờ nó chưa bao giờ thật sự ngừng lớn lên. Gần như mọi thứ bạn đang dùng đều được làm vào đêm khuya, vào cuối tuần, trên tàu, bên cạnh một công việc toàn thời gian, và đã có không ít buổi tối tôi lặng lẽ tự hỏi liệu có ai ngoài kia sẽ mở nó ra không.',
+  'system_notice.release_notes.promise_label': 'Lời hứa',
+  'system_notice.release_notes.promise_lead': 'TREK luôn miễn phí, mãi mãi.',
+  'system_notice.release_notes.promise_text':
+    'Mọi tính năng, mọi bản cập nhật, cho tất cả mọi người. Không tầng trả phí, không đăng ký, không ràng buộc.',
+  'system_notice.release_notes.note_body_after':
+    'Rồi các bạn đã mở nó. Chỉ trong vài tháng đã có hàng nghìn bạn: những ngôi sao, báo lỗi, bản dịch sang những ngôn ngữ tôi không biết nói, pull request từ những người tôi chưa từng gặp. Đến giờ, việc đầu tiên tôi làm mỗi sáng vẫn là mở kho mã, và cảm giác vẫn chưa hẳn là thật.',
+  'system_notice.release_notes.note_closing': 'Cảm ơn bạn đã ở đây. Thân mến, Maurice.',
+  'system_notice.release_notes.support_lead':
+    'TREK miễn phí và sẽ luôn như vậy, nhưng máy chủ, tên miền và rất nhiều đêm thức khuya thì không.',
+  'system_notice.release_notes.support_text':
+    'Nếu TREK đã có một chỗ trong những chuyến đi của bạn, hãy mời tôi một ly cà phê để bản phát hành tiếp theo tiếp tục ra đời.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'Hỗ trợ trên Ko-fi',
+  'system_notice.release_notes.feature_docsync_title': 'Đồng bộ tài liệu',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud và Synology Drive. Tài liệu của chuyến đi luân chuyển hai chiều với kho lưu trữ bạn đang dùng.',
 };
 export default system_notice;

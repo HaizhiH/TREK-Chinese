@@ -27,11 +27,13 @@ export type NotificationEventKey =
   | 'trip_reminder'
   | 'todo_due'
   | 'vacay_invite'
+  | 'vacay_share'
   | 'collection_invite'
   | 'photos_shared'
   | 'collab_message'
   | 'packing_tagged'
   | 'version_available'
+  | 'replica_failure'
   | 'synology_session_cleared'
   | 'plugin_notification';
 

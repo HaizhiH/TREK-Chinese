@@ -1,12 +1,19 @@
 import React from 'react'
-import { Bell, CheckCheck, Trash2 } from 'lucide-react'
+import { CheckCheck, Trash2 } from 'lucide-react'
 import { useTranslation } from '../i18n'
 import PageShell from '../components/Layout/PageShell'
+import EmptyState from '../components/shared/EmptyState'
 import { Spinner } from '../components/shared/Spinner'
 import InAppNotificationItem from '../components/Notifications/InAppNotificationItem.tsx'
 import { useInAppNotifications } from './inAppNotifications/useInAppNotifications'
 
 export default function InAppNotificationsPage(): React.ReactElement {
+  // ViewportRoute in App.tsx picks the branch now, so the phone screen is a
+  // chunk of its own instead of a dead limb in this one.
+  return <InAppNotificationsPageDesktop />
+}
+
+function InAppNotificationsPageDesktop(): React.ReactElement {
   const { t } = useTranslation()
   // Page = wiring container: store, filter, fetch + infinite scroll live in the hook.
   const {
@@ -37,7 +44,7 @@ export default function InAppNotificationsPage(): React.ReactElement {
             {/* Bulk actions */}
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
-                <button
+                <button type="button"
                   onClick={markAllRead}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors text-content-secondary bg-surface-hover"
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-tertiary)'}
@@ -48,7 +55,7 @@ export default function InAppNotificationsPage(): React.ReactElement {
                 </button>
               )}
               {notifications.length > 0 && (
-                <button
+                <button type="button"
                   onClick={deleteAll}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors text-red-500 hover:bg-red-500/10"
                 >
@@ -61,13 +68,13 @@ export default function InAppNotificationsPage(): React.ReactElement {
 
           {/* Filter toggle */}
           <div className="flex gap-2 mb-4">
-            <button
+            <button type="button"
               onClick={() => setUnreadOnly(false)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!unreadOnly ? 'bg-content text-surface' : 'bg-surface-hover text-content-secondary'}`}
             >
               {t('notifications.all')}
             </button>
-            <button
+            <button type="button"
               onClick={() => setUnreadOnly(true)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${unreadOnly ? 'bg-content text-surface' : 'bg-surface-hover text-content-secondary'}`}
             >
@@ -82,11 +89,7 @@ export default function InAppNotificationsPage(): React.ReactElement {
                 <Spinner className="w-6 h-6 border-2 border-slate-200 border-t-current" />
               </div>
             ) : displayed.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center gap-3">
-                <Bell className="w-12 h-12 text-content-faint" />
-                <p className="text-base font-medium text-content-muted">{t('notifications.empty')}</p>
-                <p className="text-sm text-content-faint">{t('notifications.emptyDescription')}</p>
-              </div>
+              <EmptyState scene="notifications" title={t('notifications.empty')} />
             ) : (
               displayed.map(n => (
                 <InAppNotificationItem key={n.id} notification={n} />

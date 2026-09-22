@@ -231,7 +231,7 @@ describe('GitHubPanel', () => {
     render(<GitHubPanel />);
     await screen.findByText('v1.7.0');
     await user.click(screen.getByText('Show details'));
-    await screen.findByText('This is a plain paragraph without any markdown syntax.');
+    expect(await screen.findByText('This is a plain paragraph without any markdown syntax.')).toBeInTheDocument();
   });
 
   it('FE-ADMIN-GH-014: markdown link with safe href renders as anchor', async () => {

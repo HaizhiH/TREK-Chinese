@@ -20,7 +20,7 @@ export const createDaysSlice = (set: SetState, get: GetState): DaysSlice => ({
   reorderDays: async (tripId, orderedIds) => {
     const prevDays = get().days
     const byId = new Map(prevDays.map(d => [d.id, d]))
-    const sortedDates = prevDays.map(d => d.date).filter((d): d is string => !!d).sort()
+    const sortedDates = prevDays.map(d => d.date).filter((d): d is string => !!d).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     const optimistic = orderedIds
       .map((id, i) => {
         const d = byId.get(id)
@@ -44,14 +44,12 @@ export const createDaysSlice = (set: SetState, get: GetState): DaysSlice => ({
   // Insert a new empty day at a 1-based position (omit to append). On a dated
   // trip this extends the trip by one day and re-pins dates server-side.
   insertDay: async (tripId, position) => {
-    const prevDays = get().days
     try {
       const result = await daysApi.create(tripId, { position })
       await get().refreshDays(tripId)
       await get().loadReservations(tripId)
       return result.day
     } catch (err: unknown) {
-      set({ days: prevDays })
       throw new Error(getApiErrorMessage(err, 'Error adding day'))
     }
   },

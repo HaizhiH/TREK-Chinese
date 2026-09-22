@@ -2,13 +2,13 @@
 
 ## Do I need a Google Maps API key?
 
-No. When no Google Maps key is configured, TREK automatically falls back to OpenStreetMap (Nominatim) for place search — no API key or account required. If you want richer place data (photos, ratings, opening hours), an admin can optionally add a Google Maps key in [User Settings](User-Settings).
+No. Place search runs on TREK's own place index, the [TREK Places API](TREK-Places-API), asked together with OpenStreetMap, with no API key, no quota and no account. A Google Maps key only answers where both come up empty, and adds ratings and photos for the places Google finds, which no open dataset has. An admin can add one in **Admin → Settings → API Keys**, see [Places and Search](Places-and-Search#with-a-google-maps-api-key). A key saved there applies instance-wide to every member; there is no per-user field for it in the UI.
 
 ## Can I use TREK offline?
 
-Yes. TREK is a Progressive Web App. After your first visit, the service worker (powered by Workbox) caches map tiles (Carto and OpenStreetMap), non-sensitive API responses, uploaded covers and avatars, and all static assets. Subsequent visits work without a network connection for already-cached content. See [Offline Mode and PWA](Offline-Mode-and-PWA) for installation instructions.
+Yes. TREK is a Progressive Web App. After your first visit, the service worker (powered by Workbox) caches map tiles (Carto, OpenStreetMap, Mapbox GL and OpenFreeMap), uploaded covers and avatars, and every page of the app. Subsequent visits work without a network connection for already-cached content. Trip data does not come from that cache: it is stored per user in IndexedDB and read back through TREK's own offline layer, with writes queued and replayed once you reconnect. See [Offline Mode and PWA](Offline-Mode-and-PWA) for installation instructions.
 
-> **Note:** Auth, admin, backup, and settings endpoints are intentionally excluded from the offline cache.
+> **Note:** API responses are **never** stored in the service-worker cache. Workbox keys its entries by URL and cannot vary them on the session cookie, so caching them would mean one account's data could be served to the next on a shared device.
 
 ## How many MCP tokens can I create?
 
@@ -40,3 +40,9 @@ Yes. An admin can disable open registration so that new accounts can only be cre
 ## Does TREK support single sign-on?
 
 Yes, via OpenID Connect (OIDC). Compatible providers include Google, Authentik, Keycloak, and any standard OIDC-compliant IdP. Set `OIDC_ONLY=true` to disable password login entirely. See [OIDC SSO](OIDC-SSO).
+
+## Can TREK open straight on my trip instead of the dashboard?
+
+Yes. In Settings → General → **Startup**, set the start page to **Active trip** and pick the tab it should open on — Costs, for instance, if you mostly add expenses while travelling. Opening TREK (including the installed PWA or a home-screen shortcut) then goes there in one step instead of three.
+
+If you would rather build the shortcut yourself, or point a wrapper app at it, any trip URL takes a tab directly: `/trips/42?tab=finanzplan`. See [Display-Settings](Display-Settings) for the full list of tab ids.

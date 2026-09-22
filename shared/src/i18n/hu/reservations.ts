@@ -71,6 +71,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Hajóút',
   'reservations.type.event': 'Esemény',
   'reservations.type.tour': 'Túra',
+  'reservations.type.parking': 'Parkolás',
   'reservations.type.other': 'Egyéb',
   'reservations.type.bus': 'Busz',
   'reservations.type.ferry': 'Komp',
@@ -127,6 +128,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': 'Érkezés',
   'reservations.span.inTransit': 'Úton',
   'reservations.span.pickup': 'Felvétel',
+  'reservations.span.dropOff': 'Leadás',
   'reservations.span.return': 'Visszaadás',
   'reservations.span.active': 'Aktív',
   'reservations.span.start': 'Kezdés',
@@ -164,6 +166,8 @@ const reservations: TranslationStrings = {
     'Az AirTrailből szinkronizálva — a módosítások mindkét irányban szinkronban maradnak.',
   'reservations.airtrail.notSynced': 'Nincs szinkronizálva',
   'reservations.airtrail.notSyncedHint': 'Ezt a járatot eltávolították az AirTrailből, és többé nem szinkronizálódik.',
+  'reservations.airtrail.layoverHint':
+    'AirTrailből importálva. A többszakaszos, átszállásos járatnak nincs egyetlen AirTrail-járata, amellyel szinkronizálható lenne, ezért egyszeri importálás marad.',
   'reservations.airtrail.loadError': 'Nem sikerült betölteni az AirTrail-járataidat.',
   'reservations.airtrail.imported': '{count} járat importálva',
   'reservations.airtrail.skippedDuplicate': '{count} már szerepel ebben az utazásban, kihagyva',
@@ -183,5 +187,8 @@ const reservations: TranslationStrings = {
   'reservations.removeExpense': 'Remove expense',
   'reservations.urlLabel': 'Hivatkozás',
   'reservations.urlPlaceholder': 'https://...',
+  'reservations.travelers.label': 'Utasok',
+  'reservations.travelers.assign': 'Utasok hozzárendelése',
+  'reservations.travelers.none': 'Még nincsenek utastársak.',
 };
 export default reservations;

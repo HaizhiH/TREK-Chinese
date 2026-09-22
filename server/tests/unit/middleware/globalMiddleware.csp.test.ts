@@ -1,0 +1,214 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+import { applyGlobalMiddleware, routingCspOrigins } from '../../../src/middleware/globalMiddleware';
+
+async function directiveSources(name: string): Promise<string[]> {
+  const app = express();
+  applyGlobalMiddleware(app);
+  app.get('/probe', (_req, res) => res.json({ ok: true }));
+
+  const res = await request(app).get('/probe');
+  const csp = String(res.headers['content-security-policy'] || '');
+  const directive = csp
+    .split(';')
+    .map(d => d.trim())
+    .find(d => d.startsWith(name));
+
+  return directive ? directive.split(/\s+/).slice(1) : [];
+}
+
+const connectSrcSources = () => directiveSources('connect-src');
+
+describe('global CSP: OpenStreetMap tile hosts (#1733)', () => {
+  it('allows the bare tile.openstreetmap.org host', async () => {
+    // A CSP wildcard host never matches the apex, so `*.tile.openstreetmap.org`
+    // alone would block the tile prefetcher's fetch() against the single host
+    // OSM has served from since it retired a/b/c/d sharding.
+    expect(await connectSrcSources()).toContain('https://tile.openstreetmap.org');
+  });
+
+  it('still allows the sharded hosts for templates saved earlier', async () => {
+    expect(await connectSrcSources()).toContain('https://*.tile.openstreetmap.org');
+  });
+});
+
+describe('global CSP: the other shipped raster presets (#2180)', () => {
+  it('allows tile.openstreetmap.de', async () => {
+    // The prefetcher fetches tiles with mode 'no-cors', which relaxes CORS and
+    // nothing else: a host missing here is refused in the document, so the
+    // Service Worker never sees the request and caches no tile at all.
+    expect(await connectSrcSources()).toContain('https://tile.openstreetmap.de');
+  });
+
+  it('allows tiles.stadiamaps.com', async () => {
+    expect(await connectSrcSources()).toContain('https://tiles.stadiamaps.com');
+  });
+
+  it('keeps the routing host, which is a different host and covers nothing here', async () => {
+    // routing.openstreetmap.de was on the list all along and looks close enough
+    // to hide the gap: a CSP source matches a host, not a suffix of one.
+    expect(await connectSrcSources()).toContain('https://routing.openstreetmap.de/');
+  });
+});
+
+describe('global CSP: the second routing engine', () => {
+  it('allows the public Valhalla, which is a shipped default like the OSRM hosts', async () => {
+    // It is asked only when a leg should avoid tolls, a motorway or a ferry — the
+    // question the OSRM hosts answer with HTTP 400, because their car profile carries
+    // no excludable classes. Left out here it fails the way CSP always fails a fetch:
+    // silently, with the switch working and no tile of an answer arriving.
+    expect(await connectSrcSources()).toContain('https://valhalla1.openstreetmap.de');
+  });
+
+  it('names the origin without a path, because it is a POST to /route', async () => {
+    // The OSRM entries carry `/route/v1/` because a source with a path matches that
+    // path alone, and OSRM is only ever asked there. Valhalla is a different shape and
+    // would grow endpoints (isochrones, map matching), so the origin is the right unit.
+    const sources = await connectSrcSources();
+    expect(sources).not.toContain('https://valhalla1.openstreetmap.de/route');
+  });
+});
+
+describe('global CSP: the imagery host (#2307)', () => {
+  it('allows server.arcgisonline.com, which a GL map reaches through fetch', async () => {
+    // The gap hid behind Leaflet for as long as Leaflet was the only renderer to
+    // show the imagery: it loads a tile as an <img>, and img-src allows `https:`
+    // outright. A GL map reads the raster through fetch to hand it to WebGL, so
+    // it lands on connect-src instead and was refused with nothing to see for it.
+    expect(await connectSrcSources()).toContain('https://server.arcgisonline.com');
+  });
+
+  it('names the apex host, because img-src is what used to carry it', async () => {
+    // img-src keeps its blanket `https:`, which is why Leaflet never noticed. The
+    // fix belongs on connect-src alone; widening img-src further would buy nothing
+    // and widening connect-src to a wildcard would not match the apex anyway.
+    const sources = await connectSrcSources();
+    expect(sources).not.toContain('https://*.arcgisonline.com');
+    expect(await directiveSources('img-src')).toContain('https:');
+  });
+});
+
+describe('global CSP: script-src', () => {
+  it("allows 'wasm-unsafe-eval' so the WASM decoders keep running", async () => {
+    expect(await directiveSources('script-src')).toContain("'wasm-unsafe-eval'");
+  });
+
+  it("still allows 'unsafe-eval', which heic-to needs to decode an iPhone photo", async () => {
+    // Pinned so the next tidy-up of this list finds the reason before the
+    // consequence: libheif initialises embind with new Function(), and without
+    // this every .heic upload fails in the browser. See the comment on the
+    // directive for how to actually get rid of it.
+    expect(await directiveSources('script-src')).toContain("'unsafe-eval'");
+  });
+});
+
+describe('forced-HTTPS redirect', () => {
+  const saved = { FORCE_HTTPS: process.env.FORCE_HTTPS, APP_URL: process.env.APP_URL };
+
+  afterEach(() => {
+    process.env.FORCE_HTTPS = saved.FORCE_HTTPS;
+    process.env.APP_URL = saved.APP_URL;
+    if (saved.FORCE_HTTPS === undefined) delete process.env.FORCE_HTTPS;
+    if (saved.APP_URL === undefined) delete process.env.APP_URL;
+  });
+
+  async function redirectLocation(): Promise<string> {
+    const app = express();
+    applyGlobalMiddleware(app);
+    app.get('/trips', (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get('/trips').set('Host', 'evil.example.com');
+    return String(res.headers.location || '');
+  }
+
+  it('redirects to the configured APP_URL host, not the Host header the caller sent', async () => {
+    process.env.FORCE_HTTPS = 'true';
+    process.env.APP_URL = 'https://trip.pakulat.org';
+    expect(await redirectLocation()).toBe('https://trip.pakulat.org/trips');
+  });
+
+  it('falls back to the request host when APP_URL is unset', async () => {
+    process.env.FORCE_HTTPS = 'true';
+    delete process.env.APP_URL;
+    expect(await redirectLocation()).toBe('https://evil.example.com/trips');
+  });
+
+  it('falls back to the request host when APP_URL is not a URL', async () => {
+    // A typo in the env should not take the instance down, and it should not
+    // produce a redirect to a host built from a half-parsed string either.
+    process.env.FORCE_HTTPS = 'true';
+    process.env.APP_URL = 'not a url';
+    expect(await redirectLocation()).toBe('https://evil.example.com/trips');
+  });
+
+  it('leaves an already-secure request alone, and never redirects the health probe', async () => {
+    process.env.FORCE_HTTPS = 'true';
+    process.env.APP_URL = 'https://trip.pakulat.org';
+    const app = express();
+    applyGlobalMiddleware(app);
+    app.get('/trips', (_req, res) => res.json({ ok: true }));
+    app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+    // The proxy already terminated TLS, so there is nothing to upgrade.
+    const forwarded = await request(app).get('/trips').set('X-Forwarded-Proto', 'https');
+    expect(forwarded.status).toBe(200);
+
+    // The container probe talks plain HTTP on the loopback and must not be
+    // bounced to a hostname it cannot resolve.
+    const probe = await request(app).get('/api/health');
+    expect(probe.status).toBe(200);
+  });
+});
+
+describe('routingCspOrigins', () => {
+  it('CSP-ROUTING-001: keeps only the origin, because a path source matches that path alone', () => {
+    // A router is asked at several paths (/route/v1/…, /table/v1/…); pinning one would
+    // block the rest without an error the app could report.
+    expect(routingCspOrigins(['https://osrm.example.org/route/v1/driving']))
+      .toEqual(['https://osrm.example.org']);
+  });
+
+  it('CSP-ROUTING-002: a port belongs to the origin and is kept', () => {
+    expect(routingCspOrigins(['http://192.168.178.72:5000'])).toEqual(['http://192.168.178.72:5000']);
+  });
+
+  it('CSP-ROUTING-003: anything that is not an http(s) URL widens nothing', () => {
+    // A bad settings row must not be able to loosen the policy.
+    expect(routingCspOrigins(['', null, undefined, 'not a url', 'javascript:alert(1)', 'ftp://x/y']))
+      .toEqual([]);
+  });
+
+  it('CSP-ROUTING-004: the same host twice is one source', () => {
+    expect(routingCspOrigins([
+      'https://osrm.example.org/route/v1/driving',
+      'https://osrm.example.org/table/v1/driving',
+    ])).toEqual(['https://osrm.example.org']);
+  });
+
+  it('CSP-ROUTING-006: both engines get named, because both are reached from the browser', () => {
+    // bootstrap hands in the OSRM default and the Valhalla default together. An
+    // instance that configures its own Valhalla and leaves OSRM public still has to
+    // have that host in the policy, and the other way round.
+    expect(routingCspOrigins([
+      'https://osrm.example.org/route/v1/driving',
+      'https://valhalla.example.org',
+    ])).toEqual(['https://osrm.example.org', 'https://valhalla.example.org']);
+    expect(routingCspOrigins([null, 'https://valhalla.example.org'])).toEqual(['https://valhalla.example.org']);
+  });
+});
+
+describe('connect-src with a self-hosted router', () => {
+  it('CSP-ROUTING-005: a configured origin is named, or the browser blocks it silently', async () => {
+    const app = express();
+    applyGlobalMiddleware(app, { extraConnectSrc: ['https://osrm.example.org'] });
+    app.get('/probe', (_req, res) => res.json({ ok: true }));
+
+    const res = await request(app).get('/probe');
+    const csp = String(res.headers['content-security-policy'] || '');
+    const connect = csp.split(';').map(d => d.trim()).find(d => d.startsWith('connect-src'))!;
+
+    expect(connect).toContain('https://osrm.example.org');
+    // The public hosts stay, so an instance can be switched back without another deploy.
+    expect(connect).toContain('https://routing.openstreetmap.de/');
+  });
+});

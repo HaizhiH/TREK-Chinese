@@ -6,8 +6,8 @@
 
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
-import { encryptMfaSecret } from '../../src/services/mfaCrypto';
-import { encrypt_api_key } from '../../src/services/apiKeyCrypto';
+import { encryptMfaSecret } from '../../src/nest/common/crypto/mfaCrypto';
+import { encrypt_api_key } from '../../src/nest/common/crypto/apiKeyCrypto';
 
 let _userSeq = 0;
 let _tripSeq = 0;
@@ -99,7 +99,11 @@ export function createTrip(
     const end = new Date(overrides.end_date);
     const tripId = result.lastInsertRowid as number;
     let dayNumber = 1;
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    // Step in UTC. A date-only ISO string parses as UTC midnight, but setDate()
+    // advances local wall-clock time — 23h or 25h across a DST transition — so the
+    // instant drifts off midnight and toISOString() then reports the wrong day:
+    // one is dropped in autumn, one repeated in spring. CI runs UTC and never sees it.
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
       const dateStr = d.toISOString().slice(0, 10);
       db.prepare('INSERT INTO days (trip_id, day_number, date) VALUES (?, ?, ?)').run(tripId, dayNumber++, dateStr);
     }
@@ -279,11 +283,11 @@ export function createDayNote(
   db: Database.Database,
   dayId: number,
   tripId: number,
-  overrides: Partial<{ text: string; time: string; icon: string }> = {}
+  overrides: Partial<{ text: string; time: string; icon: string; sort_order: number }> = {}
 ): TestDayNote {
   const result = db.prepare(
-    'INSERT INTO day_notes (day_id, trip_id, text, time, icon, sort_order) VALUES (?, ?, ?, ?, ?, 9999)'
-  ).run(dayId, tripId, overrides.text ?? 'Test note', overrides.time ?? null, overrides.icon ?? '📝');
+    'INSERT INTO day_notes (day_id, trip_id, text, time, icon, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(dayId, tripId, overrides.text ?? 'Test note', overrides.time ?? null, overrides.icon ?? '📝', overrides.sort_order ?? 9999);
   return db.prepare('SELECT * FROM day_notes WHERE id = ?').get(result.lastInsertRowid) as TestDayNote;
 }
 
@@ -699,18 +703,20 @@ export interface TestJourneyEntry {
   entry_date: string;
   title: string | null;
   story: string | null;
+  /** 0/1, as the column holds it. */
+  stats_excluded: number;
 }
 
 export function createJourneyEntry(
   db: Database.Database,
   journeyId: number,
   authorId: number,
-  overrides: Partial<{ type: string; entry_date: string; title: string; story: string; location_name: string; mood: string; weather: string }> = {}
+  overrides: Partial<{ type: string; entry_date: string; title: string; story: string; location_name: string; mood: string; weather: string; stats_excluded: number }> = {}
 ): TestJourneyEntry {
   const now = Date.now();
   const result = db.prepare(`
-    INSERT INTO journey_entries (journey_id, author_id, type, entry_date, title, story, location_name, mood, weather, visibility, sort_order, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', 0, ?, ?)
+    INSERT INTO journey_entries (journey_id, author_id, type, entry_date, title, story, location_name, mood, weather, stats_excluded, visibility, sort_order, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', 0, ?, ?)
   `).run(
     journeyId, authorId,
     overrides.type ?? 'entry',
@@ -720,6 +726,7 @@ export function createJourneyEntry(
     overrides.location_name ?? null,
     overrides.mood ?? null,
     overrides.weather ?? null,
+    overrides.stats_excluded ?? 0,
     now, now
   );
   return db.prepare('SELECT * FROM journey_entries WHERE id = ?').get(result.lastInsertRowid) as TestJourneyEntry;
@@ -737,7 +744,9 @@ export function addJourneyContributor(
 }
 
 export function linkTripToJourney(db: Database.Database, journeyId: number, tripId: number): void {
+  // The column is added_at, not linked_at — this helper had no callers until
+  // #1973 and so had never actually run against the schema.
   db.prepare(
-    'INSERT OR IGNORE INTO journey_trips (journey_id, trip_id, linked_at) VALUES (?, ?, ?)'
+    'INSERT OR IGNORE INTO journey_trips (journey_id, trip_id, added_at) VALUES (?, ?, ?)'
   ).run(journeyId, tripId, Date.now());
 }

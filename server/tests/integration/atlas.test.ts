@@ -47,8 +47,9 @@ import { buildApp } from '../../src/bootstrap';
 import { createTables } from '../../src/db/schema';
 import { runMigrations } from '../../src/db/migrations';
 import { resetTestDb, resetRateLimits } from '../helpers/test-db';
-import { createUser } from '../helpers/factories';
+import { createUser, createTrip } from '../helpers/factories';
 import { authCookie } from '../helpers/auth';
+import { getRegionGeo } from '../../src/nest/atlas/atlas-geo';
 
 let nestApp: INestApplication;
 let app: Application;
@@ -79,7 +80,13 @@ beforeAll(async () => {
   runMigrations(testDb);
   nestApp = await buildApp();
   app = nestApp.getHttpAdapter().getInstance();
-});
+
+  // Warm the admin-1 store here rather than inside ATLAS-013. The first call streams
+  // the multi-MB bundle through the brace-depth splitter and caches it for the process,
+  // which costs ~3s on a quiet machine and more when every worker is busy — so whichever
+  // test hit it first used to pay for it inside its own 5s budget and fail under load.
+  await getRegionGeo(['ZZ']);
+}, 60_000);
 
 beforeEach(() => {
   resetTestDb(testDb);
@@ -102,6 +109,30 @@ describe('Atlas stats', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('countries');
     expect(res.body).toHaveProperty('stats');
+  });
+
+  it('ATLAS-014 — a future trip is returned as planned and excluded from totalCountries (#1048)', async () => {
+    const { user } = createUser(testDb);
+    // Offsets from today rather than literal dates, so this cannot expire.
+    const iso = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+    const past = createTrip(testDb, user.id, { title: 'Rome, last month', start_date: iso(-40), end_date: iso(-30) });
+    const future = createTrip(testDb, user.id, { title: 'Tokyo, next month', start_date: iso(30), end_date: iso(40) });
+    const insertPlace = testDb.prepare('INSERT INTO places (trip_id, name, address) VALUES (?, ?, ?)');
+    insertPlace.run(past.id, 'Colosseum', 'Piazza del Colosseo, Rome, Italy');
+    insertPlace.run(future.id, 'Senso-ji', 'Asakusa, Tokyo, Japan');
+
+    const res = await request(app)
+      .get('/api/addons/atlas/stats')
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    const countries = res.body.countries as { code: string; status: string }[];
+    expect(countries.find(c => c.code === 'IT')?.status).toBe('visited');
+    expect(countries.find(c => c.code === 'JP')?.status).toBe('planned');
+    expect(res.body.stats.totalCountries).toBe(1);
+    expect(res.body.stats.totalCountriesPlanned).toBe(1);
+    // The whole point: the map gets more countries than the passport counter shows.
+    expect(countries.length).toBeGreaterThan(res.body.stats.totalCountries);
   });
 
   it('ATLAS-002 — GET /api/atlas/country/:code returns places in country', async () => {
@@ -170,6 +201,50 @@ describe('Bucket list', () => {
     expect(res.status).toBe(400);
   });
 
+  it('ATLAS-005 — POST the same item twice returns 409 and keeps one row (#1898)', async () => {
+    const { user } = createUser(testDb);
+    const body = { name: 'Japan', country_code: 'JP' };
+
+    const first = await request(app)
+      .post('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id))
+      .send(body);
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id))
+      .send(body);
+    expect(second.status).toBe(409);
+    expect(second.body).toEqual({ error: 'Already on your bucket list' });
+
+    const list = await request(app)
+      .get('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id));
+    expect(list.body.items).toHaveLength(1);
+  });
+
+  it('ATLAS-005 — POST the same item for another target date is allowed (#1898)', async () => {
+    const { user } = createUser(testDb);
+
+    const undated = await request(app)
+      .post('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id))
+      .send({ name: 'Japan', country_code: 'JP', target_date: null });
+    expect(undated.status).toBe(201);
+
+    const dated = await request(app)
+      .post('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id))
+      .send({ name: 'Japan', country_code: 'JP', target_date: '2027-05' });
+    expect(dated.status).toBe(201);
+
+    const list = await request(app)
+      .get('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id));
+    expect(list.body.items).toHaveLength(2);
+  });
+
   it('ATLAS-006 — GET /bucket-list returns items', async () => {
     const { user } = createUser(testDb);
 
@@ -200,6 +275,30 @@ describe('Bucket list', () => {
       .send({ name: 'New Name', notes: 'Updated' });
     expect(res.status).toBe(200);
     expect(res.body.item.name).toBe('New Name');
+  });
+
+  it('ATLAS-007 — PUT onto an existing wish returns 409 and leaves the row alone (#1898)', async () => {
+    const { user } = createUser(testDb);
+    await request(app)
+      .post('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id))
+      .send({ name: 'Japan', country_code: 'JP', target_date: '2027-05' });
+    const second = await request(app)
+      .post('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id))
+      .send({ name: 'Japan', country_code: 'JP', target_date: '2028-09' });
+
+    const res = await request(app)
+      .put(`/api/addons/atlas/bucket-list/${second.body.item.id}`)
+      .set('Cookie', authCookie(user.id))
+      .send({ target_date: '2027-05' });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'Already on your bucket list' });
+
+    const list = await request(app)
+      .get('/api/addons/atlas/bucket-list')
+      .set('Cookie', authCookie(user.id));
+    expect(list.body.items.map((i: { target_date: string }) => i.target_date).sort()).toEqual(['2027-05', '2028-09']);
   });
 
   it('ATLAS-008 — DELETE /bucket-list/:id removes item', async () => {

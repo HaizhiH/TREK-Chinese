@@ -9,14 +9,17 @@
  */
 
 /** Mirrors the published package's constant — bumped on any breaking API change. */
-export const PLUGIN_API_VERSION = 1 as const;
+export { PLUGIN_API_VERSION } from '../protocol/envelope';
 
 export interface PluginContext {
   readonly id: string;
+  /** `scope:'instance'` settings, secrets decrypted, frozen at activation; a field nobody
+   * set resolves to its manifest `default` (settings-defaults.ts). */
   readonly config: Readonly<Record<string, unknown>>;
   /** The ACTING USER's own value for one of this plugin's `scope:'user'` settings fields
-   * (decrypted host-side). Returns undefined for an unset value or a userless context
-   * (job/onLoad) — fall back to `config` (the admin-owned instance settings) there. */
+   * (decrypted host-side), or the field's manifest `default` when they never set it.
+   * Undefined for a field with neither, and in a userless context (job/onLoad) — fall
+   * back to `config` (the admin-owned instance settings) there. */
   settings: {
     get(key: string): Promise<unknown>;
   };
@@ -88,14 +91,19 @@ export interface PluginContext {
     /** A trip's packing items (hydrated bags/assignees). Needs 'db:read:packing'. */
     list(tripId: number): Promise<unknown[]>;
     /** Add a packing item (owner = acting user). Needs 'db:write:packing' + 'packing_edit'. */
-    create(tripId: number, input: { name: string; category?: string; checked?: boolean; is_private?: boolean; visibility?: 'common' | 'personal' | 'shared'; recipient_ids?: number[] }): Promise<unknown>;
+    create(tripId: number, input: { name: string; category?: string; checked?: boolean; weight_grams?: number | null; bag_id?: number | null; quantity?: number; is_private?: boolean; visibility?: 'common' | 'personal' | 'shared'; recipient_ids?: number[] }): Promise<unknown>;
     /** Update a packing item. Needs 'db:write:packing' + 'packing_edit'. */
     update(tripId: number, itemId: number, input: Record<string, unknown>): Promise<unknown>;
     /** Delete a packing item. Needs 'db:write:packing' + 'packing_edit'. */
     delete(tripId: number, itemId: number): Promise<{ deleted: boolean }>;
-    /** List/create/update/delete packing bags + set members (no privacy). Needs 'db:write:packing' + 'packing_edit'. */
+    /**
+     * List/create/update/delete packing bags + set members (no privacy). Bag methods need
+     * 'db:write:packing' + the acting user's 'packing_edit' trip permission — except this
+     * one: listBags is a read, but the envelope still gates it on the write scope
+     * (intentional — bags are the write-side structure; packing.list is the read surface).
+     */
     listBags(tripId: number): Promise<unknown[]>;
-    createBag(tripId: number, input: { name: string; color?: string }): Promise<unknown>;
+    createBag(tripId: number, input: { name: string; color?: string; weight_limit_grams?: number }): Promise<unknown>;
     updateBag(tripId: number, bagId: number, input: Record<string, unknown>): Promise<unknown>;
     deleteBag(tripId: number, bagId: number): Promise<{ deleted: boolean }>;
     setBagMembers(tripId: number, bagId: number, userIds: number[]): Promise<unknown>;
@@ -198,6 +206,15 @@ export interface PluginContext {
     getEntries(journeyId: number): Promise<unknown[]>;
     /** Create an entry on a journey the acting user can edit. Needs 'db:write:journal'. */
     createEntry(journeyId: number, input: { entry_date: string; [k: string]: unknown }): Promise<unknown>;
+    /**
+     * Attach a photo to an entry, bytes included. Needs 'db:write:journal'.
+     *
+     * For an importer that holds an export archive: it has bytes, not a gallery
+     * photo to point at and not a provider asset. 'name' supplies the extension
+     * only, the stored filename is the host's. Images only, no SVG, 10MB decoded,
+     * and the operator's allowed-file-types setting applies.
+     */
+    addEntryPhoto(entryId: number, input: { name: string; content_base64: string; caption?: string }): Promise<unknown>;
     /** Update an entry (owner/contributor-gated). Needs 'db:write:journal'. */
     updateEntry(entryId: number, input: Record<string, unknown>): Promise<unknown>;
     /** Delete an entry (owner/contributor-gated). Needs 'db:write:journal'. */
@@ -397,6 +414,42 @@ export interface PlaceDetailItem { label: string; value?: string; url?: string; 
 export interface PlaceDetailProvider {
   getDetails(placeId: number, ctx: PluginContext): Promise<PlaceDetailItem[]>;
 }
+/**
+ * A place a search provider found, in the shape the host turns into a search row.
+ *
+ * `rating` is the one field open data cannot answer, and the reason this hook exists:
+ * OpenStreetMap carries no ratings at all, so "the best one around here" needs an
+ * index that has them. Zero to five, the scale every such index uses.
+ */
+export interface SearchResultPlace {
+  /** Stable id in your own index. The host namespaces it as `plugin:<yourId>:<id>`. */
+  id?: string;
+  name: string;
+  lat: number;
+  lng: number;
+  address?: string;
+  rating?: number;
+  website?: string;
+  phone?: string;
+  category?: string;
+  description?: string;
+}
+/** What the host asks a search provider to look for. */
+export interface SearchRequest {
+  query: string;
+  /** The most rows worth returning. The host caps it at 20 whatever it is asked for. */
+  limit: number;
+  /** The caller's language tag, for indexes that carry localized names. */
+  lang?: string;
+  /** Where the person is looking, when there is somewhere to bias toward. */
+  near?: { lat: number; lng: number };
+  /** Category search within a Roadtrip search rectangle. Older hosts omit these fields. */
+  category?: string;
+  bounds?: { south: number; west: number; north: number; east: number };
+}
+export interface SearchProvider {
+  search(request: SearchRequest, ctx: PluginContext): Promise<SearchResultPlace[]>;
+}
 /** A validation/warning a plugin raises on a trip; TREK surfaces it in the planner. */
 export interface TripWarning { level: 'info' | 'warning' | 'error'; message: string; dayId?: number; placeId?: number; }
 export interface WarningProvider {
@@ -453,6 +506,130 @@ export interface MapMarkerProvider {
   /** Return markers to overlay on a trip's map. Runs with the current user bound,
    * on a short timeout; the host caps the marker count and skips a failing call. */
   getMarkers(tripId: number, ctx: PluginContext): Promise<MapMarkerContribution[]>;
+}
+
+/** One shape in a map layer. Declarative only — the host draws it; styling is the
+ * tone palette plus clamped numerics (width 1–8, opacity 0.05–1) and a dash enum. */
+export interface MapLayerFeature {
+  type: 'polyline' | 'polygon' | 'circle';
+  points?: Array<[number, number]>; // [lat,lng] pairs — polyline (≥2) / polygon (≥3)
+  center?: [number, number];        // circle center [lat,lng]
+  radiusM?: number;                 // circle radius in metres (1..2,000,000)
+  tone?: ContributionTone;
+  width?: number;                   // stroke width, clamped 1..8 (default 3)
+  dash?: 'solid' | 'dash' | 'dot';  // stroke style (default solid)
+  opacity?: number;                 // stroke opacity, clamped 0.05..1 (default 0.8)
+  fill?: boolean;                   // polygon/circle: tint the inside (default true)
+  label?: string;                   // short tooltip text (≤80 chars)
+}
+/** A bounded vector overlay the host renders onto the trip map — a computed route,
+ * a reachable-range corridor, a zone. Complements mapMarkerProvider (points). */
+export interface MapLayerContribution {
+  id: string;                 // stable per-layer id (React key / dedupe)
+  name?: string;              // short layer name
+  features: MapLayerFeature[]; // host caps: 4 layers + 150 features + 8000 vertices per plugin
+}
+export interface MapLayerProvider {
+  /** Return layers to overlay on a trip's map. Runs with the current user bound,
+   * on a short timeout; the host caps the vertex budget and skips a failing call. */
+  getLayers(tripId: number, ctx: PluginContext): Promise<MapLayerContribution[]>;
+}
+
+/** One waypoint of a route request — a located stop of the day being routed. */
+export interface RouteWaypoint {
+  lat: number;
+  lng: number;
+  name?: string;    // the stop's display name, when known
+  placeId?: number; // the TREK place behind this stop, when it is one
+}
+/** What the planner asks a routeProvider to route. */
+export interface RouteRequest {
+  tripId: number;
+  dayId: number | null;   // the selected day, when the request is day-scoped
+  profile: string;        // one of the plugin's declared capabilities.routeProfiles ids
+  waypoints: RouteWaypoint[]; // 2..30 located stops, in visit order
+}
+/** One leg of the returned route — between consecutive request waypoints. */
+export interface RouteLeg {
+  distance: number; // metres
+  duration: number; // seconds (driving + any stop time you fold into the leg)
+  note?: string;    // short text shown on the leg connector (e.g. "25 min charge"), ≤120 chars
+}
+/** An intermediate stop on the returned route (a charging stop, a rest area). */
+export interface RouteViaPoint {
+  lat: number;
+  lng: number;
+  label?: string;        // short marker text, ≤80 chars
+  tone?: ContributionTone;
+  dwellSeconds?: number; // planned time at the stop (0..86400)
+}
+/** A computed route. The host validates it whole: coordinates are range-checked
+ * (≤10000 vertices), legs must be exactly waypoints-1 entries, vias are capped
+ * at 40 — a malformed result is discarded and the planner falls back to straight
+ * lines, like an OSRM outage. */
+export interface RouteProviderResult {
+  coordinates: Array<[number, number]>; // [lat,lng] polyline of the whole route
+  distance: number;                     // metres, whole route
+  duration: number;                     // seconds, whole route
+  legs: RouteLeg[];
+  viaPoints?: RouteViaPoint[];
+}
+export interface RouteProvider {
+  /** Route the given waypoints under one of the plugin's declared profiles.
+   * Runs with the current user bound, on a 20 s timeout (room for an external
+   * solver via declared egress); a failing call falls back to straight lines. */
+  getRoute(request: RouteRequest, ctx: PluginContext): Promise<RouteProviderResult>;
+}
+
+/** A time contribution the host renders into the day plan — "35 min charging at
+ * this stop", "45 min security before this flight". Anchored to an assignment or
+ * reservation row (or the start/end of a day); `minutes` also counts into the
+ * day's route-footer total. */
+export interface DayScheduleContribution {
+  id: string;              // stable per-item id (React key / dedupe)
+  dayId: number;           // must be a day of the requested trip
+  assignmentId?: number;   // anchor under this itinerary place row…
+  reservationId?: number;  // …or under this booking row…
+  position?: 'start' | 'end'; // …or at the start/end of the day (default 'end')
+  minutes?: number;        // planned time, 1..1440 — shown and totalled
+  label: string;           // short text (≤120 chars)
+  tone?: ContributionTone;
+}
+export interface DayScheduleProvider {
+  /** Return schedule contributions for a trip's days. Runs with the current user
+   * bound, on a short timeout; the host caps the item count and skips a failing
+   * call. */
+  getSchedule(tripId: number, ctx: PluginContext): Promise<DayScheduleContribution[]>;
+}
+
+/** A colour the host paints into one day card in the Plan sidebar (and into that day's
+ * mobile chip) — so a trip split into legs shows its leg membership while you scroll
+ * the itinerary. A region takes a `tone` from the shared palette or the plugin's own
+ * `#rrggbb` `color` (exactly six hex digits — anything else is ignored); either way
+ * the host picks the alpha per theme and per region and clamps a colour's lightness,
+ * so the tint always lands as a readable wash. The card has three separately tintable
+ * regions; the `tone`/`color` shorthands fill every region not named, and `color` wins
+ * over `tone` at the same level. The regions follow the DESKTOP card — mobile honours
+ * only the badge (as the day chip). */
+export interface DayTintContribution {
+  dayId: number;              // must be a day of the requested trip
+  tone?: ContributionTone;    // shorthand for every region not named below
+  color?: string;             // own-colour shorthand, `#rrggbb` only
+  badgeTone?: ContributionTone;    // the day-number badge (and the mobile day chip)
+  badgeColor?: string;
+  headerTone?: ContributionTone;   // the day header row
+  headerColor?: string;
+  activityTone?: ContributionTone; // the expanded activity list
+  activityColor?: string;
+  label?: string;             // optional tooltip on the day (≤60 chars)
+}
+export interface DayTintProvider {
+  /** Return one entry per day you want coloured. Runs with the current user bound, on
+   * a short timeout; a failing call is skipped. A day takes at most one contribution,
+   * resolved whole: within your own list the first entry for a day wins, and across
+   * plugins the first granted provider wins, so a day never flickers between two
+   * colours and two plugins can never each own part of one card. */
+  getDayTints(tripId: number, ctx: PluginContext): Promise<DayTintContribution[]>;
 }
 
 /** A text-only section the host appends to a trip's PDF export. Declarative only —
@@ -529,6 +706,25 @@ export interface PluginSubscription {
   handler(payload: unknown, ctx: PluginContext): Promise<void> | void;
 }
 
+/**
+ * Publishes MCP tools on TREK's own MCP server, so an assistant can call into
+ * the plugin as the requesting user. Requires the `mcp:tools` permission.
+ *
+ * `tools` lists which of the tools declared in `capabilities.mcpTools` this
+ * build actually implements. The host advertises the intersection of the two:
+ * the manifest is signed and re-consented, this list is not, so a tool the
+ * manifest never declared is ignored rather than trusted.
+ *
+ * `callTool` receives the plugin-local name, without the `plugin_<id>_` prefix
+ * the tool is advertised under. Return anything JSON-serialisable; the host
+ * wraps it into an MCP result envelope, and a throw becomes a tool error the
+ * assistant can read and recover from.
+ */
+export interface McpToolProvider {
+  tools: string[];
+  callTool(call: { name: string; args: unknown }, ctx: PluginContext): Promise<unknown> | unknown;
+}
+
 export interface PluginDefinition {
   onLoad?(ctx: PluginContext): Promise<void> | void;
   onUnload?(ctx: PluginContext): Promise<void> | void;
@@ -545,13 +741,15 @@ export interface PluginDefinition {
    * JSON-serialisable value the host aggregates. Userless. Needs `hook:user-data`. */
   exportUserData?(input: { userId: number }, ctx: PluginContext): Promise<unknown> | unknown;
   /**
-   * Buttons on the plugin's own settings page ("Test connection", "Sync now"). The key
-   * must match an entry in the manifest's `actions`.
+   * Buttons on the plugin's settings forms ("Test connection", "Sync now", "Purge
+   * cache"). The key must match an entry in the manifest's `actions`; that entry's
+   * `scope` decides WHERE the button renders — `'user'` (default) on the user Settings
+   * tab, `'instance'` in the admin instance-settings dialog.
    *
-   * USER-INITIATED, so unlike the notificationChannel hook there IS an acting user — the
-   * person who clicked. `ctx.settings.get()` returns THEIR value and trip reads are
-   * membership-checked against them, which is what makes a "test my credentials" button
-   * possible at all.
+   * USER-INITIATED either way, so unlike the notificationChannel hook there IS an acting
+   * user — the person who clicked (a user, or an admin for an instance action).
+   * `ctx.settings.get()` returns THEIR value, `ctx.config` is the instance config, and
+   * trip reads are membership-checked against them.
    */
   actions?: Record<string, (ctx: PluginContext) => Promise<PluginActionResult | void> | PluginActionResult | void>;
   events?: PluginEventSubscription[];
@@ -559,14 +757,20 @@ export interface PluginDefinition {
     photoProvider?: PhotoProvider;
     calendarSource?: CalendarSource;
     placeDetailProvider?: PlaceDetailProvider;
+    searchProvider?: SearchProvider;
     warningProvider?: WarningProvider;
     tableContributor?: TableContributor;
     mapMarkerProvider?: MapMarkerProvider;
+    mapLayerProvider?: MapLayerProvider;
+    routeProvider?: RouteProvider;
+    dayScheduleProvider?: DayScheduleProvider;
+    dayTintProvider?: DayTintProvider;
     pdfSectionProvider?: PdfSectionProvider;
     atlasLayerProvider?: AtlasLayerProvider;
     journalEntryProvider?: JournalEntryProvider;
     tripCardProvider?: TripCardProvider;
     notificationChannel?: NotificationChannel;
+    mcpToolProvider?: McpToolProvider;
   };
   /** Functions exposed to dependents (names must match manifest capabilities.provides). */
   exports?: Record<string, PluginExport>;
@@ -703,6 +907,7 @@ export function createPluginContext(
       listMine: () => t.rpc('journal.listMine', { _inv: invocationId }) as Promise<unknown[]>,
       getEntries: (journeyId) => t.rpc('journal.getEntries', { journeyId, _inv: invocationId }) as Promise<unknown[]>,
       createEntry: (journeyId, input) => t.rpc('journal.createEntry', { journeyId, input, _inv: invocationId }),
+      addEntryPhoto: (entryId, input) => t.rpc('journal.addEntryPhoto', { entryId, input, _inv: invocationId }),
       updateEntry: (entryId, input) => t.rpc('journal.updateEntry', { entryId, input, _inv: invocationId }),
       deleteEntry: (entryId) => t.rpc('journal.deleteEntry', { entryId, _inv: invocationId }) as Promise<{ deleted: boolean }>,
       createJourney: (input) => t.rpc('journal.createJourney', { input, _inv: invocationId }),

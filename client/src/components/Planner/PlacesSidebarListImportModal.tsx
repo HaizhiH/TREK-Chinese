@@ -1,4 +1,4 @@
-import ReactDOM from 'react-dom'
+import { createPortal } from 'react-dom'
 import ToggleSwitch from '../Settings/ToggleSwitch'
 import type { SidebarState } from './usePlacesSidebar'
 
@@ -8,13 +8,15 @@ export function ListImportModal(S: SidebarState) {
     listImportProvider, setListImportProvider, listImportUrl, listImportLoading, handleListImport,
     listImportEnrich, setListImportEnrich, canEnrichImport,
   } = S
-  return ReactDOM.createPortal(
+  return createPortal(
     <div
+      role="presentation"
       onClick={() => { setListImportOpen(false); setListImportUrl('') }}
       className="bg-[rgba(0,0,0,0.4)]"
       style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
     >
       <div
+        role="presentation"
         onClick={e => e.stopPropagation()}
         className="bg-surface-card"
         style={{ borderRadius: 16, width: '100%', maxWidth: 440, padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}
@@ -25,7 +27,7 @@ export function ListImportModal(S: SidebarState) {
         {hasMultipleListImportProviders && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             {availableListImportProviders.map(provider => (
-              <button
+              <button type="button"
                 key={provider}
                 onClick={() => setListImportProvider(provider)}
                 className={listImportProvider === provider ? 'bg-accent text-accent-text' : 'bg-surface-tertiary text-content-muted'}
@@ -41,6 +43,9 @@ export function ListImportModal(S: SidebarState) {
         )}
         <div className="text-content-faint" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', marginBottom: 16 }}>
           {t(listImportProvider === 'google' ? 'places.googleListHint' : 'places.naverListHint')}
+          {/* Same box, same Share button: which screen the link came from is the URL's
+              business, and until it said so nobody knew a route could be pasted here. */}
+          {listImportProvider === 'google' ? <div style={{ marginTop: 4 }}>{t('places.googleDirHint')}</div> : null}
         </div>
         <input
           type="text"
@@ -67,7 +72,7 @@ export function ListImportModal(S: SidebarState) {
           </div>
         )}
         <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-          <button
+          <button type="button"
             onClick={() => { setListImportOpen(false); setListImportUrl('') }}
             className="text-content"
             style={{
@@ -78,7 +83,7 @@ export function ListImportModal(S: SidebarState) {
           >
             {t('common.cancel')}
           </button>
-          <button
+          <button type="button"
             onClick={handleListImport}
             disabled={!listImportUrl.trim() || listImportLoading}
             className={!listImportUrl.trim() || listImportLoading ? 'bg-surface-tertiary text-content-faint' : 'bg-accent text-accent-text'}

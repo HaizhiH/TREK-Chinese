@@ -70,6 +70,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Rejs',
   'reservations.type.event': 'Wydarzenie',
   'reservations.type.tour': 'Wycieczka',
+  'reservations.type.parking': 'Parking',
   'reservations.type.other': 'Inne',
   'reservations.type.bus': 'Autobus',
   'reservations.type.ferry': 'Prom',
@@ -127,6 +128,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': 'Przylot',
   'reservations.span.inTransit': 'W tranzycie',
   'reservations.span.pickup': 'Odbiór',
+  'reservations.span.dropOff': 'Oddanie',
   'reservations.span.return': 'Zwrot',
   'reservations.span.active': 'Aktywny',
   'reservations.span.start': 'Start',
@@ -161,6 +163,8 @@ const reservations: TranslationStrings = {
   'reservations.airtrail.syncedHint': 'Zsynchronizowano z AirTrail — zmiany są synchronizowane w obie strony.',
   'reservations.airtrail.notSynced': 'Niezsynchronizowane',
   'reservations.airtrail.notSyncedHint': 'Ten lot został usunięty w AirTrail i nie jest już synchronizowany.',
+  'reservations.airtrail.layoverHint':
+    'Zaimportowano z AirTrail. Lot wieloetapowy z przesiadką nie ma pojedynczego lotu AirTrail do synchronizacji, więc pozostaje jednorazowym importem.',
   'reservations.airtrail.loadError': 'Nie udało się wczytać Twoich lotów z AirTrail.',
   'reservations.airtrail.imported': 'Zaimportowano {count} lot(y/ów)',
   'reservations.airtrail.skippedDuplicate': '{count} już w tej wyprawie, pominięto',
@@ -180,5 +184,8 @@ const reservations: TranslationStrings = {
   'reservations.removeExpense': 'Remove expense',
   'reservations.urlLabel': 'Link',
   'reservations.urlPlaceholder': 'https://...',
+  'reservations.travelers.label': 'Podróżni',
+  'reservations.travelers.assign': 'Przypisz podróżnych',
+  'reservations.travelers.none': 'Brak podróżnych w wyprawie.',
 };
 export default reservations;

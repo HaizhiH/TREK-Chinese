@@ -2,15 +2,22 @@ import type { GeoPoint } from '@trek/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { mapsApi } from '../../api/client';
 import { useTransportRoutes } from '../../hooks/useTransportRoutes';
+import { useTranslation } from '../../i18n/TranslationContext';
 import { useSettingsStore } from '../../store/settingsStore';
 import type { Place, Reservation } from '../../types';
 import { visibleRouteReservations } from '../../utils/reservationRoutes';
 import { loadAmap, wgs84ToAmap } from './amapLoader';
+import { addAmapTripLayers, amapEventPoint, type AmapTripLayersProps } from './amapTripLayers';
+import { makePoiDraggable } from './markerDrag';
 import type { Poi } from './poiCategories';
 import { buildReservationItems } from './reservationsMapbox';
 import { getTransitMapSegments } from './transitGeometry';
+import { useStableVias } from './viaMarkerState';
 
-interface Props {
+interface Props extends AmapTripLayersProps {
+  routeColors?: { line: string; casing: string }[] | null;
+  focusPoints?: [number, number][];
+  fitPadding?: { top: number; right: number; bottom: number; left: number };
   jsKey: string;
   securityCode: string;
   places?: Place[];
@@ -87,7 +94,15 @@ export function MapViewAmap({
   showTransitRoutes = true,
   showReservationStats = false,
   onReservationClick,
+  routeColors,
+  focusPoints,
+  fitPadding,
+  ...tripLayers
 }: Props) {
+  const { t } = useTranslation();
+  const stableVias = useStableVias(tripLayers.roadtripVias);
+  const viaHandlers = useRef({ move: tripLayers.onMoveVia, remove: tripLayers.onRemoveVia });
+  viaHandlers.current = { move: tripLayers.onMoveVia, remove: tripLayers.onRemoveVia };
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const amapRef = useRef<any>(null);
@@ -186,6 +201,80 @@ export function MapViewAmap({
   }, [jsKey, securityCode]);
 
   useEffect(() => {
+    if (!ready || !mapRef.current || !amapRef.current) return;
+    try {
+      return addAmapTripLayers(
+        amapRef.current,
+        mapRef.current,
+        { ...tripLayers, roadtripVias: undefined },
+        {
+          hazard: t('roadtrip.hazards.note'),
+          point: t('roadtrip.hazards.point'),
+          via: t('roadtrip.via.hint'),
+        }
+      );
+    } catch {
+      onLoadError?.();
+    }
+  }, [
+    ready,
+    tripLayers.hazards,
+    tripLayers.dawarichTrack,
+    tripLayers.dawarichSelectedDate,
+    tripLayers.dawarichHiddenDates,
+    tripLayers.accessLines,
+    tripLayers.routeSegments,
+    tripLayers.routeVias,
+    tripLayers.dayBoundaryControls,
+    tripLayers.alternativeRoutes,
+    tripLayers.activeAlternative,
+    tripLayers.onChooseAlternative,
+    tripLayers.onHighlightAlternative,
+    tripLayers.onPoiDropOnRoute,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (!ready || !mapRef.current || !amapRef.current) return;
+    return addAmapTripLayers(
+      amapRef.current,
+      mapRef.current,
+      {
+        roadtripVias: { 0: stableVias },
+        onMoveVia: tripLayers.onMoveVia ? (...args) => viaHandlers.current.move?.(...args) : undefined,
+        onRemoveVia: (...args) => viaHandlers.current.remove?.(...args),
+      },
+      { hazard: '', point: '', via: t('roadtrip.via.hint') }
+    );
+  }, [ready, stableVias, !!tripLayers.onMoveVia, t]);
+
+  const focusKey = JSON.stringify([focusPoints, fitPadding]);
+  useEffect(() => {
+    const map = mapRef.current;
+    const AMap = amapRef.current;
+    if (!ready || !map || !AMap || !focusPoints?.length) return;
+    let cancelled = false;
+    void wgs84ToAmap(
+      AMap,
+      focusPoints.map(([lat, lng]) => ({ lat, lng }))
+    )
+      .then((points) => {
+        if (cancelled) return;
+        const markers = points.map((position) => new AMap.Marker({ position }));
+        const padding = fitPadding
+          ? [fitPadding.top, fitPadding.right, fitPadding.bottom, fitPadding.left]
+          : [48, 48, 48, 48];
+        map.setFitView(markers, false, padding, 16);
+      })
+      .catch(() => {
+        if (!cancelled) onLoadError?.();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, focusKey]);
+
+  useEffect(() => {
     const map = mapRef.current;
     const AMap = amapRef.current;
     if (!map || !AMap) return;
@@ -222,9 +311,11 @@ export function MapViewAmap({
         );
         if (cancelled) return;
         const poiMarkers = pois.map((poi, index) => {
+          const content = markerNode(poi.name, false, '#16a34a');
+          if (tripLayers.onPoiDropOnRoute && poi.osm_id) makePoiDraggable(content, poi.osm_id);
           const marker = new AMap.Marker({
             position: poiCoords[index],
-            content: markerNode(poi.name, false, '#16a34a'),
+            content,
             anchor: 'center',
             zIndex: 80,
           });
@@ -259,7 +350,7 @@ export function MapViewAmap({
             return [];
           }
         });
-        for (const line of [...(route || []), ...gpxLines]) {
+        for (const [index, line] of [...(route || []), ...gpxLines].entries()) {
           const path = await wgs84ToAmap(
             AMap,
             line.map(([lat, lng]) => ({ lat, lng }))
@@ -267,11 +358,17 @@ export function MapViewAmap({
           if (cancelled) return;
           const polyline = new AMap.Polyline({
             path,
-            strokeColor: '#2563eb',
+            strokeColor: routeColors?.[index]?.line || '#2563eb',
             strokeWeight: 5,
             strokeOpacity: 0.85,
             lineJoin: 'round',
           });
+          if (index < (route?.length ?? 0) && tripLayers.onRouteClick) {
+            polyline.on('click', (event: any) => {
+              const point = amapEventPoint(event);
+              tripLayers.onRouteClick?.(point.lat, point.lng);
+            });
+          }
           map.add(polyline);
           overlaysRef.current.push(polyline);
         }
@@ -327,8 +424,9 @@ export function MapViewAmap({
           map.add(endpointMarkers);
           overlaysRef.current.push(...endpointMarkers);
 
-          if (showReservationStats && item.primaryArc.length > 1 && (item.mainLabel || item.subLabel)) {
-            const midpoint = item.primaryArc[Math.floor(item.primaryArc.length / 2)];
+          const primaryArc = lines[0]?.coordinates || [];
+          if (showReservationStats && primaryArc.length > 1 && (item.mainLabel || item.subLabel)) {
+            const midpoint = primaryArc[Math.floor(primaryArc.length / 2)];
             if (midpoint) {
               const [position] = await wgs84ToAmap(AMap, [{ lat: midpoint[0], lng: midpoint[1] }]);
               if (cancelled) return;
@@ -343,7 +441,7 @@ export function MapViewAmap({
             }
           }
         }
-        if (located.length && lastFitKeyRef.current !== fitKey) {
+        if (located.length && !focusPoints?.length && lastFitKeyRef.current !== fitKey) {
           lastFitKeyRef.current = fitKey;
           const dayIds = new Set(dayPlaces.map((place) => place.id));
           const fitPoints = dayIds.size ? clusterPoints.filter(({ place }) => dayIds.has(place.id)) : clusterPoints;
@@ -351,7 +449,7 @@ export function MapViewAmap({
           map.setFitView(fitMarkers.length ? fitMarkers : undefined, false, [48, 48, 48, 48], 16);
         }
       } catch {
-        /* keep the basemap usable if an overlay conversion fails */
+        if (!cancelled) onLoadError?.();
       }
     };
     void render();
@@ -368,6 +466,11 @@ export function MapViewAmap({
     onPoiClick,
     fitKey,
     ready,
+    routeColors,
+    focusPoints,
+    fitPadding,
+    tripLayers.onRouteClick,
+    tripLayers.onPoiDropOnRoute,
     visibleReservations,
     transportRoutes,
     showEndpointLabels,

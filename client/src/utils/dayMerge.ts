@@ -1,3 +1,9 @@
+import { chronoOrder } from '@trek/shared'
+// `orderedEndpoints` is the geometry order's single source of truth, in the module
+// that documents the multi-leg model. Sorting endpoints a second time here is how
+// the two drift.
+import { orderedEndpoints } from './flightLegs'
+
 export const TRANSPORT_TYPES = new Set(['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cruise', 'ferry', 'transit', 'transport_other'])
 
 export interface MergedItem {
@@ -13,7 +19,7 @@ export function parseTimeToMinutes(time?: string | null): number | null {
     return h * 60 + m
   }
   const parts = time.split(':').map(Number)
-  if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) return parts[0] * 60 + parts[1]
+  if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) return parts[0] * 60 + parts[1]
   return null
 }
 
@@ -30,6 +36,47 @@ export function getSpanPhase(
 }
 
 /**
+ * Booking types that carry no information on the days between their start and end and
+ * therefore drop out of the day timeline there. A parked car just stands in the garage:
+ * you only need to know when you hand it over and when you collect it, so the days in
+ * between show nothing at all, not even a badge in the day header (#1937).
+ *
+ * A car rental is deliberately NOT in this set: its middle days are not dropped but
+ * moved into the day header, which is what people expect from a vehicle they are
+ * driving around. Kept as a set so another such type can join without editing every
+ * render site again.
+ */
+const MIDDLE_DAY_HIDDEN_TYPES = new Set(['parking'])
+
+export function hidesOnMiddleDay(
+  r: { type?: string | null; day_id?: number | null; end_day_id?: number | null },
+  dayId: number
+): boolean {
+  return !!r.type && MIDDLE_DAY_HIDDEN_TYPES.has(r.type) && getSpanPhase(r, dayId) === 'middle'
+}
+
+/**
+ * Bookings you ride and then leave behind: the vehicle carries you out of the day's
+ * geography and keeps going without you. Their endpoints are therefore not the ends of
+ * a drive — you did not drive to tonight's hotel from the airport you took off from, and
+ * you did not drive to the airport you landed at from this morning's hotel (#2133).
+ *
+ * A hire car, a parked car or a hired bike is the exact opposite and must stay out of
+ * this set: you collect the vehicle and keep driving it, so a multi-day rental's pickup
+ * point IS where a drive to the hotel starts, and its drop-off point IS where a drive
+ * from the hotel ends (both pinned by the car-rental span rules above).
+ *
+ * `taxi`, `transit` and `transport_other` are left out on purpose: they are same-day
+ * hops, so both their endpoints land on the day anyway and the distinction never fires.
+ * Keeping them out means this set cannot change any behaviour they have today.
+ */
+const CARRIER_TRANSPORT_TYPES = new Set(['flight', 'train', 'ferry', 'cruise', 'bus'])
+
+export function isCarrierTransport(r: { type?: string | null }): boolean {
+  return !!r.type && CARRIER_TRANSPORT_TYPES.has(r.type)
+}
+
+/**
  * The route waypoints a transport contributes on a given day, respecting multi-day spans.
  * A car rental (or any reservation whose span covers several days) is only routed to on its
  * pickup day (the departure endpoint) and from on its drop-off day (the arrival endpoint) — on
@@ -40,9 +87,23 @@ export function getTransportRouteEndpoints(
   r: any,
   dayId: number
 ): { from: { lat: number; lng: number } | null; to: { lat: number; lng: number } | null } {
+  // A leg of a multi-leg booking spans its OWN pair of airports, endpoints[i] and
+  // endpoints[i+1] — not the booking's outermost two. Handing back the booking's
+  // from/to for every leg put a stop between two legs on a road route from the
+  // arrival airport back to the departure one (#2071).
+  //
+  // Only when the endpoints line up one-per-stop with the legs. An endpoint that
+  // failed to geocode never reaches the row, and a short list would silently map
+  // every earlier leg to the wrong pair — so an ambiguous booking keeps the role
+  // lookup it has always used.
+  const ordered = orderedEndpoints(r)
+  const legIdx: number | null =
+    r.__leg && ordered.length === r.__leg.total + 1 ? (r.__leg.index as number) : null
+  const point = (e: { lat?: number | null; lng?: number | null } | undefined): { lat: number; lng: number } | null =>
+    e && e.lat != null && e.lng != null ? { lat: e.lat, lng: e.lng } : null
   const ep = (role: 'from' | 'to'): { lat: number; lng: number } | null => {
-    const e = (r.endpoints || []).find((x: any) => x.role === role)
-    return e && e.lat != null && e.lng != null ? { lat: e.lat, lng: e.lng } : null
+    if (legIdx != null) return point(ordered[role === 'from' ? legIdx : legIdx + 1])
+    return point((r.endpoints || []).find((x: { role?: string }) => x.role === role))
   }
   switch (getSpanPhase(r, dayId)) {
     case 'start':
@@ -54,6 +115,21 @@ export function getTransportRouteEndpoints(
     default:
       return { from: ep('from'), to: ep('to') }
   }
+}
+
+/**
+ * Whether this booking is a carrier that contributes a located route endpoint on the
+ * given day — the signal that the day's geography changes by riding something rather
+ * than driving, which the hotel-bookend rules need on days without recorded
+ * check-in/check-out times (#2157). The span rules above make an overnight carrier
+ * count only on the days it actually touches. A carrier saved without coordinates
+ * deliberately does not count: it contributes nothing to the drawn route, so treating
+ * it as proof of travel would flip hotel legs on data the map cannot see.
+ */
+export function hasCarrierEndpointOnDay(r: any, dayId: number): boolean {
+  if (!isCarrierTransport(r)) return false
+  const { from, to } = getTransportRouteEndpoints(r, dayId)
+  return from != null || to != null
 }
 
 export function getDisplayTimeForDay(
@@ -161,30 +237,56 @@ export function getTransportForDay(opts: {
 }
 
 /**
+ * Every booking pinned to one day assignment. A stop can carry several (the parking
+ * pass and the tickets for the same zoo), and the exclusion above keeps all of them
+ * out of the timeline, so the place row is the only surface that can show them, and
+ * a `find()` there dropped the rest without trace (#2201).
+ *
+ * Earliest first, untimed last, id as the tiebreaker: the store's array order is
+ * newest-first for locally created bookings and load order otherwise, which would
+ * shuffle the same two bookings between a reload and a live update.
+ */
+export function getAssignmentReservations<T extends {
+  id: number
+  assignment_id?: number | null
+  reservation_time?: string | null
+}>(reservations: T[], assignmentId: number | null | undefined): T[] {
+  if (!assignmentId) return []
+  return reservations
+    .filter(r => r.assignment_id === assignmentId)
+    .sort((a, b) => {
+      const at = a.reservation_time || ''
+      const bt = b.reservation_time || ''
+      if (at !== bt) {
+        if (!at) return 1
+        if (!bt) return -1
+        return at < bt ? -1 : 1
+      }
+      return a.id - b.id
+    })
+}
+
+/**
  * Order items chronologically: anything with a time (a place's place_time, a
  * transport/leg display time, a timed note) sorts by that time. An item WITHOUT a
  * time inherits the time of the timed item before it, so untimed items stay where
  * they were manually placed. Stable on the incoming order for ties.
+ *
+ * The rule itself is `chronoOrder` in @trek/shared, the same one the server uses when
+ * a start time is saved. The server feeds it the day's stops only, though. An untimed
+ * place behind a timed note or booking inherits that item's time here and the previous
+ * stop's time there, so on such a day the stored order and this one can differ.
  */
 function applyChronoOrder(
   items: MergedItem[],
   dayId: number,
   getDisplayTime: (r: any, dayId: number) => string | null
 ): MergedItem[] {
-  const timeOf = (it: MergedItem): number | null => {
+  return chronoOrder(items, it => {
     if (it.type === 'place') return parseTimeToMinutes(it.data?.place?.place_time)
     if (it.type === 'note') return parseTimeToMinutes(it.data?.time)
     return parseTimeToMinutes(getDisplayTime(it.data, dayId))
-  }
-  let last = -Infinity
-  return items
-    .map((it, i) => {
-      const t = timeOf(it)
-      if (t != null) last = t
-      return { it, i, eff: t != null ? t : last }
-    })
-    .sort((a, b) => a.eff - b.eff || a.i - b.i)
-    .map(k => k.it)
+  })
 }
 
 /** Merge places, notes, and transports into a single ordered day timeline. */
@@ -220,8 +322,13 @@ export function getMergedItems(opts: {
     const timed = timedTransports[ti]
     const minutes = timed.minutes
 
-    // Per-day position takes precedence (set by user reorder)
-    const perDayPos = timed.data.day_positions?.[dayId] ?? timed.data.day_positions?.[String(dayId)]
+    // Per-day position takes precedence (set by user reorder), then the booking's
+    // own slot. The map's waypoint builder has always read day_plan_position and
+    // this never did, so a booking carrying only that value sat between the places
+    // on the map and at the bottom of the day everywhere else (#2071).
+    const perDayPos = timed.data.day_positions?.[dayId]
+      ?? timed.data.day_positions?.[String(dayId)]
+      ?? timed.data.day_plan_position
     if (perDayPos != null) {
       result.push({ type: timed.type, sortKey: perDayPos, data: timed.data })
       continue

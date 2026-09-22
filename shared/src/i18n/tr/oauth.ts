@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'Geziler',
   'oauth.scope.group.places': 'Yer',
+  'oauth.scope.group.collections': 'Koleksiyonlar',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': 'Ambalaj',
   'oauth.scope.group.todos': 'Yapılacaklar',
@@ -27,6 +28,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'Yerleri, gün atamalarını, etiketleri ve kategorileri oku',
   'oauth.scope.places:write.label': 'Yerleri yönet',
   'oauth.scope.places:write.description': 'Yerleri, atamaları ve etiketleri oluştur, güncelle ve sil',
+  'oauth.scope.collections:read.label': 'Koleksiyonları görüntüle',
+  'oauth.scope.collections:read.description':
+    'Kayıtlı yer koleksiyonlarını, içindeki yerleri, puanları, etiketleri ve üyeleri okuma',
+  'oauth.scope.collections:write.label': 'Koleksiyonları yönet',
+  'oauth.scope.collections:write.description':
+    'Koleksiyon oluşturma/düzenleme, yerleri kaydetme, puanlama, etiketleme ve kopyalama, listeleri paylaşma',
   'oauth.scope.atlas:read.label': "Atlas'ı Görüntüle",
   'oauth.scope.atlas:read.description': 'Ziyaret edilen ülkeleri, bölgeleri ve yapılacaklar listesini oku',
   'oauth.scope.atlas:write.label': "Atlas'ı Yönet",
@@ -91,5 +98,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'Dosyalar',
+  'oauth.scope.group.settings': 'Ayarlar',
+  'oauth.scope.files:read.label': 'Gezi dosyalarını görüntüle',
+  'oauth.scope.files:read.description': 'Bir gezinin belgelerini listele: adlar, boyutlar, kimin yüklediği ve neye bağlı oldukları',
+  'oauth.scope.files:write.label': 'Gezi dosyalarını yönet',
+  'oauth.scope.files:write.description': 'Dosyaları yeniden adlandır ve açıkla, rezervasyonlara ve yerlere bağla, yıldızla ve çöpe taşı',
+  'oauth.scope.files:content.label': 'Dosya içeriğini oku',
+  'oauth.scope.files:content.description': 'Yüklenmiş bir belgenin içeriğini oku, örneğin bir rezervasyon PDF’i veya bir bilet',
+  'oauth.scope.settings:read.label': 'Tercihlerini görüntüle',
+  'oauth.scope.settings:read.description': 'Birimleri, saat biçimini, dili, varsayılan para birimini ve başlangıç sayfasını oku',
+  'oauth.scope.settings:write.label': 'Tercihlerini değiştir',
+  'oauth.scope.settings:write.description': 'Birimleri, saat biçimini, dili, varsayılan para birimini ve başlangıç sayfasını değiştir. Kayıtlı API anahtarlarını asla',
+  'oauth.scope.group.plugins': 'Eklentiler',
+  'oauth.scope.plugins:use.label': 'Eklenti araçlarını çalıştır',
+  'oauth.scope.plugins:use.description': 'Bu istemcinin, bir yöneticinin kurup onayladığı eklentilerin sunduğu araçları çağırmasına izin verir. Her eklenti, bu belirtecin kapsamlarıyla değil, kendisine önceden verilmiş yetkilerle çalışır',
 };
 export default oauth;

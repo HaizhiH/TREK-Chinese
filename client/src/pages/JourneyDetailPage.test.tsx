@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { localIsoDate } from '../utils/localDate';
 import { render, screen, waitFor, cleanup } from '../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -68,8 +69,8 @@ vi.mock('../components/shared/ConfirmDialog', () => ({
 }));
 
 const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
   return {
     ...actual,
     useParams: () => ({ id: '1' }),
@@ -326,18 +327,26 @@ describe('JourneyDetailPage', () => {
 
   // ── FE-PAGE-JOURNEYDETAIL-008 ──────────────────────────────────────────
   describe('FE-PAGE-JOURNEYDETAIL-008: Shows VerdictSection when entry has pros/cons', () => {
-    it('renders the Pros & Cons section header', async () => {
+    // The verdict moved behind the story's fold in discussion #2299: it belongs to
+    // one entry, and a feed of open pro/con tables reads as a spreadsheet.
+    async function openTheFold() {
+      const user = userEvent.setup();
       await renderAndWait();
+      await user.click(screen.getAllByText('Show more')[0]);
+    }
+
+    it('renders the Pros & Cons section header once the entry is opened', async () => {
+      await openTheFold();
       expect(screen.getByText('Pros & Cons')).toBeInTheDocument();
     });
 
     it('renders pro items', async () => {
-      await renderAndWait();
+      await openTheFold();
       expect(screen.getByText('Great food')).toBeInTheDocument();
     });
 
     it('renders con items', async () => {
-      await renderAndWait();
+      await openTheFold();
       expect(screen.getByText('Crowded')).toBeInTheDocument();
     });
   });
@@ -501,16 +510,17 @@ describe('JourneyDetailPage', () => {
       });
     });
 
-    it('shows hint text to add a trip', async () => {
+    it('shows the journey mascot illustration alongside the empty state', async () => {
       setupDefaultHandlers({ entries: [], stats: { entries: 0, photos: 0, places: 0 } });
 
-      render(<JourneyDetailPage />);
+      const { container } = render(<JourneyDetailPage />);
 
       await waitFor(() => {
-        expect(
-          screen.getByText('Add a trip to get started with skeleton entries'),
-        ).toBeInTheDocument();
+        expect(screen.getByText('No entries yet')).toBeInTheDocument();
       });
+      // The shared EmptyState renders the TREK mascot acting out the "journey"
+      // scene instead of a text hint.
+      expect(container.querySelector('.trek--journey')).toBeInTheDocument();
     });
   });
 
@@ -636,8 +646,8 @@ describe('JourneyDetailPage', () => {
         expect(screen.getAllByText('Venice Visit').length).toBeGreaterThanOrEqual(1);
       });
 
-      // Skeleton card shows "Add Entry" CTA
-      expect(screen.getByText(/Add Entry/)).toBeInTheDocument();
+      // Skeleton card shows "Add Entry" CTA (the view-controls button also shows it)
+      expect(screen.getAllByText(/Add Entry/).length).toBeGreaterThan(0);
     });
   });
 
@@ -839,16 +849,13 @@ describe('JourneyDetailPage', () => {
     });
   });
 
-  // ── Helper: open entry editor ────────────────────────��─────────────────
+  // ── Helper: open entry editor ───────────────────────────────────────────
   async function openEntryEditor(user: ReturnType<typeof userEvent.setup>) {
-    // The + button is inside the view controls row, after the tab group
-    // Structure: div.justify-between > [div(tabs), button(+)]
-    // The tab group div contains the Timeline/Gallery/Map buttons
-    const tabGroup = screen.getByRole('button', { name: /timeline/i }).parentElement!;
-    // The + button is the next sibling of the tab group
-    const addBtn = tabGroup.nextElementSibling as HTMLElement;
-    expect(addBtn).toBeTruthy();
-    expect(addBtn.tagName).toBe('BUTTON');
+    // By name rather than by position: the controls row also carries the search
+    // box now, so "next sibling of the tab group" stopped being the + button
+    // (discussion #2299). The day headers' own plus buttons are labelled "Add an
+    // entry on this day" and do not answer to this.
+    const addBtn = screen.getByRole('button', { name: /^add entry$/i });
 
     await user.click(addBtn);
 
@@ -920,10 +927,11 @@ describe('JourneyDetailPage', () => {
       await renderAndWait();
       await openEntryEditor(user);
 
-      // The editor shows "Pros & Cons" label (displayed uppercase via CSS class)
-      // The timeline view already shows "Pros & Cons" from the first entry, so use getAllByText
+      // The editor shows "Pros & Cons" label (displayed uppercase via CSS class).
+      // Exactly one: the timeline's copy sits behind the entry's fold now, and this
+      // test never opens it (discussion #2299).
       const prosConsLabels = screen.getAllByText('Pros & Cons');
-      expect(prosConsLabels.length).toBeGreaterThanOrEqual(2);
+      expect(prosConsLabels).toHaveLength(1);
       // It also shows sub-labels Pros and Cons
       expect(screen.getByText('Pros')).toBeInTheDocument();
       expect(screen.getByText('Cons')).toBeInTheDocument();
@@ -1316,7 +1324,7 @@ describe('JourneyDetailPage', () => {
         http.post('/api/journeys/1/entries', () => {
           return HttpResponse.json({
             id: 99, journey_id: 1, author_id: 1, type: 'entry',
-            entry_date: new Date().toISOString().split('T')[0],
+            entry_date: localIsoDate(),
             title: 'Test Entry', story: null, location_name: null,
             location_lat: null, location_lng: null, mood: null, weather: null,
             tags: [], pros_cons: null, visibility: 'private', sort_order: 0,
@@ -2195,13 +2203,13 @@ describe('JourneyDetailPage', () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       await openGalleryWithProvider(user);
 
-      // Footer shows "0 selected" initially
+      // The count lives on the Add button alone now: the separate "N selected" pill
+      // beside it said the same thing twice and cost the grid a row (#2299).
       await waitFor(() => {
-        expect(screen.getByText('selected')).toBeInTheDocument();
+        expect(screen.queryByText('selected')).toBeNull();
       });
 
-      // Add button shows "Add" (disabled when 0 selected)
-      const addBtn = screen.getByRole('button', { name: /^Add/ });
+      const addBtn = screen.getByRole('button', { name: /^Add$/ });
       expect(addBtn).toBeDisabled();
     });
   });
@@ -2359,15 +2367,15 @@ describe('JourneyDetailPage', () => {
 
   // ── FE-PAGE-JOURNEYDETAIL-105 ──────────────────────────────────────────
   describe('FE-PAGE-JOURNEYDETAIL-105: EntryEditor has hidden file input', () => {
-    it('has a hidden file input with accept="image/*" and multiple attribute', async () => {
+    it('takes pictures and clips, several at a time', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       await renderAndWait();
       await openEntryEditor(user);
 
-      // The editor has a hidden file input
-      const fileInputs = document.querySelectorAll('input[type="file"][accept="image/*"]');
+      // The picker takes video as well as stills (#2341). The camera input beside
+      // it stays image-only: `capture` is for taking a photo, not filming one.
+      const fileInputs = document.querySelectorAll('input[type="file"][accept="image/*,video/*"]');
       expect(fileInputs.length).toBeGreaterThanOrEqual(1);
-      // Should have the multiple attribute
       const editorFileInput = Array.from(fileInputs).find(input => {
         return input.closest('[class*="fixed"]') !== null;
       });
@@ -2752,7 +2760,7 @@ describe('JourneyDetailPage', () => {
 
       // After selection, the Add button should show count
       await waitFor(() => {
-        const addBtn = screen.getByRole('button', { name: /^Add/ });
+        const addBtn = screen.getByRole('button', { name: /^Add \(\d+\)$/ });
         expect(addBtn.textContent).toContain('1');
       });
     });
@@ -3719,13 +3727,15 @@ describe('JourneyDetailPage', () => {
     it('clicking Copy on share link copies to clipboard', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
-      // Mock clipboard
+      // Mock clipboard. jsdom leaves isSecureContext undefined, which the copy
+      // handler reads as plain HTTP and answers with its execCommand fallback.
       const mockWriteText = vi.fn().mockResolvedValue(undefined);
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: mockWriteText },
         writable: true,
         configurable: true,
       });
+      Object.defineProperty(window, 'isSecureContext', { value: true, writable: true, configurable: true });
 
       server.use(
         http.get('/api/journeys/1/share-link', () => {
@@ -3756,6 +3766,242 @@ describe('JourneyDetailPage', () => {
       await waitFor(() => {
         expect(screen.getByText('Copied!')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('FE-PAGE-JOURNEYDETAIL-153: Contextual external photos', () => {
+    it('shows the External photos tab and searches the selected entry day', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const searches: Array<{ from?: string; to?: string }> = [];
+      server.use(
+        http.get('/api/integrations/memories/:provider/status', () => HttpResponse.json({ connected: true })),
+        http.post('/api/integrations/memories/:provider/search', async ({ request }) => {
+          searches.push(await request.json() as { from?: string; to?: string });
+          return HttpResponse.json({ assets: [{ id: 'context-1', takenAt: '2026-03-15T12:00:00Z', city: 'Rome' }], hasMore: false });
+        }),
+      );
+
+      await renderAndWait();
+      await openEntryEditor(user);
+      await user.click(screen.getByRole('button', { name: /external photos/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('journey-external-provider-immich')).toBeInTheDocument();
+      });
+      await user.click(screen.getByTestId('journey-external-provider-immich'));
+      await waitFor(() => expect(screen.getByTestId('journey-provider-picker-embedded')).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText(/This day|journey\.picker\.day/)).toBeInTheDocument());
+      await waitFor(() => expect(searches.length).toBeGreaterThan(0));
+
+      expect(searches[0].from).toBe(searches[0].to);
+      expect(screen.getByText('This day')).toBeInTheDocument();
+      expect(document.querySelector('img[src*="/api/integrations/memories/"]')).toBeTruthy();
+
+      await user.click(screen.getByText('Trip Period'));
+      await waitFor(() => expect(searches.some(search => search.from === '2026-03-14' && search.to === '2026-03-20')).toBe(true));
+      expect(screen.queryByText(/No trips linked/i)).not.toBeInTheDocument();
+    });
+
+    it('does not create a duplicate when provider-photo attachment fails after creating the entry', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      let createCalls = 0;
+      let updateCalls = 0;
+      let providerCalls = 0;
+
+      server.use(
+        http.get('/api/integrations/memories/:provider/status', () => HttpResponse.json({ connected: true })),
+        http.post('/api/integrations/memories/:provider/search', () => HttpResponse.json({
+          assets: [{ id: 'context-1', takenAt: '2026-03-15T12:00:00Z', city: 'Rome' }],
+          hasMore: false,
+        })),
+        http.post('/api/journeys/1/entries', () => {
+          createCalls++;
+          return HttpResponse.json({
+            id: 88, journey_id: 1, author_id: 1, type: 'entry',
+            entry_date: '2026-03-15', title: null, story: null, location_name: null,
+            location_lat: null, location_lng: null, mood: null, weather: null,
+            tags: [], pros_cons: null, visibility: 'private', sort_order: 0,
+            entry_time: null, photos: [], created_at: now, updated_at: now,
+          });
+        }),
+        http.patch('/api/journeys/entries/88', () => {
+          updateCalls++;
+          return HttpResponse.json({ id: 88 });
+        }),
+        http.post('/api/journeys/entries/88/provider-photos', () => {
+          providerCalls++;
+          return providerCalls === 1
+            ? HttpResponse.json({ error: 'provider unavailable' }, { status: 502 })
+            : HttpResponse.json({ added: 1 });
+        }),
+      );
+
+      await renderAndWait();
+      await openEntryEditor(user);
+      await user.click(screen.getByRole('button', { name: /external photos/i }));
+      await waitFor(() => expect(screen.getByTestId('journey-external-provider-immich')).toBeInTheDocument());
+      await user.click(screen.getByTestId('journey-external-provider-immich'));
+
+      const picker = await waitFor(() => screen.getByTestId('journey-provider-picker-embedded'));
+      await waitFor(() => expect(picker.querySelector('img[src*="/api/integrations/memories/"]')).toBeTruthy());
+      const photo = picker.querySelector('img[src*="/api/integrations/memories/"]')!;
+      await user.click(photo.closest('[class*="aspect-square"]') as HTMLElement);
+      await user.click(screen.getByRole('button', { name: /^Add \(1\)/ }));
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(providerCalls).toBe(1));
+      expect(createCalls).toBe(1);
+      expect(screen.getByText('New Entry')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(providerCalls).toBe(2));
+      expect(createCalls).toBe(1);
+      expect(updateCalls).toBe(1);
+    });
+  });
+
+  // ── FE-PAGE-JOURNEYDETAIL-154 ──────────────────────────────────────────
+  describe('FE-PAGE-JOURNEYDETAIL-154: EntryEditor use-current-location button', () => {
+    const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+
+    function stubGeolocation(getCurrentPosition: (success: PositionCallback, error?: PositionErrorCallback) => void) {
+      Object.defineProperty(navigator, 'geolocation', {
+        configurable: true,
+        value: { getCurrentPosition: vi.fn(getCurrentPosition) },
+      });
+    }
+
+    const stubGeoSuccess = () =>
+      stubGeolocation(success => success({
+        coords: {
+          latitude: 41.9, longitude: 12.5, accuracy: 10,
+          heading: null, speed: null, altitude: null, altitudeAccuracy: null,
+        },
+        timestamp: now,
+      } as unknown as GeolocationPosition));
+
+    afterEach(() => {
+      if (originalGeolocation) {
+        Object.defineProperty(navigator, 'geolocation', originalGeolocation);
+      } else {
+        delete (navigator as { geolocation?: unknown }).geolocation;
+      }
+      delete (window as { __addToast?: unknown }).__addToast;
+    });
+
+    it('fills the location field from geolocation and reverse geocoding', async () => {
+      stubGeoSuccess();
+      server.use(
+        http.get('/api/maps/reverse', () => {
+          return HttpResponse.json({ name: 'Colosseum', address: 'Rome, Italy' });
+        }),
+      );
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await renderAndWait();
+      await openEntryEditor(user);
+
+      await user.click(screen.getByRole('button', { name: 'Use my current location' }));
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Search location...')).toHaveValue('Colosseum');
+      });
+    });
+
+    it('falls back to coordinates when reverse geocoding returns nothing', async () => {
+      stubGeoSuccess();
+      server.use(
+        http.get('/api/maps/reverse', () => {
+          return HttpResponse.json({ name: null, address: null });
+        }),
+      );
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await renderAndWait();
+      await openEntryEditor(user);
+
+      await user.click(screen.getByRole('button', { name: 'Use my current location' }));
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Search location...')).toHaveValue('41.90000, 12.50000');
+      });
+    });
+
+    it('shows an error toast when location permission is denied', async () => {
+      const addToast = vi.fn();
+      (window as { __addToast?: unknown }).__addToast = addToast;
+      stubGeolocation((_success, error) => error?.({
+        code: 1, message: 'denied',
+        PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3,
+      } as GeolocationPositionError));
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await renderAndWait();
+      await openEntryEditor(user);
+
+      await user.click(screen.getByRole('button', { name: 'Use my current location' }));
+
+      await waitFor(() => {
+        expect(addToast).toHaveBeenCalledWith(
+          'Location access was denied. Allow it in your browser settings and try again.',
+          'error',
+          undefined,
+        );
+      });
+    });
+
+    it('keeps a search result picked while the reverse geocode is in flight', async () => {
+      stubGeoSuccess();
+      let releaseReverse!: () => void;
+      const reverseGate = new Promise<void>(resolve => { releaseReverse = resolve; });
+      let reverseReturned = false;
+      server.use(
+        http.get('/api/maps/reverse', async () => {
+          await reverseGate;
+          reverseReturned = true;
+          return HttpResponse.json({ name: 'Colosseum', address: 'Rome, Italy' });
+        }),
+        http.post('/api/maps/search', () => {
+          return HttpResponse.json({
+            places: [{ name: 'Vatican City', address: 'Vatican, Rome', lat: 41.9, lng: 12.45 }],
+            source: 'osm',
+          });
+        }),
+      );
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await renderAndWait();
+      await openEntryEditor(user);
+
+      await user.click(screen.getByRole('button', { name: 'Use my current location' }));
+
+      const locationInput = screen.getByPlaceholderText('Search location...');
+      await waitFor(() => {
+        expect(locationInput).toHaveValue('41.90000, 12.50000');
+      });
+
+      // With the reverse geocode still pending, search for and pick a place
+      await user.type(locationInput, 'Vatican');
+      vi.advanceTimersByTime(500);
+      await waitFor(() => {
+        expect(screen.getByText('Vatican City')).toBeInTheDocument();
+      });
+      await user.click(screen.getByText('Vatican City'));
+      await waitFor(() => {
+        expect(locationInput).toHaveValue('Vatican City');
+      });
+
+      // Now let the reverse geocode land; it must not overwrite the pick.
+      // If the guard regresses, the input flips to 'Colosseum' and the
+      // inner waitFor resolves, failing the rejects assertion.
+      releaseReverse();
+      await waitFor(() => {
+        expect(reverseReturned).toBe(true);
+      });
+      await expect(
+        waitFor(() => expect(locationInput).toHaveValue('Colosseum'), { timeout: 300 }),
+      ).rejects.toThrow();
+      expect(locationInput).toHaveValue('Vatican City');
     });
   });
 });

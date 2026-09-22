@@ -6,11 +6,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => ({ tasks: [] as Array<{ expr: string; fn: () => void; stopped: boolean; stop(): void }> }));
-vi.mock('node-cron', () => ({
-  default: {
-    validate: (expr: string) => typeof expr === 'string' && expr.trim() !== '' && expr !== 'not-a-cron',
-    schedule: (expr: string, fn: () => void) => {
-      const t = { expr, fn, stopped: false, stop() { this.stopped = true; } };
+vi.mock('cron', () => ({
+  validateCronExpression: (expr: string) => ({ valid: typeof expr === 'string' && expr.trim() !== '' && expr !== 'not-a-cron' }),
+  CronJob: {
+    from: ({ cronTime, onTick }: { cronTime: string; onTick: () => void }) => {
+      const t = { expr: cronTime, fn: onTick, stopped: false, stop() { this.stopped = true; } };
       h.tasks.push(t);
       return t;
     },

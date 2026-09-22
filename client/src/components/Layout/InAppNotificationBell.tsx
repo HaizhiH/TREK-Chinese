@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import ReactDOM from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router'
 import { Bell, Trash2, CheckCheck } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { useInAppNotificationStore } from '../../store/inAppNotificationStore.ts'
@@ -42,7 +42,7 @@ export default function InAppNotificationBell(): React.ReactElement {
 
   return (
     <div className="relative flex-shrink-0">
-      <button
+      <button type="button"
         onClick={handleOpen}
         title={t('notifications.title')}
         className="relative p-2 rounded-lg transition-colors text-content-muted"
@@ -67,9 +67,10 @@ export default function InAppNotificationBell(): React.ReactElement {
         )}
       </button>
 
-      {open && ReactDOM.createPortal(
+      {open && createPortal(
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setOpen(false)} />
+          {/* Click-away catcher only — the bell button itself closes the panel again from the keyboard. */}
+          <div role="presentation" style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setOpen(false)} />
           <div
             className="rounded-xl shadow-xl border overflow-hidden bg-surface-card border-edge"
             style={{
@@ -98,7 +99,7 @@ export default function InAppNotificationBell(): React.ReactElement {
               </span>
               <div className="flex items-center gap-1">
                 {unreadCount > 0 && (
-                  <button
+                  <button type="button"
                     onClick={markAllRead}
                     title={t('notifications.markAllRead')}
                     className="p-1.5 rounded-lg transition-colors text-content-muted"
@@ -109,7 +110,7 @@ export default function InAppNotificationBell(): React.ReactElement {
                   </button>
                 )}
                 {notifications.length > 0 && (
-                  <button
+                  <button type="button"
                     onClick={deleteAll}
                     title={t('notifications.deleteAll')}
                     className="p-1.5 rounded-lg transition-colors text-content-muted"
@@ -142,7 +143,7 @@ export default function InAppNotificationBell(): React.ReactElement {
             </div>
 
             {/* Footer */}
-            <button
+            <button type="button"
               onClick={handleShowAll}
               className="w-full py-2.5 text-xs font-medium transition-colors flex-shrink-0 border-t border-edge-secondary text-content"
               style={{

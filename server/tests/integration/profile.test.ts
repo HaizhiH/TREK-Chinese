@@ -108,6 +108,32 @@ describe('Avatar', () => {
     expect(typeof res.body.avatar_url).toBe('string');
   });
 
+  it('PROFILE-P01 — avatar bytes land at uploads/avatars under a bare uuid name', async () => {
+    const fsMod = require('fs') as typeof import('fs');
+    const pathMod = require('path') as typeof import('path');
+    const avatarsDir = pathMod.join(__dirname, '../../uploads/avatars');
+    const { user } = createUser(testDb);
+
+    const res = await request(app)
+      .post('/api/auth/avatar')
+      .set('Cookie', authCookie(user.id))
+      .attach('avatar', FIXTURE_JPEG);
+    expect(res.status).toBe(200);
+    const first = pathMod.basename(res.body.avatar_url);
+    expect(first).toMatch(/^[0-9a-f-]{36}\.jpg$/);
+    expect(fsMod.existsSync(pathMod.join(avatarsDir, first))).toBe(true);
+
+    // Re-upload removes the previous file (saveAvatar's cleanup branch).
+    const second = await request(app)
+      .post('/api/auth/avatar')
+      .set('Cookie', authCookie(user.id))
+      .attach('avatar', FIXTURE_JPEG);
+    expect(second.status).toBe(200);
+    const secondName = pathMod.basename(second.body.avatar_url);
+    expect(fsMod.existsSync(pathMod.join(avatarsDir, secondName))).toBe(true);
+    expect(fsMod.existsSync(pathMod.join(avatarsDir, first))).toBe(false);
+  });
+
   it('PROFILE-003 — uploading non-image (PDF) is rejected', async () => {
     const { user } = createUser(testDb);
     const res = await request(app)

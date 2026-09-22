@@ -50,9 +50,11 @@ my-plugin/
   .gitattributes        # LF everywhere, so the packed artifact's sha256 is reproducible
 ```
 
-The scaffold declares `"trek": ">=3.4.0 <4.0.0"` — the `ctx` namespaces it is written
-against only exist from 3.4.0, and claiming an older floor would let the plugin install
-on a host where they are `undefined`.
+The scaffold declares `"trek": ">=4.0.0 <5.0.0"` — the host surface it is written
+against is the TREK 4 surface, and claiming an older floor would let the plugin
+install on a host where parts of it are missing. Picking `oauth:client` in the wizard
+also scaffolds the five instance-scope settings the OAuth broker reads (see
+[Host-brokered OAuth](#host-brokered-oauth-ctxoauth)).
 
 What you get **runs and packs immediately**, but it does **not** pass `validate` yet:
 the README is still a template and there is no screenshot. That is deliberate — those
@@ -137,11 +139,10 @@ permissions still requires explicit re-consent).
 
 ## The plugin types
 
-- **integration** — background logic (jobs, routes) with no UI of its own. Most
-  provider hooks are **live** (placeDetailProvider, warningProvider,
-  tableContributor, mapMarkerProvider, pdfSectionProvider, atlasLayerProvider,
-  journalEntryProvider); only `photoProvider` / `calendarSource` are declared in the
-  SDK but **not yet wired into the host** — see [Provider hooks](#provider-hooks).
+- **integration** — background logic (jobs, routes) with no UI of its own. Every
+  provider hook is **live** — from placeDetailProvider, searchProvider and
+  warningProvider through photoProvider (Memories) and calendarSource — see
+  [Provider hooks](#provider-hooks).
 - **page** — adds a nav entry that opens a full-page sandboxed iframe.
 - **widget** — adds a card to the dashboard (`sidebar` slot), a hero-bar overlay
   (`hero` slot), a panel inside the trip planner's **place-detail** view
@@ -237,21 +238,21 @@ module.exports = definePlugin({
 
 The routes and job ids you declare here are the **authoritative** ones: the host
 reads them off your loaded definition (a route's array index is its internal id).
-The `routes` block the scaffold writes into `trek-plugin.json` is only a
-declaration for readers — the manifest parser does not consume it.
+The scaffold writes no `routes` block into `trek-plugin.json`, and the manifest
+parser would ignore one if you added it.
 
 ### The `ctx` object
 
 | Area | Methods | Requires |
 |---|---|---|
-| `ctx.db` | `query(sql, …args)` / `exec(sql, …args)` / `migrate(id, sql)` / `tx(ops)` against your **own** SQLite file. `tx([{sql, args?}, …])` runs up to 100 statements in one transaction (all commit or all roll back; reads see the batch's own earlier writes) → `{ results: [{changes?}|{rows?}, …] }` | `db:own` |
+| `ctx.db` | `query(sql, …args)` / `exec(sql, …args)` / `migrate(id, sql)` / `tx(ops)` against your **own** SQLite file. `tx([{sql, args?}, …])` runs up to 100 statements in one transaction (all commit or all roll back; reads see the batch's own earlier writes) → `{ results: [{changes?}\|{rows?}, …] }`. Your file is capped at **256 MB** (a write past it fails `SQLITE_FULL`, contained to your plugin) and a single result set at **100,000 rows** — page your reads instead of materialising a cartesian product | `db:own` |
 | `ctx.trips` | `getById` / `getPlaces` / `getReservations` / `getDays` / `getAccommodations` / `listMine()` — enumerate every trip the acting user can access (membership-checked). `getDays` includes each day's `assignments` + `notes_items`; `getReservations` includes `endpoints` + `day_positions` | `db:read:trips` |
 | `ctx.trips.update(tripId, fields)` | update trip fields (title/dates/currency/reminder_days/…) | `db:write:trips` |
 | `ctx.trips.create(input)` | create a **new trip owned by the acting user** (importers) — `title` required, plus `description?`/`start_date?`/`end_date?`/`currency?`/`reminder_days?`/`day_count?` | `db:create:trips` (+ `trip_create`) |
 | `ctx.places` | `create(tripId, fields)` / `update(tripId, placeId, fields)` / `delete(tripId, placeId)` | `db:write:places` |
 | `ctx.days` | `create(tripId, {date?, notes?})` / `update(tripId, dayId, {notes?, title?})` / `delete(tripId, dayId)` | `db:write:days` |
 | `ctx.itinerary` | `assign(tripId, dayId, placeId, notes?)` / `unassign(tripId, assignmentId)` — place↔day | `db:write:itinerary` |
-| `ctx.meta` | `get` / `set` / `list` / `delete` your **own** namespaced data on a `trip`/`place`/`day` (enrich core entities without forking the schema) | `db:meta` |
+| `ctx.meta` | `get` / `set` / `list` / `delete` your **own** namespaced data on a `trip`/`place`/`day`/`reservation`/`accommodation` (enrich core entities without forking the schema) | `db:meta` |
 | `ctx.packing` | `list(tripId)` — a trip's packing items (membership-checked, respects private-item visibility) | `db:read:packing` |
 | `ctx.files` | `list(tripId)` — a trip's files, trash excluded (membership-checked) | `db:read:files` |
 | `ctx.files.getContent` | `getContent(tripId, fileId)` → `{ name, mimetype, size, content_base64 }` — a file's bytes as base64 (10MB cap; trashed files refused) | `db:read:files:content` |
@@ -271,7 +272,7 @@ declaration for readers — the manifest parser does not consume it.
 | `ctx.ai` | `complete(prompt, system?)` → `{ text }`; `extract(text, jsonSchema, prompt?)` → `{ results }` — the admin/user-configured provider; host holds the key; output is DATA (no auto-writes) | `ai:invoke` |
 | `ctx.oauth` | `getAccessToken()` → a **short-lived access token** for the acting user of a third-party service the host connected on their behalf (Settings → Plugins → Connect); `null` if not connected / userless. Host holds the refresh token + client secret | `oauth:client` |
 | `ctx.scheduler` | `at(whenMs, name, payload?)` / `in(ms, name, payload?)` / `every(ms, name, payload?)` / `cancel(name)` — **persistent, userless** timers that survive restarts and fire your `scheduled(input, ctx)` handler. `set` is an upsert by `name`; caps: ≤100 tasks, 8 KB payload, recurring interval ≥ 60 s, ≤ ~1 year out. Same risk class as `jobs` (no acting user → trip reads refused) | `jobs:run` |
-| `ctx.settings` | `get(key)` — the **acting user's** own value for one of your `scope:'user'` settings fields (decrypted host-side). Returns `undefined` for an unset value or a userless context (job/onLoad) — fall back to `ctx.config` there. Users fill these in under **Settings → Plugins**; secrets are stored encrypted and never echoed back | none (your own settings) |
+| `ctx.settings` | `get(key)` — the **acting user's** own value for one of your `scope:'user'` settings fields (decrypted host-side), or the field's manifest `default` when they never set it. Returns `undefined` for a field with neither, and in a userless context (job/onLoad) — fall back to `ctx.config` there. Users fill these in under **Settings → Plugins**; secrets are stored encrypted and never echoed back | none (your own settings) |
 | `ctx.daynotes` | `list(tripId, dayId)` — a day's notes (membership-checked) | `db:read:daynotes` |
 | `ctx.daynotes` (write) | `create(tripId, dayId, {text, time?, icon?, sort_order?})` / `update(tripId, dayId, noteId, fields)` / `delete(tripId, dayId, noteId)` — broadcasts `dayNote:*` | `db:write:daynotes` |
 | `ctx.packing` (write) | `create(tripId, {name, category?, checked?, is_private?, visibility?, recipient_ids?})` / `update(tripId, itemId, fields)` / `delete(tripId, itemId)` — broadcasts `packing:*`, private items (#858) stay owner-scoped | `db:write:packing` |
@@ -292,7 +293,7 @@ declaration for readers — the manifest parser does not consume it.
 | `ctx.ws.broadcastToUser(userId, event, data)` | broadcast to one user | `ws:broadcast:user` |
 | `ctx.plugins.call(id, fn, args?)` | call a function another plugin **exposes** and get its result — `id` must be a declared, satisfied `pluginDependency` that lists `fn` in its `capabilities.provides` | a plugin dependency (no permission) |
 | `ctx.events.emit(name, payload?)` | publish an event to dependents that subscribed — `name` must be in your `capabilities.emits` | — (no permission) |
-| `ctx.config` | your resolved settings (secrets delivered decrypted) | — |
+| `ctx.config` | your `scope:'instance'` settings (secrets delivered decrypted, a field nobody set resolves to its manifest `default`), frozen at activation | — |
 | `ctx.log` | `info` / `warn` / `error` → your error log | — |
 | `ctx.id` | your plugin id (string) | — |
 
@@ -333,15 +334,56 @@ validated against TREK's budget schema, and a successful create broadcasts the s
 Routes are authenticated by default (`req.user` is the logged-in user). Set
 `auth: false` for OAuth callbacks or webhooks that can't carry a session.
 
-The proxy forwards `{ method, path, query, body, headers, user }`. **`req.headers`
-is populated ONLY on `auth: false` routes** (an authenticated route gets `{}`) and
-only an explicit, credential-free **allowlist** — the common provider signature +
-event headers (`stripe-signature`, `x-hub-signature-256`, `svix-signature`,
-`x-gitlab-event`, `content-type`, `user-agent`, …). **`Cookie`, `Authorization`,
-`X-Socket-Id` and every session/forwarded-auth header are stripped** and never reach
-your code, so a forwarded header can't leak a TREK session. To trust a webhook,
-verify the provider's signature over the raw body against a secret you hold in
-`ctx.config` (admin-set instance setting) or `ctx.settings` (per-user).
+The proxy forwards `{ method, path, query, body, rawBodyBase64, headers, user }`.
+**`req.headers` is populated ONLY on `auth: false` routes** (an authenticated route
+gets `{}`) and only an explicit, credential-free **allowlist** — the common provider
+signature + event headers (`stripe-signature`, `x-hub-signature-256`,
+`svix-signature`, `x-gitlab-event`, `content-type`, `user-agent`, …). **`Cookie`,
+`Authorization`, `X-Socket-Id` and every session/forwarded-auth header are stripped**
+and never reach your code, so a forwarded header can't leak a TREK session.
+
+**`req.rawBodyBase64` is webhook-only in the same way** — the exact request bytes,
+base64-encoded, on `auth: false` routes, and absent on an authenticated route, which
+never needs them. To trust a webhook, verify the provider's signature over *those*
+bytes against a secret you hold in `ctx.config` (admin-set instance setting) or
+`ctx.settings` (per-user). Never re-serialize `req.body` for the check:
+`JSON.stringify` won't reproduce the key order, whitespace and unicode escaping the
+sender signed, so the HMAC won't match.
+
+The snippet below handles two things, and yours has to as well. TREK only keeps the
+raw bytes when a body parser ran, i.e. for `application/json` and
+`application/x-www-form-urlencoded` — a webhook posted as `text/plain` or a GET
+callback with no body arrives with `rawBodyBase64: null`, so **fail closed** instead
+of running the HMAC over an empty buffer, which is a constant anyone can forge. And
+the request body ceiling is 100 kB; a larger payload is rejected before your route
+runs.
+
+```js
+const crypto = require('node:crypto')
+
+if (typeof req.rawBodyBase64 !== 'string') return { status: 400, body: { error: 'no raw body' } }
+const raw  = Buffer.from(req.rawBodyBase64, 'base64')
+const mac  = crypto.createHmac('sha256', ctx.config.webhookSecret).update(raw).digest()
+const sent = Buffer.from(String(req.headers['x-hub-signature-256'] || '').replace(/^sha256=/, ''), 'hex')
+if (sent.length !== mac.length || !crypto.timingSafeEqual(mac, sent)) return { status: 401, body: { error: 'bad signature' } }
+```
+
+### Runtime limits
+
+The host enforces these on every plugin. They are generous for real work and only
+bite a runaway one, but they are exactly what a plugin that loops over `ctx.*` or
+stores blobs in `ctx.db` runs into, so build against them.
+
+| Area | Limit |
+|---|---|
+| every `ctx.*` call | burst 60, sustained 20/s, 16 in-flight per plugin; a throttled call is refused with `HOST_ERROR: rate limit exceeded — slow down ctx.* calls`. Tunable with `TREK_PLUGIN_RPC_BURST` / `TREK_PLUGIN_RPC_PER_SEC` / `TREK_PLUGIN_RPC_INFLIGHT` (see [Environment-Variables](Environment-Variables#plugins)) |
+| `ctx.db` | 256 MB per plugin, one result set capped at 100,000 rows |
+| event subscriptions | 200 events buffered per plugin while it restarts, dropped unreplayed after 15 minutes |
+| the plugin process | 300 MB RSS (`TREK_PLUGIN_MAX_RSS_MB`) — the child is killed past it; auto-disabled with status `error` after 5 crashes inside a 5-minute window |
+
+The daily `ctx.ai` / `ctx.notify` budgets and the `ctx.meta` quotas are in
+[Testing without a running TREK](#testing-without-a-running-trek), because the mock
+host enforces those too.
 
 ## Writing the client (page / widget)
 
@@ -456,12 +498,15 @@ works. Add `data-trek-native` to a field to keep the browser default; `multiple`
 | `trek.onContext(cb)` | run `cb(context)` now (if already received) and on every update; returns an unsubscribe fn |
 | `trek.context` | the last context (or `null`) |
 | `trek.invoke(sub, { method, body })` | call your own route; returns a `Promise` (rejects with an `Error`, `.code` = HTTP status) |
+| `trek.session.get(key, options?)`, `.set(key, value, options?)`, `.remove(key, options?)`, `.clear(options?)` | Host-managed JSON session state for this browser tab. `scope: 'plugin'` is the default; `scope: 'trip'` additionally partitions it by the trip in view and rejects with `NO_TRIP_CONTEXT` outside a trip. Missing `get()` values are `undefined`. Each plugin or individual trip scope is limited to 32 keys, 64 characters/key, and 1 KiB/value. Do not use it to store secrets. |
 | `trek.notify(level, message, duration?)` | toast (`info`/`success`/`warning`/`error`); optional duration in ms (clamped 1.5–15s) |
 | `trek.confirm({ title?, message, confirmLabel?, cancelLabel?, danger? })` | host-rendered native confirm dialog; resolves `true`/`false` (one at a time — a second concurrent request resolves `false`) |
 | `trek.navigate(to)` | in-app navigation (relative paths only) |
 | `trek.openExternal(url)` | open an `http(s)` URL in a new tab (the sandbox itself can't) |
 | `trek.onEvent(cb)` | `cb(event, tripId)` for core events on the trip in view — names only, no payloads; refetch via `invoke()`; returns an unsubscribe fn |
 | `trek.resize(px)` | override the auto height (ignored on full pages — see `trek:resize` below) |
+| `trek.geolocation.get()` | one browser position as `{ lat, lng, accuracy, heading, speed, timestamp }` — **needs the `geolocation:read` permission**; rejects with `.code` `forbidden`/`denied`/`timeout`/`unavailable`/`unsupported`. The HOST reads the position (the sandbox never gains the API) and the browser's own site prompt still applies |
+| `trek.geolocation.watch(cb)` | stream positions — `cb(position, error)`; returns an unsubscribe fn. The host keeps ONE GPS watch per frame and force-stops it when the frame closes |
 | `trek.ready()` / `trek.requestContext()` | re-handshake / re-request the context |
 
 **Preview it:** `npx trek-plugin-sdk dev`, then open **`/preview`** — it renders your UI
@@ -497,22 +542,38 @@ window.parent.postMessage({ type: 'trek:invoke', requestId: '1', sub: '/status',
 | `trek:invoke` | `{ requestId, sub, method, body }` | call your own route; resolves as `trek:response` or `trek:error` |
 | `trek:confirm` | `{ requestId, title?, message?, confirmLabel?, cancelLabel?, danger? }` | host-rendered ConfirmDialog; answered as `trek:confirm:result` |
 | `trek:openExternal` | `{ url }` | open an `http(s)` URL in a new `noopener` tab; anything else is dropped |
+| `trek:geolocation` | `{ requestId, action?: 'get'\|'watch'\|'clear' }` | host-brokered browser position (needs `geolocation:read`); answered as `trek:geolocation:result`, watch updates stream as `trek:geolocation:update` |
+| `trek:session:get` | `{ requestId, key, scope?: 'plugin'\|'trip' }` | read tab-scoped state; answered as `trek:response` with `data` (`undefined` when unset) |
+| `trek:session:set` | `{ requestId, key, value, scope? }` | store a JSON-serialisable value; answered as `trek:response` |
+| `trek:session:remove` | `{ requestId, key, scope? }` | drop one key; answered as `trek:response` |
+| `trek:session:clear` | `{ requestId, scope? }` | drop every key in that scope; answered as `trek:response` |
+
+The session messages are rejected as `trek:error` with `code` set to `NO_TRIP_CONTEXT`
+(trip scope outside a trip), `SESSION_INVALID_KEY` (empty or over 64 characters),
+`SESSION_INVALID_VALUE` (not JSON-serialisable), `SESSION_VALUE_TOO_LARGE` (over 1 KiB
+serialised), `SESSION_KEY_LIMIT` (over 32 keys in that scope) or `SESSION_STORAGE_ERROR`
+(the browser refused the write). The storage key itself is host-owned and includes the
+signed-in user and your plugin id, so scopes never collide.
 
 **Messages TREK sends you:**
 
 | Message | Payload |
 |---|---|
 | `trek:context` | `{ tripId, placeId, dayId, reservationId, userId, theme, locale, dir, hostOrigin, user, formats, tokens, appearance }` (see below) — re-sent whenever the theme, appearance, **locale or formats** change |
-| `trek:response` | `{ requestId, data }` — a successful `trek:invoke` |
-| `trek:error` | `{ requestId, code, message }` — a failed `trek:invoke` (`code` is the HTTP status or `"error"`) |
+| `trek:response` | `{ requestId, data }` — a successful `trek:invoke` or `trek:session:*` |
+| `trek:error` | `{ requestId, code, message }` — a failed request; for `trek:invoke` `code` is the HTTP status or `"error"`, for `trek:session:*` one of the `SESSION_*` / `NO_TRIP_CONTEXT` codes above |
 | `trek:confirm:result` | `{ requestId, confirmed }` — the user's answer to your `trek:confirm` |
 | `trek:event` | `{ event, tripId }` — a core event fired on the trip in view; **names only, never payloads** — refetch what you need via `trek:invoke` |
+| `trek:geolocation:result` | `{ requestId, position? \| watching? \| cleared? \| error? }` — the answer to a `trek:geolocation` request (`error` ∈ `forbidden`/`denied`/`timeout`/`unavailable`/`unsupported`) |
+| `trek:geolocation:update` | `{ position? , error? }` — a streamed watch fix (`position` = `{ lat, lng, accuracy, heading, speed, timestamp }`) |
 
 The frame's CSP is locked down per plugin: `default-src 'none'`, own inline
 scripts/styles + the plugin's **own** `/plugin-frame/<id>/` files only (no other
 host may serve it script/style/img), `connect-src` limited to the hosts you were
 **granted** via `http:outbound:<host>` permissions (not merely the `egress[]` you
-declared), no popups.
+declared), no popups. The frame is allowed to go **fullscreen** (`allow="fullscreen"`
+on the iframe), so a page or widget may call `requestFullscreen()` on its own content
+after a click or tap; popups stay blocked.
 
 ### The context payload
 
@@ -528,19 +589,21 @@ declared), no popups.
 | `locale` | e.g. `'en'` |
 | `hostOrigin` | the app origin |
 | `user` | `{ name, avatar, isAdmin } \| null` — **never** an email; role only as a boolean |
-| `formats` | `{ locale, currency, timeFormat, distanceUnit, temperatureUnit, timezone }` |
+| `formats` | `{ locale, currency, timeFormat, distanceUnit, temperatureUnit, timezone, blurBookingCodes }` — `blurBookingCodes` mirrors the user's "blur booking codes" preference so your UI can hide confirmation numbers until they're revealed. It is a **display hint, not redaction**: the codes still reach your plugin in full over `trek:invoke`. |
 | `tokens` | TREK's resolved CSS design tokens for the current theme (see below) |
 | `appearance` | `{ scheme, density: 'comfortable'\|'compact', reducedMotion, noTransparency }` |
 
 ### Matching the TREK look by hand (`m.tokens`)
 
-`tokens` is the whole global palette resolved for the **current** theme — surfaces
+`tokens` is the global palette resolved for the **current** theme — surfaces
 (`--bg-card`, `--bg-hover`, …), text (`--text-primary`/`-secondary`/`-muted`/`-faint`),
 borders, the **accent family** (`--accent`, `--accent-text`, `--accent-hover`,
 `--accent-subtle`), semantic + soft fills (`--success`/`--danger`/`--warning`/`--info`
 `-soft`), shadows (`--shadow-*`), radii (`--radius-*`) and fonts (`--font-system`).
-Apply them as CSS variables and your UI matches the host exactly — in both themes and
-under a custom accent or high-contrast — instead of hard-coding a palette that drifts:
+Apply them as CSS variables and your UI follows the host through a theme toggle, a
+custom accent and high-contrast, instead of hard-coding a palette that drifts. (Fonts
+are named, not shipped: the files live in the host bundle, so declare your own or fall
+back to a system stack.)
 
 ```js
 function applyContext(m) {
@@ -562,13 +625,113 @@ bakes those, since they only change with light/dark, not the accent.) Honour
 and auto-size to the height you report via `trek:resize`, so render flush and
 transparent — the design kit reports your height for you.
 
+## On a phone
+
+TREK 4 gives the phone its own design, and your plugin is mounted inside it. Two things
+follow from that, and both arrive in `trek:context` under `viewport`:
+
+```js
+m.viewport = {
+  surface: 'trip-tab',      // where you are mounted, see the table below
+  formFactor: 'phone',      // 'phone' | 'desktop'
+  fill: true,               // true = fill the host container, false = report your height
+  insets: { top: 82, bottom: 106 },  // px the host ALREADY keeps clear around you
+}
+```
+
+### Know which surface you are on
+
+| `surface` | Shape | Notes |
+|---|---|---|
+| `trip-tab` | fills | Your own tab in a trip. You scroll yourself. |
+| `plugin-page` | fills | `/plugins/:id`. You scroll yourself. |
+| `dashboard-widget` | reports height | A card on the dashboard. |
+| `user-settings` | reports height | Your `settings.html`. |
+| `detail-slot` | reports height | A narrow column inside a place/day/reservation panel. |
+| `action-frame` | fills | The modal a table action opens. |
+
+This matters because the contract differs: on a **filling** surface your `trek:resize`
+height is deliberately ignored, so give your document `height: 100%` and put the
+scrolling on an inner element. On a **reporting** surface let the content decide the
+height and never set `100%`, or the host reserves a screenful for two lines of text.
+The design kit does both for you when it sees `viewport.fill`.
+
+### `insets` is not padding you have to add
+
+It is the space the host is *already* keeping clear. On the mobile trip tab, floating
+controls hover above your frame and a translucent dock hovers below it, and the host
+holds both areas free for you. Use the numbers to line your own sticky header up with
+the host's chrome, not to add margin — that would double the gap.
+
+### The mobile palette
+
+Inside the mobile shell, `tokens` carries a **second** family alongside the global one:
+`--m-ink`, `--m-muted`, `--m-faint`, `--m-bg`, `--m-card`, `--m-cbr`, `--m-glass`,
+`--m-gbr`, `--m-inner`, `--m-act`, `--m-actfg`, `--m-ic`, `--m-rowbr`, the status canon
+(`--m-st-confirmed`, `--m-st-pending`, `--m-st-info`, `--m-st-danger`, `--m-st-neutral`)
+and `--m-safe-top`. These are what the native mobile screens are built from; the global
+palette describes the desktop chrome and looks foreign next to them.
+
+They are **absent on desktop**, so branch on their presence rather than assuming both
+families are there:
+
+```css
+.card {
+  background: var(--m-card, var(--bg-card));
+  border: 1px solid var(--m-cbr, var(--border-primary));
+}
+```
+
+### Four rules that decide whether it feels native
+
+1. **Inputs at 16px or larger.** Below that, iOS Safari zooms the page on focus and does
+   not zoom back. This is the most common mobile bug in embedded UI.
+2. **Touch feedback on `:active`, not `:hover`.** A hover rule never fires on a phone, so
+   a tap gives no response at all.
+3. **Targets at least 44px.** Anything smaller is a coin toss with a thumb.
+4. **No drop shadows on the mobile surface.** The design is translucent and border-led
+   over a gradient; a shadow reads as a sticker glued on top.
+
+The design kit applies all four automatically once `data-form-factor="phone"` is set,
+which it does from `viewport`. If you style everything yourself, they are on you.
+
+### Seeing it
+
+`trek-plugin dev` previews at a desktop size. Until that grows a phone width, resize the
+browser window and use your browser's device emulation — the frame is a real browsing
+context, so media queries inside it measure the frame, and they work.
+
 ## Settings
 
 Declare settings in the manifest; TREK renders the form (you write no settings
-UI). `scope: "instance"` settings are set once by the admin; `scope: "user"`
-settings are per-user. `secret: true` fields are stored encrypted and delivered
-decrypted through `ctx.config` (server-side only) — never to the iframe. Resolved
-values arrive in `ctx.config`.
+UI). `scope: "instance"` settings are set once by the admin — under
+**Admin → Plugins → ⋯ → Instance settings**, where only the fields your manifest declares
+are stored and saving re-spawns a running plugin — and arrive resolved in `ctx.config`.
+`scope: "user"` settings are edited by each user under **Settings → Plugins** and are read
+one key at a time with `await ctx.settings.get(key)` (a userless job / `onLoad` gets `undefined` —
+fall back to `ctx.config` there). `secret: true` fields are stored encrypted and
+delivered decrypted through whichever of the two applies (server-side only) —
+never to the iframe.
+
+Two attributes do more than decorate the form:
+
+- **`default`** is the field's value wherever nobody set one. The form pre-fills it
+  **and the runtime resolves it** — `ctx.config.api_url` and
+  `ctx.settings.get('region')` return the default until someone saves something
+  else — so a plugin that ships sensible defaults works before anyone opens the
+  form. A default satisfies `required`. It is refused on a `secret` (the manifest
+  is public), must be a boolean on a `checkbox`, and must be one of the `options`
+  when those are declared; the host drops a default that breaks these rules at
+  install, `trek-plugin validate` errors on it first.
+- **`required`** is enforced on both ends: the form refuses Save while the field is
+  blank (naming it), and the host answers `400 { error: 'Missing required setting
+  "<key>"' }` if a save reaches it anyway. A `checkbox` is exempt. A required
+  `scope:'user'` field also decides whether a notification channel dispatches to
+  that user at all.
+
+Any attribute outside `key, label, input_type, placeholder, hint, required, secret,
+scope, options, oauth, default` is silently dropped at install; `trek-plugin
+validate` warns on one (`manifest.settings-known-keys`).
 
 ### A custom settings page (`capabilities.settingsUi`)
 
@@ -586,7 +749,7 @@ simply ignore the flag, so declaring it never breaks an install.
 
 A plugin can act as an OAuth *client* of a third-party service **without ever handling the secrets**. The **host** runs the entire flow — authorize → callback → token exchange → refresh — with PKCE (S256) and a `state` check, and holds the tokens. The plugin only triggers "connect" and reads a **short-lived access token** at runtime.
 
-**Setup.** Declare the provider as `scope: "instance"` settings the admin fills in: `oauth_authorize_url`, `oauth_token_url`, `oauth_scopes` (optional), plus the two `secret: true` fields `oauth_client_id` and `oauth_client_secret`. (A settings field may also carry an `oauth: { initPath, callbackPath }` block.)
+**Setup.** Declare the provider as `scope: "instance"` settings the admin fills in: `oauth_authorize_url`, `oauth_token_url`, `oauth_scopes` (optional), plus `oauth_client_id` and the `secret: true` `oauth_client_secret`. (A settings field may also carry an `oauth: { initPath, callbackPath }` block.) `trek-plugin create` scaffolds all five for you when you pick the `oauth:client` permission.
 
 **Connecting.** A user connects under **Settings → Plugins → Connect**, which sends them to the provider's authorize page. The callback returns to `…/api/plugin-oauth/<id>/callback`; the host verifies the `state` (single-use, 10-minute TTL, bound to that user — CSRF defence), exchanges the code and stores the tokens **per user, encrypted at rest**.
 
@@ -608,8 +771,8 @@ if (!token) return { status: 401, body: 'connect this plugin first' }
 Grant `hook:user-data` and implement either handler to honour data-subject rights. Both are **userless** — the plugin only receives the `userId` and acts on its **own** `ctx.db`:
 
 ```js
+// trek-plugin.json: "permissions": ["db:own", "hook:user-data"]
 module.exports = definePlugin({
-  permissions: ['db:own', 'hook:user-data'],
   async deleteUserData({ userId }, ctx) {           // erasure
     await ctx.db.exec('DELETE FROM my_prefs WHERE user_id = ?', userId)
   },
@@ -645,20 +808,32 @@ module.exports = definePlugin({
 | Hook | Permission | Status |
 |---|---|---|
 | `placeDetailProvider.getDetails(placeId, ctx)` → `{ label, value?, url? }[]` | `hook:place-detail-provider` | **live** — shown in the place-detail panel; also `GET /api/place-details/:placeId` |
-| `warningProvider.getWarnings(tripId, ctx)` → `{ level, message, dayId?, placeId? }[]` | `hook:trip-warning-provider` | **live** — validation warnings shown as a non-blocking banner in the trip planner; also `GET /api/trip-warnings/:tripId` |
+| `searchProvider.search(request, ctx)` → `SearchResultPlace[]` | `hook:search-provider` | **live** — answers place searches from an index TREK does not ship, drawn into the app's own search list beside the core results (#2221). `request` is `{query, limit, lang?, near?, category?, bounds?}`; each place is `{id?, name, lat, lng, address?, rating?, website?, phone?, category?, description?}`. `rating` is the field open data cannot answer — OpenStreetMap carries none — so it is what makes "the best rated one around here" answerable at all; it is clamped to 0..5. Coordinates are range-checked, strings capped, `website` must be http/https, and ids are namespaced to `plugin:<yourId>:<id>` so they can never collide with an OSM one. Called for an explicit search, **not** per keystroke. The Road trip search along the route calls it too, once per kind the person picked, with `category` (`fuel`, `charging`, `rest_area`, `campsite`, `restaurant`, `sights` or `hotel`) and `bounds` (`{south, west, north, east}`, with `near` at its centre); `query` is then a fixed English phrase for that kind such as `fuel station` or `EV charging station`. The host drops every hit outside `bounds`, and a hit whose own `category` names a different one of those seven kinds; the rest count as the requested kind. Both fields are absent on ordinary searches. Also `GET /api/plugin-search`, and to a connected assistant as the `search_places_via_plugins` MCP tool; the corridor search is `POST /api/roadtrip/search-area` and the `search_roadtrip_corridor` MCP tool |
+| `warningProvider.getWarnings(tripId, ctx)` → `{ level, message, dayId?, placeId? }[]` | `hook:trip-warning-provider` | **live** — validation warnings shown as a non-blocking banner in the trip planner; also `GET /api/trip-warnings/:tripId`, and to a connected assistant as the `get_trip_warnings` MCP tool (≤20 warnings per provider, message ≤300 chars) — that path needs only the trips read scope, not `plugins:use` |
 | `tableContributor.getContributions(view, tripId, ctx)` → `TableContribution[]` | `hook:table-contributor` | **live** — host-rendered **columns/actions** keyed by `entityId` in the reservations, transports, places, day, costs, packing, files and todos views. A `column` is `{kind:'column', entityId, id, label, value?, url?, icon?, tone?}` (url is http/https/mailto only); an `action` is `{kind:'action', entityId, id, label, icon?, target}` where `target` opens your sandboxed frame (`{kind:'frame', sub}`) or calls a route (`{kind:'route', method, sub}`). All fields are bounded + normalized host-side; also `GET /api/view-contributions/:view/:tripId` |
 | `mapMarkerProvider.getMarkers(tripId, ctx)` → `MapMarkerContribution[]` | `hook:map-marker-provider` | **live** — bounded markers overlaid on the trip map (#587). Each is `{id, lat, lng, label?, popupText?, url?, icon?, tone?}`; coordinates are range-checked (−90..90 / −180..180), text length-capped, url http/https/mailto-only, count capped (≤200/plugin). Declarative only — plugin JS never runs on the map canvas. Also `GET /api/map-markers/:tripId` |
+| `mapLayerProvider.getLayers(tripId, ctx)` → `MapLayerContribution[]` | `hook:map-layer-provider` | **live** — bounded vector overlays on the trip map: a computed route, a reachable-range corridor, a zone. Each layer is `{id, name?, features}` with features `{type: 'polyline'\|'polygon'\|'circle', points?/center?+radiusM?, tone?, width?, dash?, opacity?, fill?, label?}`. Styling stays in the tone palette; width (1–8), opacity (0.05–1) and radius (≤2000 km) are clamped, `dash` is an enum. Budgets per plugin: ≤4 layers, ≤150 features, ≤8000 vertices, ≤2000 vertices/shape — an oversized or partly-invalid shape is dropped whole, never truncated. Declarative only; drawn beneath TREK's own day route on both the Leaflet and GL renderers. Also `GET /api/map-layers/:tripId` |
+| `routeProvider.getRoute(request, ctx)` → `RouteProviderResult` | `hook:route-provider` | **live** — routes a day's stops under one of the plugin's declared `capabilities.routeProfiles` (an EV profile with charging stops, a scenic profile…). `request` is `{tripId, dayId, profile, waypoints}` (2–30 located stops in visit order); the result is `{coordinates, distance, duration, legs, viaPoints?}` and is validated **whole**: ≤10000 vertices, `legs` must be exactly `waypoints−1` entries (each `{distance, duration, note?}` — `note` ≤120 chars shows on the sidebar connector), ≤40 via points (`{lat, lng, label?, tone?, dwellSeconds?}` drawn as stops on the route line). A malformed result is discarded and the planner falls back to straight lines. **Targeted, not a fan-out**: TREK calls exactly the provider whose profile the user picked in the route toggle, with a 20 s timeout (room to call an external solver through your declared egress). `POST /api/plugin-routes/:pluginId/:profileId` |
+| `dayScheduleProvider.getSchedule(tripId, ctx)` → `DayScheduleContribution[]` | `hook:day-schedule-provider` | **live** — time contributions rendered into the day plan on desktop and mobile: "35 min charging at this stop", "45 min security before this flight". Each is `{id, dayId, assignmentId?/reservationId?/position?, minutes?, label, tone?}` — anchored under a place/booking row or at a day's start/end (default end). `dayId` must belong to the trip (checked server-side), `minutes` (1–1440) is shown on the row **and folded into the day's route-footer total**, `label` ≤120 chars, ≤60 items/plugin. Also `GET /api/day-schedule/:tripId` |
+| `dayTintProvider.getDayTints(tripId, ctx)` → `DayTintContribution[]` | `hook:day-tint-provider` | **live** — colours painted into a day card in the Plan sidebar (and into that day's mobile chip), so a trip split into legs shows its leg membership while you scroll. Each is `{dayId, tone?, color?, badgeTone?, badgeColor?, headerTone?, headerColor?, activityTone?, activityColor?, label?}`. The card has **three separately tintable regions** — the day-number badge (also the mobile chip), the header row, and the expanded activity list — so a plugin can mark the leg boldly on the badge while leaving the dense activity list plain; `tone` / `color` are the shorthands that fill every region you do not name, and an unnamed region renders exactly as it does with no plugin. Paint a region with a palette tone or with your own `#rrggbb` (nothing else is accepted — the value lands inside a CSS colour); a colour beats a tone within a region, and anything a region names beats the shorthand. You choose the hue, the host chooses the weight: it sets the alpha per theme **and** per region and clamps a colour's lightness into a band that reads in both themes, so the tint stays subtle in light and dark, no contribution can make a day unreadable, and a tinted header hovers to a deeper mix of its own colour. `dayId` must belong to the trip (checked server-side), `label` ≤ 60 chars becomes the day's tooltip, raw array sliced at 2000. **A day takes at most one contribution, resolved whole**: within your own list the first entry for a day wins, and across plugins the first granted provider wins — so a day never flickers between colours, and a losing plugin cannot fill in the winner's untinted regions. Bounded by the trip's day count rather than a fixed item cap, which is why this is not `dayScheduleProvider` (≤60 items would tint only the first 60 days of a long trip). Also `GET /api/day-tints/:tripId` |
 | `pdfSectionProvider.getSections(tripId, ctx)` → `PdfSection[]` | `hook:pdf-section-provider` | **live** — text-only sections appended to the trip PDF export. Each is `{title, paragraphs?, table?}`; the host escapes and lays everything out itself (no markup ever reaches the document), caps counts (≤5 sections/plugin, ≤20 paragraphs, ≤8 headers, ≤50 rows) + lengths (title 120, paragraph 2000, header 60, cell 200) and clips rows to the header width. Also `GET /api/pdf-sections/:tripId` |
 | `atlasLayerProvider.getLayers(ctx)` → `AtlasLayer[]` | `hook:atlas-layer-provider` | **live** — country tint layers drawn over the Atlas world map (wishlists, advisories, …). **User-scoped**: the host binds the acting user, the hook takes no target parameter. Each layer is `{id, name?, countries: [{code, tone?, label?}]}`; codes must be ISO-3166 alpha-2 (uppercase-coerced), tone is enum-whitelisted, counts capped (≤3 layers/plugin, ≤300 countries/layer). Declarative only — plugin JS never runs on the map canvas. Also `GET /api/atlas-layers` |
 | `journalEntryProvider.getRows(entryId, ctx)` → `{ label, value?, url? }[]` | `hook:journal-entry-provider` | **live** — extra rows rendered under a journal entry card (needs the Journey addon; the entry's journey is access-checked like the journal detail routes). Same hardening as place details plus server-side normalization: ≤12 rows/plugin, label ≤60, value ≤200, url http/https/mailto-only. Also `GET /api/journal-entry-rows/:entryId` |
-| `tripCardProvider.getCards(tripIds, ctx)` → `TripCardContribution[]` | `hook:trip-card-provider` | **live** — small badges on the dashboard trip cards. Called ONCE with all visible `tripIds` (each already access-checked for the acting user), returns `{ tripId, id, label, value?, icon?, tone?, url? }[]`; the host bounds every field (label 64, value 256, tone enum, url http/https/mailto-only), caps the count (≤40/plugin) and drops any badge whose `tripId` wasn't requested. Declarative only. Also `GET /api/trip-card-contributions?tripIds=…` |
+| `tripCardProvider.getCards(tripIds, ctx)` → `TripCardContribution[]` | `hook:trip-card-provider` | **live** — small badges on the dashboard trip cards. Called ONCE with all visible `tripIds` (each already access-checked for the acting user), returns `{ tripId, id, label, value?, icon?, tone?, url? }[]`; the host bounds every field (label 64, value 256, tone enum, url http/https/mailto-only), caps the count (≤4 badges per trip, ≤240 total per plugin) and drops any badge whose `tripId` wasn't requested. Declarative only. Also `GET /api/trip-card-contributions?tripIds=…` |
 | `photoProvider.search(query, {page, limit}, ctx)` / `.getById(id, ctx)` | `hook:photo-provider` | **live** — plugin photo sources aggregated at `GET /api/plugin-photos/search` (+ `/sources`, `/item`) for the picker. Each `{id, title?, thumbnailUrl, fullUrl, takenAt?}`; thumbnail/full URLs must be http/https, per-source count capped, a failing source skipped |
 | `calendarSource.getName(ctx)` / `.getEvents(userId, start, end, ctx)` | `hook:calendar-source` | **live** — plugin calendar events aggregated for the signed-in user at `GET /api/plugin-calendar?start=&end=`. Each `{id, title, start, end, allDay}` (ISO dates); count capped, a failing source skipped |
 | `notificationChannel.send(msg, config, ctx)` / `.test(config, ctx)` | `hook:notification-channel` | **live** — registers a new notification channel. **Userless** (see below). See [Notification channels](#notification-channels) |
+| `mcpToolProvider.callTool({name, args}, ctx)` + `tools: string[]` | `mcp:tools` | **live** — publishes MCP tools on TREK's own MCP server, advertised to connected assistants as `plugin_<id>_<name>`. Runs **as the requesting MCP user** (route-like ctx). Declared in `capabilities.mcpTools`; only the intersection of the manifest declaration and the `tools` array is advertised. See [MCP tools](#mcp-tools) |
 
 Each hook method receives its args plus the per-invocation `ctx`, so any `ctx.trips.*`
 read it makes is membership-checked against the current user (like a route handler) —
 with **one exception**, the notification channel, which has no acting user at all.
+
+Every string a hook returns is **emoji-stripped at the render boundary** — badges, columns,
+warnings, PDF sections, map-marker labels, calendar and photo titles, notifications — so
+plugin text stays inside TREK's own icon language; use the declarative `icon` field (a
+lucide name) instead. Your plugin's own sandboxed frame is untouched: that markup is yours
+to design.
 
 ## Notification channels
 
@@ -720,9 +895,19 @@ also being given the right to read their trips as them.
 Notes:
 
 - **`title`** names the column in the notification preferences matrix (defaults to your
-  plugin's name). **`events`** may *narrow* which events the channel carries; the default is
-  every non-admin event. Admin-scoped events (`version_available`) are never deliverable to a
-  plugin channel — those go over the admin's own credentials.
+  plugin's name). **`events`** may *narrow* which events the channel carries; omit it and
+  the channel carries all ten deliverable events: `trip_invite`, `booking_change`,
+  `trip_reminder`, `todo_due`, `vacay_invite`, `collection_invite`, `photos_shared`,
+  `collab_message`, `packing_tagged`, `plugin_notification`. The SDK exports the same list
+  as `CHANNEL_EVENTS`, and both `trek-plugin validate` and the installer refuse anything
+  outside it with `capabilities.notificationChannel.events: "x" is not a plugin-deliverable
+  event`.
+
+  The four events TREK sends that a plugin channel never carries are the admin-scoped
+  `version_available` and `replica_failure` (those go over the admin's own credentials),
+  the in-app-only `synology_session_cleared`, and `vacay_share`. Don't read the set off the
+  table in [Notifications](Notifications) — that one lists what a user can toggle, not what
+  a channel can carry.
 - **Configured-ness is inferred, not asked.** A user's column is "not configured" until every
   `required`, `scope:'user'` field has a value. A plugin with no required user fields counts as
   configured for everyone (an instance-wide channel, e.g. a shared workspace webhook).
@@ -735,15 +920,93 @@ Notes:
   addresses by default. It relaxes the policy for *every* installed plugin, so enable it only
   if you trust them all.
 
+## MCP tools
+
+A plugin can publish tools on **TREK's own MCP server**, so an assistant a user has
+connected to TREK (Claude, or any MCP client) can call into the plugin. Three parts,
+all required — miss one and nothing is advertised:
+
+1. **`capabilities.mcpTools`** in the manifest — the declaration the admin consents
+   to. Up to **8** tools, each `{ name, description, title?, inputSchema?,
+   annotations? }`: `name` lowercase `^[a-z0-9_]{1,48}$` (unique, no dash/dot),
+   `description` required, `inputSchema` an optional JSON Schema whose root `type`
+   (if present) is `"object"`.
+2. **The `mcp:tools` permission** — the one hook grant not named `hook:*`.
+   Declaring the capability without it fails `trek-plugin validate` *and* install.
+3. **`hooks.mcpToolProvider`** on the definition:
+
+```js
+module.exports = definePlugin({
+  hooks: {
+    mcpToolProvider: {
+      tools: ['pin_note', 'list_notes'],       // plugin-local names
+      async callTool({ name, args }, ctx) {    // ONE function for all tools
+        if (name === 'pin_note') { /* … */ }
+        return { pinned: true }                // any JSON value; the host builds the MCP envelope
+      },
+    },
+  },
+})
+```
+
+Semantics worth knowing before you ship one:
+
+- **Only the intersection** of `capabilities.mcpTools[].name` and the code's
+  `tools` array is advertised — **silently**. A name mismatch drops the tool with
+  no warning anywhere, so a tool missing from `tools/list` is almost always these
+  two lists disagreeing. Keep them identical.
+- **Names are prefixed** for assistants: `plugin_<id>_<name>`; `callTool` receives
+  the local name. Global cap: 32 plugin tools across all installed plugins.
+- **`callTool` runs as the requesting MCP user** — route-like, never userless. The
+  host binds the user from the MCP session (a plugin can't name one); user-scoped
+  `ctx.*` reads are membership-checked against *that* user, and `mcp:tools` itself
+  unlocks no ctx method — the tool can only do what your other grants allow.
+  Timeout 15 s; demo users are refused before your code runs.
+- **Arguments are validated against your declared `inputSchema` before `callTool`
+  runs.** `required` is enforced, `additionalProperties: false` rejects extras,
+  enum/const/ranges/pattern/format are enforced — and nothing may be advertised
+  that cannot be enforced, so an unsupported schema keyword (`oneOf`, `$ref`, an
+  unknown `format`) **fails the install**, not silently drops. A `pattern` is capped at
+  **200 chars** and may not be ReDoS-shaped (a quantified group that itself repeats or
+  alternates); property names must look like identifiers
+  (`^[A-Za-z_][A-Za-z0-9_.-]{0,63}$`, so `__proto__` & co are rejected);
+  `additionalProperties` must be a boolean; and the schema **root** may not use `enum`,
+  `const` or `nullable`. `default` is advertisement only — the host does not inject it;
+  apply defaults yourself.
+- **A throw is a tool error, not a crash** — the assistant sees a sanitised
+  message (≤ 300 chars). Results are capped at 64 KiB / 32 content blocks with a
+  visible `[truncated: …]` marker; every string the assistant reads is sanitised
+  (control characters and newlines collapsed, emoji stripped) so plugin text can't
+  fake headings or instructions.
+- **Annotations are clamped against your grants**: `readOnlyHint: true` is lowered
+  if the plugin holds any write-ish grant; `openWorldHint` is forced true if you
+  hold any `http:outbound*`; `destructiveHint` defaults true unless read-only or
+  explicitly `false`.
+- **Caller side:** the MCP client's token needs the **`plugins:use`** OAuth scope —
+  deliberately coarse (not per-plugin or per-tool) and opt-in only; static `trek_`
+  tokens and web-session JWTs have it implicitly. The scope grants no data access
+  of its own: the plugin acts with the grants the **admin** consented to.
+- **The tool surface is frozen per MCP session.** Activating, deactivating,
+  updating, re-trusting or uninstalling a plugin (or flipping an addon that
+  affects one) closes every live MCP session; clients pick up the new surface on
+  the next initialize. A dev-link **Reload** does *not* invalidate — reconnect
+  your MCP client yourself after changing `tools`.
+
+Admin → Plugins shows the tools a plugin will advertise. `trek-plugin dev` warns at
+load about a `mcpToolProvider` without the `mcp:tools` grant and 403s
+`/__dev/fire/hook/mcpToolProvider/callTool`, like any other hook.
+
 ## Settings-page actions
 
-A plugin can put **buttons on its own settings page** — "Test connection", "Sync now",
-"Clear cache". Declare them in the manifest and implement them on the definition:
+A plugin can put **buttons on its own settings form** — "Test connection", "Sync now",
+"Clear cache" — on a user's settings page or, with `scope: "instance"`, in the admin's
+instance-settings dialog. Declare them in the manifest and implement them on the definition:
 
 ```json
 "actions": [
   { "key": "testConnection", "label": "Test connection", "hint": "Pings the API." },
-  { "key": "purge", "label": "Delete my data", "danger": true }
+  { "key": "purge", "label": "Delete my data", "danger": true },
+  { "key": "purgeCache", "label": "Purge cache", "scope": "instance" }
 ]
 ```
 
@@ -764,6 +1027,15 @@ An action is **user-initiated**, which is what makes it different from the
 `ctx.settings.get()` returns **their** value and any trip read is membership-checked
 against them — exactly what a "test my credentials" button needs.
 
+`scope` decides *which* clicker, and where the button renders. The default, `"user"`, puts
+it under **Settings → Plugins** beneath that plugin's own fields. `"instance"` puts it in
+the admin's instance-settings dialog instead (**Admin → Plugins → ⋯ → Instance settings**),
+next to the `scope: "instance"` fields it operates on — a "Purge cache" or a "Test SMTP"
+that acts on instance configuration rather than one person's credentials. Both bind the
+clicker as acting user, so an instance action is admin-*surfaced*, not admin-privileged: it
+still sees that admin's own `ctx.settings` alongside `ctx.config`, and its trip reads are
+membership-checked against them.
+
 Notes:
 
 - Return `{ ok, message? }`. Throwing is the same as `{ ok: false }` with the error text.
@@ -771,7 +1043,18 @@ Notes:
 - `danger: true` renders it destructively and asks for confirmation first.
 - The key must be a valid settings key, and the host refuses any key the manifest didn't
   declare — the key arrives from the URL, so it is never forwarded to your plugin blindly.
-- Max 8 actions; label capped at 60 chars, hint at 200.
+  The scope is fixed by the route as well: a `"user"` key can never be fired from the admin
+  route, nor an `"instance"` key from the settings page.
+- Max 8 actions **across both scopes**, with keys unique across them too; label capped at 60
+  chars (a blank one falls back to the key), hint at 200. A `scope` that is anything but
+  `"user"` or `"instance"` fails install and `trek-plugin validate` with
+  `action "<key>".scope must be "user" or "instance"`.
+- An instance action needs a **running** plugin: the button is disabled until the plugin is
+  active, the dialog saves an edited form before firing it, and the host answers
+  `404 { error: 'Plugin is not active' }` if the child is gone anyway.
+- **Hosts older than TREK 4.2.0 ignore `scope`** and render the button on every user's
+  settings tab, so a plugin using `scope: "instance"` should set a manifest `trek` floor of
+  `>=4.2.0`.
 
 ## Operator-supplied egress hosts (`operatorEgress`)
 
@@ -839,8 +1122,8 @@ place/day/reservation/accommodation/assignment/trip, `db:read:costs` for budget,
 file). Without that grant you get exactly the id hint, as before:
 
 ```js
+// trek-plugin.json: "permissions": ["events:subscribe", "db:read:trips"]
 module.exports = definePlugin({
-  permissions: ['events:subscribe', 'db:read:trips'],
   events: [
     { on: 'reservation:created', async handler({ event, tripId, entityId, snapshot }, ctx) {
         // with db:read:trips the snapshot carries the reservation's fields
@@ -861,10 +1144,12 @@ id (never a parent or a user id).
 
 Delivery is fire-and-forget on a short timeout, so a slow subscriber never blocks a
 core write. Because there's no user, trip reads (`ctx.trips.*`) are refused inside a
-handler — beyond the snapshot, use the plugin's own `ctx.db`, `ctx.ws.*`, or an
-outbound call. A plugin's own `plugin:*` broadcasts are never delivered back, so
-handlers can't loop. Common events: `place:*`, `day:*`, `assignment:*`, `budget:*`,
-`file:*`, `accommodation:*`.
+handler, and so are `ctx.ws.*` broadcasts; beyond the snapshot, use the plugin's own
+`ctx.db` or an outbound call. A plugin's own `plugin:*` broadcasts are never
+delivered back, so handlers can't loop. Event names follow `<family>:<verb>` (`place:created`,
+`day:updated`, `file:*`, `assignment:*`, `budget:*`, `accommodation:*`, …); the SDK
+exports the authoritative family list and the snapshot-grant mapping as
+`EVENT_FAMILIES` and `EVENT_SNAPSHOT_GRANT`.
 
 ## Dependencies
 
@@ -994,10 +1279,14 @@ import { createMockHost } from 'trek-plugin-sdk/testing'
 
 const { ctx, broadcasts } = createMockHost({
   grants: ['db:read:trips'],
-  trips: { 1: { members: [42], data: { id: 1, name: 'Japan' } } },
+  actingUserId: 42,                                   // the user every read is checked against
+  trips: {
+    1: { members: [42], data: { id: 1, name: 'Japan' } },
+    2: { members: [99], data: { id: 2, name: 'Peru' } },
+  },
 })
-await ctx.trips.getById(1, 42)                        // ok — member
-await expect(ctx.trips.getById(1, 99)).rejects…       // RESOURCE_FORBIDDEN
+await ctx.trips.getById(1)                            // ok — member
+await expect(ctx.trips.getById(2)).rejects…           // RESOURCE_FORBIDDEN
 await expect(ctx.db.query('SELECT 1')).rejects…       // PERMISSION_DENIED (no db:own)
 ```
 
@@ -1005,6 +1294,13 @@ The mock db is a recorder — set `queryResults` for canned rows, or use an
 integration test for real SQL. To test inter-plugin calls, pass
 `pluginExports: { koffi: { convert: (args) => … } }` and assert on `mock.emitted`
 for anything your plugin publishes via `ctx.events.emit`.
+
+The mock also enforces the host's operational limits, so a test can prove your
+plugin backs off correctly: the **daily AI and notification budgets** (defaults
+200 / 100 per day; configure with `aiPerDay` / `notifyPerDay` — `0` disables the
+broker entirely, the exhausted call fails with the host's exact error) and the
+**`ctx.meta` quotas** (≤256-char keys, ≤64 KB serialized values, ≤100 keys per
+entity).
 
 ### Driving your plugin's handlers
 
@@ -1061,6 +1357,20 @@ set — is refused rather than delivered, so a test can't pass on a notification
 host would never route to you. Pass `declaredActions` / `channelEvents` to model
 what your manifest declares.
 
+`declaredActions` takes plain keys or `{ key, scope? }` entries, so a manifest with both
+scopes models faithfully:
+
+```js
+const host = createMockHost({
+  actingUserId: 7,
+  declaredActions: ['testConnection', { key: 'purgeCache', scope: 'instance' }],
+})
+```
+
+`app.action(key)` drives either one, and driving a key you didn't declare throws
+(`RESOURCE_FORBIDDEN`) like the host. The scope itself has no runtime effect in the mock:
+both scopes get the acting-user ctx, exactly as the host gives both the clicker's.
+
 ## Rules
 
 - **No native modules** (`.node`, `binding.gyp`, `prebuilds/`) — rejected at pack
@@ -1083,22 +1393,25 @@ what your manifest declares.
 | `id` | string, **required** | lowercase slug, `^[a-z][a-z0-9-]{2,39}$` (3–40 chars). Must match the directory name. |
 | `name` | string, **required** | display name; also the page nav label. |
 | `version` | string, **required** | semver (`1.2.3`, optional pre-release). |
-| `apiVersion` | number | plugin API version (currently `1`; `PLUGIN_API_VERSION`). Defaults to `1`. |
+| `apiVersion` | number | plugin API version (currently `1`; `PLUGIN_API_VERSION`). Defaults to `1`; must be a positive integer, and a version newer than the host supports is refused at install and won't activate (`API_VERSION_INCOMPATIBLE`). |
 | `type` | string, **required** | `integration` \| `page` \| `widget` \| `trip-page`. |
-| `trek` | string, **required** | the TREK versions this plugin supports, as a semver **range**: `">=3.4.0 <4.0.0"` (what the scaffold writes). Must be *satisfiable* (`">=4.0.0 <3.0.0"` parses but nothing can satisfy it — rejected). **Enforced at install and at activation** (see below); it is copied verbatim onto the registry entry, which is the entry's only compatibility field. Keep it **bounded** — an unbounded range claims support for TREK versions that do not exist yet. |
+| `trek` | string, **required** | the TREK versions this plugin supports, as a semver **range**: `">=4.0.0 <5.0.0"` (what the scaffold writes). Must be *satisfiable* (`">=4.0.0 <3.0.0"` parses but nothing can satisfy it — rejected). **Enforced at install and at activation** (see below); it is copied verbatim onto the registry entry, which is the entry's only compatibility field. Keep it **bounded** — an unbounded range claims support for TREK versions that do not exist yet. |
 | `author` | string | shown in the store. |
 | `description` | string | one-line summary for the store. |
 | `icon` | string | lucide-react icon name (default `Blocks`); used for the page nav entry. |
 | `homepage` | string | project URL. |
+| `tags` | string[] | store keywords, copied verbatim onto the registry entry. Each must be a lowercase slug of 2–24 chars (`[a-z0-9-]`), at most 8 — `validate` rejects a capital or a space, because the registry's schema does. |
 | `license` | string | shown in the store detail (read from the manifest, not enforced). |
 | `nativeModules` | boolean | must be `false`/absent — `true` is rejected. |
 | `permissions` | string[] | see below. |
 | `egress` | string[] | allowed outbound hosts; required (non-empty, no bare `*`) when any `http:outbound` permission is present — **unless** `operatorEgress` is `true`, in which case it may be empty/omitted and the admin supplies the hosts. |
 | `capabilities.widget` | object | `{ title, slot, defaultSize }` — `slot` is `sidebar` (default), `hero`, `place-detail`, `day-detail`, or `reservation-detail`. |
 | `capabilities.tripPage` | object | `{ replaces?, position? }` for `trip-page` plugins — `replaces` names core planner tabs to hide while active (`transports`, `buchungen`, `listen`, `finanzplan`, `dateien`, `collab`; never `plan`), `position` is the tab's 0-based index in the bar (0–50; omitted = appended). |
-| `actions` | array | Buttons on the plugin's own settings page — `{ key, label, hint?, danger? }` (max 8). Implement each as `actions[key](ctx)` on the definition. **User-initiated**, so `ctx.settings.get()` returns the clicking user's value. See [Settings-page actions](#settings-page-actions). |
+| `actions` | array | Buttons on the plugin's settings form — `{ key, label, hint?, danger?, scope? }` (max 8 across both scopes, keys unique across them). Implement each as `actions[key](ctx)` on the definition. `scope` is `user` (default — renders under **Settings → Plugins**) or `instance` (renders in **Admin → Plugins → ⋯ → Instance settings**, needs `trek` ≥ 4.2.0). Either way the action is **initiated by the person who clicked it** and runs as them, so `ctx.settings.get()` returns *that* user's value. See [Settings-page actions](#settings-page-actions). |
 | `operatorEgress` | boolean | The plugin talks to a **self-hosted** service whose hostname only the operator knows. The admin adds the real hosts after install (Admin → Plugins → Allowed hosts) and the runtime unions them into the egress allow-list. Requires an `http:outbound` permission, and is the only way to declare one with an empty `egress[]`. See [Operator-supplied egress hosts](#operator-supplied-egress-hosts-operatoregress). |
-| `capabilities.notificationChannel` | object | `{ title?, events? }` for a plugin implementing the `notificationChannel` hook — `title` names the column in the notification preferences matrix (default: the plugin's `name`), `events` **narrows** which events the channel carries (default: every non-admin event; admin-scoped events are never deliverable). Requires the `hook:notification-channel` permission. See [Notification channels](#notification-channels). |
+| `capabilities.notificationChannel` | object | `{ title?, events? }` for a plugin implementing the `notificationChannel` hook — `title` names the column in the notification preferences matrix (default: the plugin's `name`), `events` **narrows** which events the channel carries (default: all ten plugin-deliverable events; `events` may only narrow that set). Requires the `hook:notification-channel` permission. See [Notification channels](#notification-channels). |
+| `capabilities.routeProfiles` | array | up to 3 `{ id, label, icon? }` entries for a plugin implementing the `routeProvider` hook — each becomes a selectable mode in the planner's route toggle (next to Driving/Walking). `id` is lowercase `[a-z][a-z0-9-]` (max 24 chars) and is what `getRoute` receives as `request.profile`; `label` (≤40 chars) is shown to the user. Requires the `hook:route-provider` permission. |
+| `capabilities.mcpTools` | array | up to **8** MCP tools for a plugin implementing the `mcpToolProvider` hook — each `{ name, description, title?, inputSchema?, annotations? }` (`name` lowercase `^[a-z0-9_]{1,48}$`, unique; `description` required; `inputSchema` a JSON Schema with root `type: "object"` built from a small enforced keyword set — an unsupported keyword fails the install). Requires the `mcp:tools` permission. See [MCP tools](#mcp-tools). |
 | `capabilities.provides` | string[] | function names this plugin exposes to its dependents via `ctx.plugins.call` (see [Talking to other plugins](#talking-to-other-plugins)). |
 | `capabilities.emits` | string[] | event names this plugin publishes to its dependents via `ctx.events.emit`. |
 | `requiredAddons` | string[] | addon ids that must be **enabled** for the plugin to activate (see [Dependencies](#dependencies)). |
@@ -1118,9 +1431,17 @@ The `trek` range is a **hard contract**, enforced in both directions:
   declared `<4.0.0` it now refuses to start. It stays installed and listed,
   switched off, with the reason shown (`TREK_VERSION_INCOMPATIBLE`; a plugin that
   declares no range at all reports `TREK_VERSION_UNKNOWN`).
-- **No admin override.** The range is the author's own statement that the plugin
-  does not work there — unlike a rotated signing key, there is nothing an operator
-  could verify out-of-band and wave through.
+- **One operator escape hatch, loudly.** The range is the author's own statement
+  that the plugin does not work there, so there is no per-install override in the
+  UI. An operator who is stuck on a plugin whose author has not yet updated its
+  range can set `TREK_PLUGINS_IGNORE_TREK_RANGE=1` on the server: every gate above
+  then warns instead of refusing (a missing range is tolerated too), "install
+  latest" takes the newest published version, each bypass is logged, the response
+  carries a `trekRangeBypassed` marker, and the admin sees a warning dialog plus a
+  persistent chip on the row. Nothing guarantees the plugin works there, and a
+  mismatched plugin can in rare cases corrupt TREK data — so ship the range bump
+  rather than telling your users to flip the switch. The plugin-API version gate
+  (`apiVersion`) is never bypassed.
 
 Two behaviours follow. "Install latest" resolves to the newest version *this* TREK
 can run rather than the newest published, so shipping a 2.0.0 that needs TREK 4
@@ -1132,9 +1453,10 @@ build arg defaults to the literal `dev` — has nothing to compare a range again
 the check is skipped and an unversioned build installs anything. Plugins should still
 guard optional `ctx.*` namespaces.
 
-**Permissions** — the commonly-used core subset below; the **full list of ~50**
-(all read/write scopes, the notify/ai/oauth brokers, every provider hook) lives in
-**[[Plugin Permissions|Plugin-Permissions]]**. Unknown values are rejected at activation.
+**Permissions** — the commonly-used core subset below; the **full list of 65**
+(all read/write scopes, the notify/ai/oauth brokers, every provider hook, `mcp:tools`)
+lives in **[[Plugin Permissions|Plugin-Permissions]]**. Unknown values are rejected at
+install (and by `trek-plugin validate` and registry CI, which check against the same list).
 
 | Permission | Grants |
 |---|---|
@@ -1152,21 +1474,27 @@ guard optional `ctx.*` namespaces.
 | `db:meta` | `ctx.meta.*` — your own namespaced data on a trip/place/day/reservation/accommodation |
 | `db:read:users` | `ctx.users.getById` |
 | `events:subscribe` | receive core activity events via `events: [...]` (event name + tripId + a { entity, entityId } hint, plus a whitelisted entity **snapshot** when the plugin also holds the family's `db:read:*` grant; never a user) |
-| `hook:trip-card-provider` | `hooks.tripCardProvider` — small badges on the dashboard trip cards |
+| `hook:trip-card-provider` | `hooks.tripCardProvider` — small badges on the dashboard trip cards (`getCards(tripIds, ctx)` → `{ tripId, id, label, value?, icon?, tone?, url? }[]`; `id` is required — a badge without one is dropped; the host bounds every field and access-checks each tripId) |
 | `jobs:run` | run declared background `jobs` on their cron schedule **and** `ctx.scheduler` runtime timers → `scheduled` handler (opt-in; no user, so trip reads are refused) |
 | `ws:broadcast:trip` | `ctx.ws.broadcastToTrip` |
 | `ws:broadcast:user` | `ctx.ws.broadcastToUser` |
 | `http:outbound` or `http:outbound:<host>` | outbound HTTP to `egress[]` hosts |
 | `hook:place-detail-provider` | `hooks.placeDetailProvider` — extra place rows TREK renders (see [Provider hooks](#provider-hooks)) |
+| `hook:search-provider` | `hooks.searchProvider` — answers place searches from your own index (see [Provider hooks](#provider-hooks)) |
 | `hook:trip-warning-provider` | `hooks.warningProvider` — validation warnings in the planner (see [Provider hooks](#provider-hooks)) |
 | `hook:table-contributor` | `hooks.tableContributor` — host-rendered columns/actions in the reservations, transports, places, day, costs, packing, files and todos views (see [Provider hooks](#provider-hooks)) |
 | `hook:map-marker-provider` | `hooks.mapMarkerProvider` — bounded markers on the trip map |
+| `hook:map-layer-provider` | `hooks.mapLayerProvider` — bounded vector overlays (routes, corridors, zones) on the trip map |
+| `hook:route-provider` | `hooks.routeProvider` — routing profiles for the planner's route toggle (declared in `capabilities.routeProfiles`) |
+| `hook:day-schedule-provider` | `hooks.dayScheduleProvider` — time contributions in the day plan (charging, buffers), totalled in the route footer |
+| `hook:day-tint-provider` | `hooks.dayTintProvider` — colours for a day card's badge / header / activity list in the Plan sidebar (e.g. which leg of the trip a day belongs to). One contribution per day: first granted provider wins |
 | `hook:pdf-section-provider` | `hooks.pdfSectionProvider` — sections appended to the trip PDF export |
 | `hook:atlas-layer-provider` | `hooks.atlasLayerProvider` — per-user country tint layers on the Atlas map |
 | `hook:journal-entry-provider` | `hooks.journalEntryProvider` — extra rows on a journal entry card |
-| `hook:trip-card-provider` | `hooks.tripCardProvider` — small badges on the dashboard trip cards (`getCards(tripIds, ctx)` → `{ tripId, label, value?, icon?, tone?, url? }[]`; host bounds every field + access-checks each tripId) |
 | `hook:user-data` | `deleteUserData` / `exportUserData` handlers — honour GDPR erasure (durable, retried) and data-export for a deleted/requesting user (userless; own db only) |
-| `hook:photo-provider` / `hook:calendar-source` | reserved (see [Provider hooks](#provider-hooks)) |
+| `hook:photo-provider` | `hooks.photoProvider` — a photo source for Memories, aggregated at `GET /api/plugin-photos/search` (see [Provider hooks](#provider-hooks)) |
+| `hook:calendar-source` | `hooks.calendarSource` — calendar events for the signed-in user, aggregated at `GET /api/plugin-calendar` (see [Provider hooks](#provider-hooks)) |
+| `mcp:tools` | `hooks.mcpToolProvider` — publish MCP tools on TREK's MCP server, declared in `capabilities.mcpTools`; runs as the requesting MCP user (see [MCP tools](#mcp-tools)) |
 
 > There is **no `ws:broadcast:*`** — use `ws:broadcast:trip` and/or
 > `ws:broadcast:user` explicitly.
@@ -1182,14 +1510,14 @@ guard optional `ctx.*` namespaces.
 | `required` | boolean. |
 | `secret` | boolean — encrypted at rest, decrypted only into `ctx.config`. |
 | `placeholder`, `hint` | form hints. |
-| `options` | `[{ value, label }]` for select inputs. |
+| `options` | `[{ value, label }]` for select inputs; bare strings/numbers are accepted and coerced, but an option needs a non-empty `value`. |
 | `oauth` | `{ initPath, callbackPath }` for OAuth flows. |
 
 **Page nav:** the host builds a page plugin's nav entry from the top-level `name`
-and `icon` — the installed-manifest parser only consumes `capabilities.widget`, so
-there is nothing else to set. `icon` must be a real lucide name: TREK resolves it at
-render time and silently falls back to `Blocks`, which makes a typo invisible locally,
-so `validate` rejects one.
+and `icon` — there is no `capabilities.nav`, so there is nothing else to set.
+`icon` must be a real lucide name: TREK resolves it at render time and silently
+falls back to `Blocks`, which makes a typo invisible locally, so `validate`
+rejects one.
 
 See [[Plugin Permissions|Plugin-Permissions]] for the full permission model.
 
@@ -1203,7 +1531,8 @@ whatever else it needs. Pass a command explicitly to skip the menu (and for scri
 CI). `trek-plugin help <command>` — or `trek-plugin <command> --help` — prints a full
 page for any command.
 
-**The path is four commands**, and the other nine are steps one of them already does:
+**The path is four commands**, and the others are steps one of them already does
+(with two exceptions that undo or repair: `unrelease` and `rotate-key`):
 
 ```bash
 trek-plugin create [name] [--type integration|page|widget|trip-page]
@@ -1240,6 +1569,15 @@ trek-plugin shot [dir] [--port 4317] [--out docs/screenshot.png] [--dark] [--no-
 trek-plugin keygen [--key file]
 trek-plugin sign [zip] [--key file]
 
+# Move a published plugin to a NEW signing key WITHOUT shipping a version (lost or
+# compromised key, planned rotation): fetches your published entry, re-signs every
+# pinned version's artifact with the new key (each verified against its sha256 first,
+# all-or-nothing), swaps authorPublicKey, and opens a registry PR flagged as a
+# rotation. The PR needs a maintainer's `allow-key-change` label, and every admin who
+# has the plugin must re-trust the new key. To rotate WHILE shipping a version, use
+# `publish --sign --allow-key-change` instead.
+trek-plugin rotate-key [dir] [--id plugin-id] [--key file] [--out entry.json] [--draft]
+
 # Emit the ready-to-PR registry entry: commitSha (resolved from the git tag),
 # downloadUrl, sha256, size, and the manifest's `trek` range verbatim — plus
 # requiredAddons and pluginDependencies, which the registry parity-checks against the
@@ -1250,20 +1588,28 @@ trek-plugin entry --repo owner/name --tag vX.Y.Z [--zip plugin.zip] [--merge ent
 # The registry checks that genuinely need the network: the tag resolves to the commit
 # the entry pins, the released artifact downloads and hashes to the pinned sha256, the
 # id is not bound to another GitHub owner, and an update does not drop or rotate a
-# signing key you already published under. `publish` runs this for you.
-trek-plugin preflight [dir] --repo owner/name --tag vX.Y.Z [--entry file.json] [--all]
+# signing key you already published under (`--allow-key-change` declares a deliberate
+# rotation, turning that refusal into a pass). `publish` runs this for you.
+trek-plugin preflight [dir] --repo owner/name --tag vX.Y.Z [--entry file.json] [--all] [--allow-key-change]
 
 # Pack -> cut the GitHub release -> print the entry, without opening the registry PR.
 trek-plugin release [dir] --repo owner/name --tag vX.Y.Z [--sign] [--merge entry.json]
 
 # Fork the registry, write registry/plugins/<id>.json, open the PR. Needs `gh`.
 trek-plugin submit [dir] --repo owner/name --tag vX.Y.Z [--registry o/n] [--draft]
+
+# Delete a stranded release + remote tag + local tag in one go. Checks the published
+# registry index first and REFUSES a version that is actually published (immutable);
+# --yes consents when the index can't be reached.
+trek-plugin unrelease vX.Y.Z [dir] --repo owner/name [--yes]
 ```
 
 `publish` chains those last steps in the order that matters: **check → pack → release →
 preflight → submit**. The local gates run *before* anything is tagged or released,
-because a GitHub release is effectively immutable — the registry pins its sha256. See
-[[Publishing a Plugin|Plugin-Publishing]].
+because a GitHub release is effectively immutable — the registry pins its sha256 —
+and a failure *after* the release is cut rolls back everything that run created (the
+release, both tags), so the same tag is free to re-run against (`--keep-release`
+opts out). See [[Publishing a Plugin|Plugin-Publishing]].
 
 ## Registry & publishing
 
@@ -1275,7 +1621,10 @@ because a GitHub release is effectively immutable — the registry pins its sha2
 - **Optional author signing:** an entry may carry `authorPublicKey` (stable,
   TOFU-pinned on first install) and each version a `signature` over the artifact
   bytes. Unsigned plugins install on sha256 alone; a plugin that was signed can't
-  later go unsigned or swap its key without an explicit admin re-trust.
+  later go unsigned, and a key *rotation* is a deliberate act the SDK drives —
+  `trek-plugin rotate-key`, or `publish --sign --allow-key-change` — that still
+  needs a registry maintainer's `allow-key-change` label plus an explicit admin
+  re-trust on every instance.
 
 Full walkthrough: [[Publishing a Plugin|Plugin-Publishing]]. Overview:
 [[Plugins|Plugins]].

@@ -1,7 +1,9 @@
 import { Calendar, ChevronLeft, ChevronRight, Keyboard } from 'lucide-react';
+import { localIsoDate } from '../../utils/localDate';
 import React, { useEffect, useRef, useState } from 'react';
-import ReactDOM from 'react-dom';
+import { createPortal } from 'react-dom';
 import { useTranslation } from '../../i18n';
+import { useRemeasureSignal } from '../../hooks/useAnchoredPosition';
 
 function daysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
@@ -19,6 +21,12 @@ interface CustomDatePickerProps {
   style?: React.CSSProperties;
   compact?: boolean;
   borderless?: boolean;
+  /** Read-only contexts (a shared journey, a locked form) — same as CustomTimePicker. */
+  disabled?: boolean;
+  // Optional inclusive ISO (YYYY-MM-DD) bounds. Dates outside the range are
+  // disabled in the calendar and rejected on manual entry.
+  min?: string;
+  max?: string;
 }
 
 export function CustomDatePicker({
@@ -28,6 +36,9 @@ export function CustomDatePicker({
   style = {},
   compact = false,
   borderless = false,
+  disabled = false,
+  min,
+  max,
 }: CustomDatePickerProps) {
   const { locale, t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -35,6 +46,8 @@ export function CustomDatePicker({
   const [yearPageStart, setYearPageStart] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
+  // Re-renders the open calendar whenever its anchor may have moved (#1999).
+  const reanchor = useRemeasureSignal(open);
 
   const parsed = value ? new Date(value + 'T00:00:00Z') : null;
   const [viewYear, setViewYear] = useState(parsed?.getUTCFullYear() || new Date().getFullYear());
@@ -55,6 +68,12 @@ export function CustomDatePicker({
       if (parsed) {
         setViewYear(parsed.getUTCFullYear());
         setViewMonth(parsed.getUTCMonth());
+      } else if (min || max) {
+        // No value yet: open on the first in-range month so the user isn't
+        // greeted by an all-disabled calendar.
+        const anchor = new Date((min || max) + 'T00:00:00Z');
+        setViewYear(anchor.getUTCFullYear());
+        setViewMonth(anchor.getUTCMonth());
       }
       setView('days');
     }
@@ -149,11 +168,17 @@ export function CustomDatePicker({
       })
     : '';
 
+  // Inclusive range check on ISO (YYYY-MM-DD) strings — lexicographic order
+  // matches chronological order for this format.
+  const isOutOfRange = (iso: string) => (!!min && iso < min) || (!!max && iso > max);
+
   const selectDay = (day: number) => {
     const y = String(viewYear);
     const m = String(viewMonth + 1).padStart(2, '0');
     const d = String(day).padStart(2, '0');
-    onChange(`${y}-${m}-${d}`);
+    const iso = `${y}-${m}-${d}`;
+    if (isOutOfRange(iso)) return;
+    onChange(iso);
     setOpen(false);
   };
 
@@ -183,6 +208,7 @@ export function CustomDatePicker({
 
     // Try ISO first — always works
     if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+      if (isOutOfRange(input)) return;
       onChange(input);
       return;
     }
@@ -204,11 +230,11 @@ export function CustomDatePicker({
     if (nums.length !== 3) return;
 
     // nachher:
-    const get = (field: 'day' | 'month' | 'year') => parseInt(nums[order.indexOf(field)]);
+    const get = (field: 'day' | 'month' | 'year') => Number.parseInt(nums[order.indexOf(field)]);
     let d = get('day'),
       m = get('month');
     const y = get('year');
-    if (isNaN(d) || isNaN(m) || isNaN(y)) return;
+    if (Number.isNaN(d) || Number.isNaN(m) || Number.isNaN(y)) return;
 
     // If locale order gives impossible month but valid swap, correct it
     if (m > 12 && d <= 12) {
@@ -218,7 +244,13 @@ export function CustomDatePicker({
     }
     const year = y < 100 ? 2000 + y : y;
     if (m < 1 || m > 12 || d < 1 || d > 31) return;
-    onChange(`${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+    // 31.02. parses fine as numbers but is no day at all; without the round-trip it would
+    // travel on as '2026-02-31' and come back out of new Date() as 3 March.
+    const probe = new Date(Date.UTC(year, m - 1, d));
+    if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) return;
+    const iso = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (isOutOfRange(iso)) return;
+    onChange(iso);
   };
 
   const gridCellStyle = (selected: boolean, current: boolean): React.CSSProperties => ({
@@ -261,16 +293,26 @@ export function CustomDatePicker({
           }}
         />
       ) : (
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        // `stretch`, not `center`: the keyboard button's own padding made it a
+        // few pixels shorter than the date trigger beside it, and the two sat in
+        // a row with mismatched heights. Stretching means it tracks the trigger
+        // whatever the type scale does to that one.
+        <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
           {/* Calendar trigger */}
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
+            disabled={disabled}
             aria-label={displayValue || placeholder || t('common.date')}
             aria-expanded={open}
             aria-haspopup="dialog"
             style={{
               flex: 1,
+              // Without this the trigger never goes below its text width, so the
+              // ellipsis on the label below is unreachable and the button
+              // overflows its column instead. A long locale date ("12. Sept.
+              // 2026") in a two-column grid is exactly that case (#2267).
+              minWidth: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -282,7 +324,8 @@ export function CustomDatePicker({
               color: displayValue ? 'var(--text-primary)' : 'var(--text-faint)',
               fontSize: 'calc(13px * var(--fs-scale-body, 1))',
               fontFamily: 'inherit',
-              cursor: 'pointer',
+              cursor: disabled ? 'default' : 'pointer',
+              opacity: disabled ? 0.6 : 1,
               outline: 'none',
               transition: 'border-color 0.15s',
             }}
@@ -310,9 +353,10 @@ export function CustomDatePicker({
               style={{
                 background: 'none',
                 border: '1px solid var(--border-primary)',
-                borderRadius: 8,
+                // Same corner as the trigger it stands next to.
+                borderRadius: 10,
                 cursor: 'pointer',
-                padding: '7px 8px',
+                padding: '0 9px',
                 display: 'flex',
                 alignItems: 'center',
                 color: 'var(--text-faint)',
@@ -335,28 +379,43 @@ export function CustomDatePicker({
       )}
 
       {open &&
-        ReactDOM.createPortal(
+        createPortal(
           <div
             ref={dropRef}
             role="dialog"
             aria-label={t('common.datepicker.dialog')}
             style={{
               position: 'fixed',
-              ...(() => {
+              // reanchor ticks on scroll / resize / keyboard so this recomputes
+              // against a fresh rect instead of the one measured on open (#1999).
+              ...((): { top?: number; bottom?: number; left: number } => {
+                void reanchor;
                 const r = ref.current?.getBoundingClientRect();
                 if (!r) return { top: 0, left: 0 };
                 const w = 268,
                   pad = 8,
+                  // Only used to decide *whether* the popup fits below the trigger —
+                  // its real height varies with the month's row count and the view
+                  // (days/months/years), so it can't be known before it renders.
                   h = 360;
                 const vw = window.innerWidth;
                 const vh = window.visualViewport?.height ?? window.innerHeight;
                 let left = r.left;
-                let top = r.bottom + 4;
                 if (left + w > vw - pad) left = Math.max(pad, vw - w - pad);
-                if (top + h > vh - pad) top = r.top - h - 4;
-                top = Math.max(pad, Math.min(top, vh - h - pad));
                 if (vw < 360) left = Math.max(pad, (vw - w) / 2);
-                return { top, left };
+                const below = r.bottom + 4;
+                if (below + h <= vh - pad) return { top: below, left };
+                // Flipped: anchor from the trigger's own top edge via `bottom`
+                // instead of subtracting a guessed height from `top`. A guessed
+                // `top` leaves a gap sized by however wrong the guess was — in a
+                // short modal (e.g. the settle-up form) that gap was big enough to
+                // land the popup over unrelated fields instead of the trigger it
+                // belongs to. Anchoring the opposite edge means the popup always
+                // sits flush against the trigger no matter its real height.
+                if (r.top - 4 - h >= pad) return { bottom: vh - r.top + 4, left };
+                // No room on either side (a phone in landscape): keep the top edge
+                // inside the viewport and let the popup cover the trigger instead.
+                return { top: Math.max(pad, Math.min(below, vh - h - pad)), left };
               })(),
               zIndex: 99999,
               background: 'var(--bg-card)',
@@ -465,6 +524,7 @@ export function CustomDatePicker({
                     const sel = d === selectedDay;
                     const td = isToday(d);
                     const isoDate = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const disabled = isOutOfRange(isoDate);
                     const ariaLabel = new Date(isoDate + 'T00:00:00Z').toLocaleDateString(locale, {
                       day: 'numeric',
                       month: 'long',
@@ -476,6 +536,7 @@ export function CustomDatePicker({
                         key={d}
                         type="button"
                         onClick={() => selectDay(d)}
+                        disabled={disabled}
                         aria-label={ariaLabel}
                         aria-pressed={sel}
                         style={{
@@ -486,9 +547,10 @@ export function CustomDatePicker({
                           alignItems: 'center',
                           justifyContent: 'center',
                           ...gridCellStyle(sel, td),
+                          ...(disabled ? { opacity: 0.3, cursor: 'not-allowed' } : {}),
                         }}
                         onMouseEnter={(e) => {
-                          if (!sel) e.currentTarget.style.background = 'var(--bg-hover)';
+                          if (!sel && !disabled) e.currentTarget.style.background = 'var(--bg-hover)';
                         }}
                         onMouseLeave={(e) => {
                           if (!sel) e.currentTarget.style.background = 'transparent';
@@ -649,7 +711,7 @@ export function CustomDateTimePicker({ value, onChange, placeholder, style = {} 
     onChange(d ? `${d}T${timePart || '12:00'}` : '');
   };
   const handleTimeChange = (t: string) => {
-    const d = datePart || new Date().toISOString().split('T')[0];
+    const d = datePart || localIsoDate();
     onChange(t ? `${d}T${t}` : d);
   };
 

@@ -9,76 +9,65 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Request } from 'express';
-import { diskStorage } from 'multer';
+import { isDemoWriteBlocked, DEMO_WRITE_ERROR } from '../common/demo-write';
+import { RuntimeEnvService } from '../app-config/runtime-env.service';
+import type { Options } from 'multer';
 import path from 'path';
-import fs from 'fs';
-import { v4 as uuidv4 } from 'uuid';
 import type { User } from '../../types';
 import { CollectionsService } from './collections.service';
-import { CollectionsAddonGuard } from './collections-addon.guard';
+import { AddonGuard } from '../addons/addon.guard';
+import { RequireAddon } from '../addons/require-addon.decorator';
+import { ADDON_IDS } from '../../addons';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { ZodValidationPipe } from '../common/zod-validation.pipe';
-import { isDemoEmail } from '../../services/demo';
+import { PLACE_IMAGE_FILE_FILTER } from '../common/place-image-upload';
+import { StorageService } from '../storage/storage.service';
+import { placeImageUrl } from '../places/place-image';
 import {
-  collectionCreateRequestSchema,
-  collectionUpdateRequestSchema,
-  collectionSavePlaceRequestSchema,
-  collectionSaveFromTripRequestSchema,
-  collectionSaveFromTripManyRequestSchema,
-  collectionPlaceUpdateRequestSchema,
-  collectionSetStatusRequestSchema,
-  collectionCopyToTripRequestSchema,
-  collectionInviteRequestSchema,
-  collectionInviteActionRequestSchema,
-  collectionInviteCancelRequestSchema,
-  collectionRemoveMemberRequestSchema,
-  collectionSetMemberRoleRequestSchema,
-  collectionLabelCreateRequestSchema,
-  collectionLabelUpdateRequestSchema,
-  collectionLabelAssignRequestSchema,
-  type CollectionLabelCreateRequest,
-  type CollectionLabelUpdateRequest,
-  type CollectionLabelAssignRequest,
-  type CollectionCreateRequest,
-  type CollectionUpdateRequest,
-  type CollectionSavePlaceRequest,
-  type CollectionSaveFromTripRequest,
-  type CollectionSaveFromTripManyRequest,
-  type CollectionPlaceUpdateRequest,
-  type CollectionSetStatusRequest,
-  type CollectionCopyToTripRequest,
-  type CollectionInviteRequest,
-  type CollectionInviteActionRequest,
-  type CollectionInviteCancelRequest,
-  type CollectionRemoveMemberRequest,
-  type CollectionSetMemberRoleRequest,
-} from '@trek/shared';
+  CollectionCreateDto,
+  CollectionUpdateDto,
+  CollectionReorderDto,
+  CollectionDeleteManyDto,
+  CollectionSavePlaceDto,
+  CollectionSaveFromTripDto,
+  CollectionSaveFromTripManyDto,
+  CollectionPlaceUpdateDto,
+  CollectionSetStatusDto,
+  CollectionSetStatusManyDto,
+  CollectionSetStatusFromTripDto,
+  CollectionCopyToTripDto,
+  CollectionInviteDto,
+  CollectionInviteActionDto,
+  CollectionInviteCancelDto,
+  CollectionRemoveMemberDto,
+  CollectionSetMemberRoleDto,
+  CollectionLabelCreateDto,
+  CollectionLabelUpdateDto,
+  CollectionLabelAssignDto,
+  CollectionImportDto,
+  CollectionImportIntoDto,
+  CollectionGpxReadDto,
+} from './collections.dto';
+import { PlaceRatingDto } from '../places/places.dto';
+import { CollectionGpxError } from './collection-gpx.helpers';
 
-const MAX_COVER_SIZE = 20 * 1024 * 1024;
-const coversDir = path.join(__dirname, '../../../uploads/covers');
-const COVER_UPLOAD = {
-  storage: diskStorage({
-    destination: (_req, _file, cb) => {
-      if (!fs.existsSync(coversDir)) fs.mkdirSync(coversDir, { recursive: true });
-      cb(null, coversDir);
-    },
-    filename: (_req, file, cb) => cb(null, `${uuidv4()}${path.extname(file.originalname)}`),
-  }),
-  limits: { fileSize: MAX_COVER_SIZE },
-  fileFilter: (_req: Request, file: Express.Multer.File, cb: (err: Error | null, accept: boolean) => void) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-    if (file.mimetype.startsWith('image/') && !file.mimetype.includes('svg') && allowed.includes(ext)) cb(null, true);
-    else cb(new Error('Only jpg, png, gif, webp images allowed'), false);
-  },
+export const MAX_COVER_SIZE = 20 * 1024 * 1024;
+// Duplicated on purpose from trips.controller.ts (historical parity — no
+// drive-by consolidation). Quirk preserved: a plain Error without statusCode
+// maps to 500, not 400. Passed inline on the cover route; the storage engine
+// comes from collections.module.ts's storage-upload factory options.
+const COVER_FILE_FILTER: Options['fileFilter'] = (_req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  if (file.mimetype.startsWith('image/') && !file.mimetype.includes('svg') && allowed.includes(ext)) cb(null, true);
+  else cb(new Error('Only jpg, png, gif, webp images allowed'));
 };
 
 /**
@@ -92,9 +81,10 @@ const COVER_UPLOAD = {
  * excluded from the WS broadcast.
  */
 @Controller('api/addons/collections')
-@UseGuards(CollectionsAddonGuard, JwtAuthGuard)
+@UseGuards(AddonGuard, JwtAuthGuard)
+@RequireAddon(ADDON_IDS.COLLECTIONS, 'Collections')
 export class CollectionsController {
-  constructor(private readonly collections: CollectionsService) {}
+  constructor(private readonly collections: CollectionsService, private readonly env: RuntimeEnvService, private readonly storage: StorageService) {}
 
   // ── Lists ─────────────────────────────────────────────────────────────────
   @Get()
@@ -103,53 +93,59 @@ export class CollectionsController {
   }
 
   @Post()
-  create(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionCreateRequestSchema)) body: CollectionCreateRequest) {
+  create(@CurrentUser() user: User, @Body() body: CollectionCreateDto) {
     return this.collections.createCollection(user.id, body);
   }
 
   @Post('reorder')
   @HttpCode(200)
-  reorder(@CurrentUser() user: User, @Body('orderedIds') orderedIds: unknown) {
-    if (!Array.isArray(orderedIds) || !orderedIds.every((v) => Number.isFinite(Number(v)))) {
-      throw new HttpException({ error: 'orderedIds must be an array of numbers' }, 400);
-    }
-    this.collections.reorderCollections(user.id, orderedIds.map(Number));
+  reorder(@CurrentUser() user: User, @Body() body: CollectionReorderDto) {
+    this.collections.reorderCollections(user.id, body.orderedIds);
     return { success: true };
   }
 
   // ── Places (static prefixes before /:id) ────────────────────────────────────
   @Post('places')
   @HttpCode(200)
-  savePlace(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionSavePlaceRequestSchema)) body: CollectionSavePlaceRequest, @Headers('x-socket-id') socketId?: string) {
+  savePlace(@CurrentUser() user: User, @Body() body: CollectionSavePlaceDto, @Headers('x-socket-id') socketId?: string) {
     return this.collections.savePlace(user.id, body, socketId);
   }
 
   @Post('places/from-trip')
   @HttpCode(200)
-  saveFromTrip(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionSaveFromTripRequestSchema)) body: CollectionSaveFromTripRequest) {
-    return this.collections.saveFromTripPlace(user.id, body.collection_id, body.source_trip_id, body.source_place_id, body.force);
+  saveFromTrip(@CurrentUser() user: User, @Body() body: CollectionSaveFromTripDto, @Headers('x-socket-id') socketId?: string) {
+    return this.collections.saveFromTripPlace(user.id, body.collection_id, body.source_trip_id, body.source_place_id, body.force, socketId);
   }
 
   @Post('places/from-trip-many')
   @HttpCode(200)
-  saveFromTripMany(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionSaveFromTripManyRequestSchema)) body: CollectionSaveFromTripManyRequest) {
-    return this.collections.saveFromTripPlaces(user.id, body.collection_id, body.source_trip_id, body.source_place_ids, body.force);
+  saveFromTripMany(@CurrentUser() user: User, @Body() body: CollectionSaveFromTripManyDto, @Headers('x-socket-id') socketId?: string) {
+    return this.collections.saveFromTripPlaces(user.id, body.collection_id, body.source_trip_id, body.source_place_ids, body.force, socketId);
   }
 
   @Post('places/delete-many')
   @HttpCode(200)
-  deleteMany(@CurrentUser() user: User, @Body('ids') ids: unknown, @Headers('x-socket-id') socketId?: string) {
-    if (!Array.isArray(ids) || !ids.every((v) => Number.isFinite(Number(v)))) {
-      throw new HttpException({ error: 'ids must be an array of numbers' }, 400);
-    }
-    return { deleted: this.collections.deletePlacesMany(user.id, ids.map(Number), socketId) };
+  async deleteMany(@CurrentUser() user: User, @Body() body: CollectionDeleteManyDto, @Headers('x-socket-id') socketId?: string) {
+    return { deleted: await this.collections.deletePlacesMany(user.id, body.ids, socketId) };
+  }
+
+  @Post('places/status-many')
+  @HttpCode(200)
+  setStatusMany(@CurrentUser() user: User, @Body() body: CollectionSetStatusManyDto, @Headers('x-socket-id') socketId?: string) {
+    return this.collections.setStatusMany(user.id, body.ids, body.status, socketId);
+  }
+
+  @Post('places/status-from-trip')
+  @HttpCode(200)
+  setStatusFromTrip(@CurrentUser() user: User, @Body() body: CollectionSetStatusFromTripDto, @Headers('x-socket-id') socketId?: string) {
+    return this.collections.setStatusFromTrip(user.id, body.trip_id, body.place_ids, body.status, socketId);
   }
 
   @Patch('places/:pid')
   updatePlace(
     @CurrentUser() user: User,
     @Param('pid') pid: string,
-    @Body(new ZodValidationPipe(collectionPlaceUpdateRequestSchema)) body: CollectionPlaceUpdateRequest,
+    @Body() body: CollectionPlaceUpdateDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     return this.collections.updatePlace(user.id, Number(pid), body, socketId);
@@ -160,22 +156,85 @@ export class CollectionsController {
   setStatus(
     @CurrentUser() user: User,
     @Param('pid') pid: string,
-    @Body(new ZodValidationPipe(collectionSetStatusRequestSchema)) body: CollectionSetStatusRequest,
+    @Body() body: CollectionSetStatusDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     return this.collections.setStatus(user.id, Number(pid), body.status, socketId);
   }
 
+  @Put('places/:pid/rating')
+  setRating(
+    @CurrentUser() user: User,
+    @Param('pid') pid: string,
+    @Body() body: PlaceRatingDto,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    return this.collections.setRating(user.id, Number(pid), body.rating, socketId);
+  }
+
+  @Delete('places/:pid/rating')
+  clearRating(@CurrentUser() user: User, @Param('pid') pid: string, @Headers('x-socket-id') socketId?: string) {
+    return this.collections.setRating(user.id, Number(pid), null, socketId);
+  }
+
+  @Post('places/:pid/image')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('image', { fileFilter: PLACE_IMAGE_FILE_FILTER }))
+  async uploadPlaceImage(
+    @CurrentUser() user: User,
+    @Param('pid') pid: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    if (isDemoWriteBlocked(this.env, user.email)) {
+      throw new HttpException(DEMO_WRITE_ERROR, 403);
+    }
+    if (!file) throw new HttpException({ error: 'No image uploaded' }, 400);
+    // Commit the spooled upload to its final storage location (atomic
+    // same-volume rename) before the DB row references the final path.
+    await this.storage.put('places', file.filename, { tmpPath: file.path });
+    return this.collections.setPlaceImage(user.id, Number(pid), placeImageUrl(file.filename), socketId);
+  }
+
   @Delete('places/:pid')
-  deletePlace(@CurrentUser() user: User, @Param('pid') pid: string, @Headers('x-socket-id') socketId?: string) {
-    this.collections.deletePlace(user.id, Number(pid), socketId);
+  async deletePlace(@CurrentUser() user: User, @Param('pid') pid: string, @Headers('x-socket-id') socketId?: string) {
+    await this.collections.deletePlace(user.id, Number(pid), socketId);
     return { success: true };
   }
 
   // ── Copy to trip ────────────────────────────────────────────────────────────
+  /**
+   * Read a list file back as a new list of the caller's own (#2198).
+   *
+   * 201, like POST / above, because it creates a list. The other POSTs here
+   * are @HttpCode(200) because they act on one that already exists.
+   */
+  @Post('import')
+  importCollection(@CurrentUser() user: User, @Body() body: CollectionImportDto) {
+    return this.collections.importCollection(user.id, body);
+  }
+
+  /**
+   * A GPX document read into the list file it amounts to (#2301). Creates
+   * nothing, hence 200: the browser shows what came out and sends it to
+   * /import above, so a GPX goes through the same contract and the same one
+   * transaction as a list file. A refusal carries a `code` the client
+   * translates, beside the English `error` every other route has.
+   */
+  @Post('gpx/read')
+  @HttpCode(200)
+  readGpx(@Body() body: CollectionGpxReadDto) {
+    try {
+      return this.collections.readCollectionGpx(body);
+    } catch (err) {
+      if (!(err instanceof CollectionGpxError)) throw err;
+      throw new HttpException({ error: err.message, code: err.code }, err.code === 'too-large' ? 413 : 400);
+    }
+  }
+
   @Post('copy-to-trip')
   @HttpCode(200)
-  copyToTrip(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionCopyToTripRequestSchema)) body: CollectionCopyToTripRequest) {
+  copyToTrip(@CurrentUser() user: User, @Body() body: CollectionCopyToTripDto) {
     return this.collections.copyToTrip(user.id, body);
   }
 
@@ -184,7 +243,7 @@ export class CollectionsController {
   @HttpCode(200)
   createLabel(
     @CurrentUser() user: User,
-    @Body(new ZodValidationPipe(collectionLabelCreateRequestSchema)) body: CollectionLabelCreateRequest,
+    @Body() body: CollectionLabelCreateDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     return this.collections.createLabel(user.id, body.collection_id, body.name, body.color, socketId);
@@ -194,7 +253,7 @@ export class CollectionsController {
   updateLabel(
     @CurrentUser() user: User,
     @Param('lid') lid: string,
-    @Body(new ZodValidationPipe(collectionLabelUpdateRequestSchema)) body: CollectionLabelUpdateRequest,
+    @Body() body: CollectionLabelUpdateDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     return this.collections.updateLabel(user.id, Number(lid), body, socketId);
@@ -210,7 +269,7 @@ export class CollectionsController {
   @HttpCode(200)
   assignLabels(
     @CurrentUser() user: User,
-    @Body(new ZodValidationPipe(collectionLabelAssignRequestSchema)) body: CollectionLabelAssignRequest,
+    @Body() body: CollectionLabelAssignDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     return this.collections.assignLabels(user.id, body.label_ids, body.place_ids, false, socketId);
@@ -220,7 +279,7 @@ export class CollectionsController {
   @HttpCode(200)
   unassignLabels(
     @CurrentUser() user: User,
-    @Body(new ZodValidationPipe(collectionLabelAssignRequestSchema)) body: CollectionLabelAssignRequest,
+    @Body() body: CollectionLabelAssignDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     return this.collections.assignLabels(user.id, body.label_ids, body.place_ids, true, socketId);
@@ -248,7 +307,7 @@ export class CollectionsController {
   // ── Fusion invitations ──────────────────────────────────────────────────────
   @Post('invite')
   @HttpCode(200)
-  invite(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionInviteRequestSchema)) body: CollectionInviteRequest) {
+  invite(@CurrentUser() user: User, @Body() body: CollectionInviteDto) {
     this.collections.assertAccess(user.id, body.collection_id); // 404 if not visible (no enumeration)
     if (!this.collections.isOwner(user.id, body.collection_id)) {
       throw new HttpException({ error: 'Only the owner can invite' }, 403);
@@ -262,7 +321,7 @@ export class CollectionsController {
 
   @Post('invite/accept')
   @HttpCode(200)
-  acceptInvite(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionInviteActionRequestSchema)) body: CollectionInviteActionRequest, @Headers('x-socket-id') socketId?: string) {
+  acceptInvite(@CurrentUser() user: User, @Body() body: CollectionInviteActionDto, @Headers('x-socket-id') socketId?: string) {
     const result = this.collections.acceptInvite(user.id, body.collection_id, socketId);
     if (result.error) {
       throw new HttpException({ error: result.error }, result.status!);
@@ -272,14 +331,14 @@ export class CollectionsController {
 
   @Post('invite/decline')
   @HttpCode(200)
-  declineInvite(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionInviteActionRequestSchema)) body: CollectionInviteActionRequest, @Headers('x-socket-id') socketId?: string) {
+  declineInvite(@CurrentUser() user: User, @Body() body: CollectionInviteActionDto, @Headers('x-socket-id') socketId?: string) {
     this.collections.declineInvite(user.id, body.collection_id, socketId);
     return { success: true };
   }
 
   @Post('invite/cancel')
   @HttpCode(200)
-  cancelInvite(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionInviteCancelRequestSchema)) body: CollectionInviteCancelRequest) {
+  cancelInvite(@CurrentUser() user: User, @Body() body: CollectionInviteCancelDto) {
     this.collections.assertAccess(user.id, body.collection_id); // 404 if not visible
     if (!this.collections.isOwner(user.id, body.collection_id)) {
       throw new HttpException({ error: 'Only the owner can cancel invites' }, 403);
@@ -290,14 +349,14 @@ export class CollectionsController {
 
   @Post('leave')
   @HttpCode(200)
-  leave(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionInviteActionRequestSchema)) body: CollectionInviteActionRequest, @Headers('x-socket-id') socketId?: string) {
+  leave(@CurrentUser() user: User, @Body() body: CollectionInviteActionDto, @Headers('x-socket-id') socketId?: string) {
     this.collections.leaveCollection(user.id, body.collection_id, socketId);
     return { success: true };
   }
 
   @Post('members/remove')
   @HttpCode(200)
-  removeMember(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionRemoveMemberRequestSchema)) body: CollectionRemoveMemberRequest) {
+  removeMember(@CurrentUser() user: User, @Body() body: CollectionRemoveMemberDto) {
     this.collections.assertAccess(user.id, body.collection_id); // 404 if not visible
     if (!this.collections.isOwner(user.id, body.collection_id)) {
       throw new HttpException({ error: 'Only the owner can remove members' }, 403);
@@ -308,7 +367,7 @@ export class CollectionsController {
 
   @Post('members/role')
   @HttpCode(200)
-  setMemberRole(@CurrentUser() user: User, @Body(new ZodValidationPipe(collectionSetMemberRoleRequestSchema)) body: CollectionSetMemberRoleRequest) {
+  setMemberRole(@CurrentUser() user: User, @Body() body: CollectionSetMemberRoleDto) {
     this.collections.assertAccess(user.id, body.collection_id); // 404 if not visible
     if (!this.collections.isOwner(user.id, body.collection_id)) {
       throw new HttpException({ error: 'Only the owner can change member roles' }, 403);
@@ -328,14 +387,64 @@ export class CollectionsController {
   }
 
   @Post(':id/cover')
-  @UseInterceptors(FileInterceptor('cover', COVER_UPLOAD))
-  uploadCover(@CurrentUser() user: User, @Param('id') id: string, @UploadedFile() file: Express.Multer.File | undefined, @Headers('x-socket-id') socketId?: string) {
-    if (process.env.DEMO_MODE?.toLowerCase() === 'true' && isDemoEmail(user.email)) {
-      throw new HttpException({ error: 'Uploads are disabled in demo mode. Self-host TREK for full functionality.' }, 403);
+  @UseInterceptors(FileInterceptor('cover', { fileFilter: COVER_FILE_FILTER }))
+  async uploadCover(@CurrentUser() user: User, @Param('id') id: string, @UploadedFile() file: Express.Multer.File | undefined, @Headers('x-socket-id') socketId?: string) {
+    if (isDemoWriteBlocked(this.env, user.email)) {
+      throw new HttpException(DEMO_WRITE_ERROR, 403);
     }
     if (!file) throw new HttpException({ error: 'No image uploaded' }, 400);
+    // Commit the spooled upload to its final storage location (atomic
+    // same-volume rename) before the DB row references the final path.
+    await this.storage.put('covers', file.filename, { tmpPath: file.path });
     const coverUrl = `/uploads/covers/${file.filename}`;
     return this.collections.setCollectionCover(user.id, Number(id), coverUrl, socketId);
+  }
+
+  /** Preview for the bulk trip import: the trip's places plus, per place, the same
+   *  duplicate verdict the import itself applies. Read-only, so the dialog can grey out
+   *  what would be skipped instead of reporting it afterwards. */
+  /**
+   * The list as a file (#2198). A plain JSON body: the browser turns it into a
+   * download, so there is no Content-Disposition to get wrong here and no
+   * filename decided by the server.
+   */
+  @Get(':id/export')
+  exportCollection(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.collections.exportCollection(user.id, Number(id));
+  }
+
+  /**
+   * The list as GPX (#2301). JSON around the document rather than the bare
+   * XML, for the same reason the list file has no Content-Disposition: the
+   * browser makes the download, and it also needs to say how many places had
+   * no coordinates and were left out.
+   */
+  @Get(':id/export/gpx')
+  exportCollectionGpx(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.collections.exportCollectionGpx(user.id, Number(id));
+  }
+
+  /**
+   * The same file read into a list that already exists (#2301 follow-up).
+   *
+   * 200, unlike POST /import above: this one adds to a list rather than making
+   * one. Anyone who may add a place to the list may do it, and the socket id
+   * rides along so the browser that asked does not echo its own change.
+   */
+  @Post(':id/import')
+  @HttpCode(200)
+  importIntoCollection(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body() body: CollectionImportIntoDto,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    return this.collections.importIntoCollection(user.id, Number(id), body, socketId);
+  }
+
+  @Get(':id/importable/:tripId')
+  importable(@CurrentUser() user: User, @Param('id') id: string, @Param('tripId') tripId: string) {
+    return this.collections.importablePlaces(user.id, Number(id), Number(tripId));
   }
 
   @Get(':id')
@@ -344,7 +453,7 @@ export class CollectionsController {
   }
 
   @Patch(':id')
-  update(@CurrentUser() user: User, @Param('id') id: string, @Body(new ZodValidationPipe(collectionUpdateRequestSchema)) body: CollectionUpdateRequest, @Headers('x-socket-id') socketId?: string) {
+  update(@CurrentUser() user: User, @Param('id') id: string, @Body() body: CollectionUpdateDto, @Headers('x-socket-id') socketId?: string) {
     return this.collections.updateCollection(user.id, Number(id), body, socketId);
   }
 

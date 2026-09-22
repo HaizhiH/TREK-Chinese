@@ -28,6 +28,10 @@ const en: NotificationLocale = {
       title: 'Vacay sammanslagnings inbjudan',
       body: `${p.actor} bjöd in dig att slå samman semesterplaner. Öppna TREK för att acceptera eller avvisa.`,
     }),
+    vacay_share: (p) => ({
+      title: 'Vacay kalender delad',
+      body: `${p.actor} delade sin semesterkalender med dig. Öppna TREK för att se den.`,
+    }),
     collection_invite: (p) => ({
       title: 'Inbjudan till samling',
       body: `${p.actor} bjöd in dig att dela en samling. Öppna TREK för att acceptera eller avvisa.`,
@@ -47,6 +51,12 @@ const en: NotificationLocale = {
     version_available: (p) => ({
       title: 'Ny TREK version tillgänglig',
       body: `TREK ${p.version} är nu tillgänglig. Gå till adminpanelen för att uppdatera.`,
+    }),
+    replica_failure: (p) => ({
+      title: 'Fel i lagringsreplik',
+      body:
+        `Skrivning till replik '${p.backend}' misslyckades: ${p.op} för ${p.key} — ${p.error}.` +
+        (p.suppressed !== '0' ? ` ${p.suppressed} ytterligare fel har undertryckts sedan senaste aviseringen.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Synology session rensad',

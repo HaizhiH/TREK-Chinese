@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'Ταξίδια',
   'oauth.scope.group.places': 'Τοποθεσίες',
+  'oauth.scope.group.collections': 'Συλλογές',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': 'Αποσκευές',
   'oauth.scope.group.todos': 'Εργασίες',
@@ -27,6 +28,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'Ανάγνωση τοποθεσιών, αναθέσεων ημερών, ετικετών και κατηγοριών',
   'oauth.scope.places:write.label': 'Διαχείριση τοποθεσιών',
   'oauth.scope.places:write.description': 'Δημιουργία, ενημέρωση και διαγραφή τοποθεσιών, αναθέσεων και ετικετών',
+  'oauth.scope.collections:read.label': 'Προβολή συλλογών',
+  'oauth.scope.collections:read.description':
+    'Ανάγνωση συλλογών αποθηκευμένων τοποθεσιών, των τοποθεσιών τους, των βαθμολογιών, των ετικετών και των μελών τους',
+  'oauth.scope.collections:write.label': 'Διαχείριση συλλογών',
+  'oauth.scope.collections:write.description':
+    'Δημιουργία/επεξεργασία συλλογών, αποθήκευση, βαθμολόγηση, προσθήκη ετικετών και αντιγραφή τοποθεσιών και κοινή χρήση λιστών',
   'oauth.scope.atlas:read.label': 'Προβολή Atlas',
   'oauth.scope.atlas:read.description': 'Ανάγνωση περιοχών που έχουν επισκεφθεί, χωρών και λίστας επιθυμιών',
   'oauth.scope.atlas:write.label': 'Διαχείριση Atlas',
@@ -92,5 +99,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'Αρχεία',
+  'oauth.scope.group.settings': 'Ρυθμίσεις',
+  'oauth.scope.files:read.label': 'Προβολή αρχείων ταξιδιού',
+  'oauth.scope.files:read.description': 'Λίστα των εγγράφων ενός ταξιδιού: ονόματα, μεγέθη, ποιος τα ανέβασε και με τι συνδέονται',
+  'oauth.scope.files:write.label': 'Διαχείριση αρχείων ταξιδιού',
+  'oauth.scope.files:write.description': 'Μετονομασία και περιγραφή αρχείων, σύνδεσή τους με κρατήσεις και τοποθεσίες, επισήμανση και διαγραφή',
+  'oauth.scope.files:content.label': 'Ανάγνωση περιεχομένου αρχείων',
+  'oauth.scope.files:content.description': 'Ανάγνωση του περιεχομένου ενός ανεβασμένου εγγράφου, όπως ένα PDF κράτησης ή ένα εισιτήριο',
+  'oauth.scope.settings:read.label': 'Προβολή προτιμήσεων',
+  'oauth.scope.settings:read.description': 'Ανάγνωση μονάδων, μορφής ώρας, γλώσσας, προεπιλεγμένου νομίσματος και αρχικής σελίδας',
+  'oauth.scope.settings:write.label': 'Αλλαγή προτιμήσεων',
+  'oauth.scope.settings:write.description': 'Αλλαγή μονάδων, μορφής ώρας, γλώσσας, προεπιλεγμένου νομίσματος και αρχικής σελίδας. Ποτέ αποθηκευμένων κλειδιών API',
+  'oauth.scope.group.plugins': 'Πρόσθετα',
+  'oauth.scope.plugins:use.label': 'Εκτέλεση εργαλείων προσθέτων',
+  'oauth.scope.plugins:use.description': 'Επιτρέπει σε αυτήν την εφαρμογή να καλεί εργαλεία που δημοσιεύουν τα πρόσθετα που εγκατέστησε και ενέκρινε ένας διαχειριστής. Κάθε πρόσθετο ενεργεί με τα δικαιώματα που του έχουν ήδη δοθεί, όχι με τα εύρη αυτού του διακριτικού',
 };
 export default oauth;

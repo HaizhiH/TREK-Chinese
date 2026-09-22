@@ -1,5 +1,5 @@
 import React from 'react'
-import { List as ListIcon, Map as MapIcon, Search, Bookmark, CheckCheck, X, Trash2, Copy, CopyPlus, FolderInput, Plus, Tags } from 'lucide-react'
+import { List as ListIcon, Map as MapIcon, Search, Bookmark, CheckCheck, X, Trash2, Copy, CopyPlus, FolderInput, Plus, Tags, DownloadCloud } from 'lucide-react'
 import Navbar from '../components/Layout/Navbar'
 import Modal from '../components/shared/Modal'
 import ListsRail from '../components/Collections/ListsRail'
@@ -12,25 +12,23 @@ import CopyToTripModal from '../components/Collections/CopyToTripModal'
 import MoveToListModal from '../components/Collections/MoveToListModal'
 import ShareCollectionModal from '../components/Collections/ShareCollectionModal'
 import AddPlaceToCollectionModal from '../components/Collections/AddPlaceToCollectionModal'
+import ImportFromTripModal from '../components/Collections/ImportFromTripModal'
+import ImportCollectionModal from '../components/Collections/ImportCollectionModal'
 import CollectionPlaceDetail from '../components/Collections/CollectionPlaceDetail'
 import LabelManager from '../components/Collections/LabelManager'
 import BulkAssignLabelModal from '../components/Collections/BulkAssignLabelModal'
 import { useCollections } from './collections/useCollections'
+import EmptyState from '../components/shared/EmptyState'
 import '../styles/dashboard.css'
 import '../styles/collections.css'
 
-function EmptyState({ icon, title, text, action }: { icon: React.ReactNode; title: string; text: string; action?: React.ReactNode }): React.ReactElement {
-  return (
-    <div className="col-emptystate">
-      <div className="ic">{icon}</div>
-      <h3>{title}</h3>
-      <p>{text}</p>
-      {action && <div style={{ marginTop: 18 }}>{action}</div>}
-    </div>
-  )
+export default function CollectionsPage(): React.ReactElement {
+  // ViewportRoute in App.tsx picks the branch now, so the phone screen is a
+  // chunk of its own instead of a dead limb in this one.
+  return <CollectionsPageDesktop />
 }
 
-export default function CollectionsPage(): React.ReactElement {
+function CollectionsPageDesktop(): React.ReactElement {
   const c = useCollections()
   const { t } = c
 
@@ -63,8 +61,8 @@ export default function CollectionsPage(): React.ReactElement {
   // + detail come into view alongside the map.
   const onMapSelect = (id: number) => { openPlace(id); if (c.view === 'map') c.setView('list') }
 
-  const desktopSplit = c.isWide && mappable.length > 0
-  const mapShown = mappable.length > 0 && (c.view === 'map' || c.isWide)
+  const desktopSplit = c.isWide && c.hasMappable
+  const mapShown = c.hasMappable && (c.view === 'map' || c.isWide)
   const mapOverlay = c.isWide && mapShown // the map carries the toggle + search
   const canAddPlace = typeof c.activeId === 'number' && c.canEdit // a real list you can edit
 
@@ -83,6 +81,11 @@ export default function CollectionsPage(): React.ReactElement {
   )
   const mapPanel = (overlay: boolean) => (
     <CollectionMapPanel
+      labelOptions={isRealList ? c.labelOptions : []}
+      labelFilter={c.labelFilter}
+      onLabelFilter={isRealList ? c.setLabelFilter : undefined}
+      canManageLabels={canManageLabels}
+      onManageLabels={() => c.setShowLabelManager(true)}
       places={mappable}
       selectedPlaceId={c.selectedPlaceId}
       onSelect={onMapSelect}
@@ -105,14 +108,22 @@ export default function CollectionsPage(): React.ReactElement {
       counts={c.counts}
       categoryFilter={c.categoryFilter}
       categoryOptions={c.categoryOptions}
+      ratingFilter={c.ratingFilter}
+      sortMode={c.sortMode}
       onStatusFilter={c.setStatusFilter}
       onCategoryFilter={c.setCategoryFilter}
-      showLabels={isRealList}
+      onRatingFilter={c.setRatingFilter}
+      onSortMode={c.setSortMode}
+      canAddPlace={canAddPlace}
+      onAddPlace={() => c.setShowAddPlace(true)}
+      showLabels={isRealList && !mapShown}
       labelOptions={c.labelOptions}
       labelFilter={c.labelFilter}
       onLabelFilter={c.setLabelFilter}
       canManageLabels={canManageLabels}
       onManageLabels={() => c.setShowLabelManager(true)}
+      canImport={canAddPlace}
+      onImport={() => c.setShowImport(true)}
       showSelect={showSelect}
       selectMode={c.selectMode}
       onToggleSelect={() => c.setSelectMode(!c.selectMode)}
@@ -124,7 +135,7 @@ export default function CollectionsPage(): React.ReactElement {
       {filterBar}
       {c.visiblePlaces.length > 0
         ? listEl
-        : <EmptyState icon={<Search size={26} />} title={t('collections.empty.noMatchTitle')} text={t('collections.empty.noMatchText')} />}
+        : <EmptyState scene="search" title={t('collections.empty.noMatchTitle')} />}
     </>
   )
 
@@ -132,7 +143,23 @@ export default function CollectionsPage(): React.ReactElement {
   if (c.placesLoading && !hasPlaces) {
     body = <div className="col-loading"><div className="col-spinner" /></div>
   } else if (!hasPlaces) {
-    body = <EmptyState icon={<Bookmark size={26} />} title={t('collections.empty.title')} text={t('collections.empty.text')} />
+    body = (
+      <div className="flex flex-col items-center">
+        <EmptyState scene="collections" title={t('collections.empty.title')} className={canAddPlace ? 'pb-4' : undefined} />
+        {canAddPlace && (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button type="button" onClick={() => c.setShowAddPlace(true)} className="col-cta">
+              <Plus size={16} /> {t('collections.addPlace')}
+            </button>
+            {/* An empty list is exactly where a trip import saves the most typing,
+                so it gets the same billing as adding one place by hand. */}
+            <button type="button" onClick={() => c.setShowImport(true)} className="col-cta col-cta-ghost">
+              <DownloadCloud size={16} /> {t('collections.importFromTrip')}
+            </button>
+          </div>
+        )}
+      </div>
+    )
   } else if (desktopSplit) {
     body = (
       <div className={`col-split${c.view === 'map' ? ' map-full' : ''}`}>
@@ -140,7 +167,7 @@ export default function CollectionsPage(): React.ReactElement {
         <div className="col-split-map">{mapPanel(true)}</div>
       </div>
     )
-  } else if (c.view === 'map' && mappable.length > 0) {
+  } else if (c.view === 'map' && c.hasMappable) {
     body = <div className="col-mapwrap">{mapPanel(false)}</div>
   } else {
     body = listColumn
@@ -154,6 +181,7 @@ export default function CollectionsPage(): React.ReactElement {
       incomingInvites={c.incomingInvites}
       onSelect={c.handleSelectList}
       onNewList={() => { c.setMobileRailOpen(false); c.setEditorTarget('new') }}
+      onImportList={() => { c.setMobileRailOpen(false); c.setShowImportFile(true) }}
       onAcceptInvite={c.handleAcceptInvite}
       onDeclineInvite={c.handleDeclineInvite}
       t={t}
@@ -169,16 +197,12 @@ export default function CollectionsPage(): React.ReactElement {
 
           <div className="col-body">
             {noLists ? (
-              <EmptyState
-                icon={<Bookmark size={26} />}
-                title={t('collections.empty.firstTitle')}
-                text={t('collections.empty.firstText')}
-                action={
-                  <button type="button" onClick={() => c.setEditorTarget('new')} className="col-cta">
-                    <Bookmark size={16} /> {t('collections.newList')}
-                  </button>
-                }
-              />
+              <div className="flex flex-col items-center">
+                <EmptyState scene="collections" title={t('collections.empty.firstTitle')} className="pb-4" />
+                <button type="button" onClick={() => c.setEditorTarget('new')} className="col-cta">
+                  <Bookmark size={16} /> {t('collections.newList')}
+                </button>
+              </div>
             ) : (
               <>
                 <div ref={c.heroRef}>
@@ -196,16 +220,18 @@ export default function CollectionsPage(): React.ReactElement {
                     onEdit={() => { if (c.activeCollection) c.setEditorTarget(c.activeCollection) }}
                     shareMemberCount={c.shareMemberCount}
                     onShare={() => c.setShowShare(true)}
+                    onExport={c.isAllSaved || !c.activeCollection ? undefined : c.handleExportList}
+                    exporting={c.exporting}
                     t={t}
                   />
                 </div>
 
-                {(!mapOverlay || canAddPlace) && (
+                {!mapOverlay && (
                   <div className="col-toolbar">
                     <button type="button" className="col-rail-toggle" onClick={() => c.setMobileRailOpen(true)}>
                       <Bookmark size={15} /> {t('collections.title')}
                     </button>
-                    {!c.isWide && mappable.length > 0 && (
+                    {!c.isWide && c.hasMappable && (
                       <div className="col-viewseg" role="group" aria-label={t('collections.title')}>
                         <button type="button" aria-pressed={c.view === 'list'} onClick={() => c.setView('list')} aria-label={t('collections.view.list')} title={t('collections.view.list')} className={c.view === 'list' ? 'on' : ''}>
                           <ListIcon size={16} />
@@ -214,11 +240,6 @@ export default function CollectionsPage(): React.ReactElement {
                           <MapIcon size={16} />
                         </button>
                       </div>
-                    )}
-                    {canAddPlace && (
-                      <button type="button" onClick={() => c.setShowAddPlace(true)} className="col-iconbtn" aria-label={t('collections.addPlace')} title={t('collections.addPlace')}>
-                        <Plus size={16} />
-                      </button>
                     )}
                     <div className="col-toolbar-spacer" />
                     {!mapOverlay && (
@@ -277,7 +298,7 @@ export default function CollectionsPage(): React.ReactElement {
         {/* Mobile rail drawer */}
         {c.mobileRailOpen && (
           <>
-            <div className="col-drawer-backdrop" onClick={() => c.setMobileRailOpen(false)} />
+            <div role="presentation" className="col-drawer-backdrop" onClick={() => c.setMobileRailOpen(false)} />
             <div className="col-drawer">
               <div className="col-drawer-head">
                 <button type="button" onClick={() => c.setMobileRailOpen(false)} aria-label={t('common.close')}><X size={18} /></button>
@@ -302,8 +323,10 @@ export default function CollectionsPage(): React.ReactElement {
             onClose={c.handleCloseDetail}
             onSetStatus={c.handleDetailStatus}
             onSave={patch => c.updatePlace(c.selectedPlace!.id, patch)}
+            onUploadImage={file => c.uploadPlaceImage(c.selectedPlace!.id, file)}
             onCopyToTrip={c.openCopyForSelectedPlace}
             onRemove={c.handleDetailRemove}
+            onRate={r => c.handleRatePlace(c.selectedPlace!.id, r)}
             t={t}
           />
         )}
@@ -318,6 +341,32 @@ export default function CollectionsPage(): React.ReactElement {
           categories={c.categories}
           onClose={() => c.setShowAddPlace(false)}
           onAdded={c.handlePlaceAdded}
+          t={t}
+        />
+      )}
+
+      {/* A list file as a new list, or added to one that is already there (#2198, #2301) */}
+      {c.showImportFile && (
+        <ImportCollectionModal
+          onImport={c.handleImportFile}
+          onImportInto={c.handleImportFileInto}
+          lists={c.writableLists}
+          defaultListId={typeof c.activeId === 'number' ? c.activeId : null}
+          onReadGpx={c.handleReadGpx}
+          onClose={() => c.setShowImportFile(false)}
+          t={t}
+        />
+      )}
+
+      {/* Bulk import of a trip's places into the current list */}
+      {typeof c.activeId === 'number' && c.activeCollection && (
+        <ImportFromTripModal
+          isOpen={c.showImport}
+          collectionId={c.activeId}
+          collectionName={c.activeCollection.name}
+          categories={c.categories}
+          onClose={() => c.setShowImport(false)}
+          onImported={c.handlePlaceAdded}
           t={t}
         />
       )}

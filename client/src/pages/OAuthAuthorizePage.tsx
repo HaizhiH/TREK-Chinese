@@ -4,6 +4,20 @@ import { Lock, ShieldCheck, AlertTriangle, Loader2, LogIn } from 'lucide-react'
 import { useTranslation } from '../i18n'
 import { useOAuthAuthorize } from './oauthAuthorize/useOAuthAuthorize'
 
+/**
+ * The glyph beside a scope on the consent screen, keyed by its mode.
+ *
+ * ':use' reads as an action rather than a level of access to your data, so it
+ * does not belong on the read/write/delete ladder: falling through to the eye
+ * would tell the user a tool-running scope only looks at things.
+ */
+function scopeGlyph(scope: string): string {
+  if (scope.endsWith(':delete')) return '🗑️'
+  if (scope.endsWith(':use')) return '🧩'
+  if (scope.endsWith(':write')) return '✏️'
+  return '👁️'
+}
+
 export default function OAuthAuthorizePage(): React.ReactElement {
   const { t } = useTranslation()
   // Page = wiring container: the validate→consent state machine lives in the hook.
@@ -50,7 +64,7 @@ export default function OAuthAuthorizePage(): React.ReactElement {
                 {t('oauth.authorize.loginDescription', { client: validation?.client?.name || clientId })}
               </p>
             </div>
-            <button
+            <button type="button"
                 onClick={handleLoginRedirect}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white"
                 style={{ background: 'var(--accent-primary, #4f46e5)' }}>
@@ -88,7 +102,7 @@ export default function OAuthAuthorizePage(): React.ReactElement {
               <p className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>
                 {t('oauth.authorize.trustNote')}
               </p>
-              <button
+              <button type="button"
                   onClick={() => submitConsent(true)}
                   disabled={submitting || (validation?.scopeSelectable === true && selectedScopes.length === 0)}
                   className="w-full px-4 py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-60 transition-opacity"
@@ -106,7 +120,7 @@ export default function OAuthAuthorizePage(): React.ReactElement {
                             )
                             : t('oauth.authorize.approveAccess')}
               </button>
-              <button
+              <button type="button"
                   onClick={() => submitConsent(false)}
                   disabled={submitting}
                   className="w-full px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60"
@@ -160,7 +174,7 @@ export default function OAuthAuthorizePage(): React.ReactElement {
                                                 className="mt-0.5 rounded flex-shrink-0"
                                             />
                                             <span className="mt-0.5 text-base leading-none flex-shrink-0">
-                                    {s.endsWith(':delete') ? '🗑️' : s.endsWith(':write') ? '✏️' : '👁️'}
+                                    {scopeGlyph(s)}
                                   </span>
                                             <div className="min-w-0">
                                               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{keys ? t(keys.labelKey) : s}</p>
@@ -186,7 +200,7 @@ export default function OAuthAuthorizePage(): React.ReactElement {
                                     return (
                                         <div key={s} className="flex items-start gap-2.5 px-3 py-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
                                 <span className="mt-0.5 text-base leading-none flex-shrink-0">
-                                  {s.endsWith(':delete') ? '🗑️' : s.endsWith(':write') ? '✏️' : '👁️'}
+                                  {scopeGlyph(s)}
                                 </span>
                                           <div className="min-w-0">
                                             <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{keys ? t(keys.labelKey) : s}</p>

@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { buildSavePayload } from '../../../src/services/airtrail/airtrailSync';
-import type { AirtrailAirport, AirtrailFlightRaw } from '../../../src/services/airtrail/airtrailClient';
+import { buildSavePayload } from '../../../src/nest/integrations/airtrail-sync.service';
+import type { AirtrailAirport, AirtrailFlightRaw, AirtrailSavePayload } from '../../../src/nest/integrations/airtrail.client';
+
+/**
+ * buildSavePayload spreads the raw flight, so the body also carries the
+ * AirTrail-owned keys the save type deliberately leaves unmodelled (terminal,
+ * gate, actual times, customFields, track). Read those through this view.
+ */
+type SavePayloadWithPassthrough = AirtrailSavePayload & Record<string, unknown>;
 
 function airport(over: Partial<AirtrailAirport> = {}): AirtrailAirport {
   return {
@@ -125,7 +132,7 @@ describe('airtrailSync.buildSavePayload', () => {
         metadata: JSON.stringify({ airline: 'BAW', flight_number: 'BA999', seat: '3C' }),
       }),
       existingFlight(),
-    );
+    ) as SavePayloadWithPassthrough | null;
     expect(payload).toMatchObject({
       id: 42,
       from: 'JFK',
@@ -174,5 +181,66 @@ describe('airtrailSync.buildSavePayload', () => {
   it('returns null when an endpoint code is missing and no fallback exists', () => {
     const payload = buildSavePayload(reservation({ endpoints: [] }), existingFlight({ from: airport({ iata: null, icao: null }) }));
     expect(payload).toBeNull();
+  });
+});
+
+// AirTrail 3.12.0 renamed the passenger list from `seats` to `passengers`, with
+// no alias on the save endpoint either (#1931). Neither schema is strict, so the
+// payload carries both names and each version keeps the one it knows.
+describe('airtrailSync.buildSavePayload — AirTrail 3.12.0 passengers', () => {
+  const newShape = (over: Partial<AirtrailFlightRaw> & Record<string, unknown> = {}) =>
+    existingFlight({
+      seats: undefined,
+      flightReason: undefined,
+      passengers: [{ userId: 'u1', guestName: null, seat: 'window', seatNumber: '12A', seatClass: 'economy', flightReason: 'leisure' }],
+      ...over,
+    });
+
+  const own = (list: unknown) => (list as Array<{ userId: string | null }>).find(s => s.userId);
+
+  it('sends the manifest under both names', () => {
+    const payload = buildSavePayload(reservation(), newShape()) as SavePayloadWithPassthrough;
+    expect(payload.passengers).toEqual(payload.seats);
+    expect(own(payload.passengers)).toMatchObject({ seatNumber: '12A', seatClass: 'economy' });
+  });
+
+  it('reads the existing manifest off passengers and pushes the TREK seat onto it', () => {
+    const res = reservation({ metadata: JSON.stringify({ seat: '22F' }) });
+    const payload = buildSavePayload(res, newShape()) as SavePayloadWithPassthrough;
+    expect(own(payload.passengers)).toMatchObject({ seatNumber: '22F' });
+    expect(own(payload.seats)).toMatchObject({ seatNumber: '22F' });
+    // A co-passenger's seat is not TREK's to touch.
+    const withGuest = buildSavePayload(res, newShape({
+      passengers: [
+        { userId: null, guestName: 'Plus One', seat: null, seatNumber: '30C', seatClass: null },
+        { userId: 'u1', guestName: null, seat: 'window', seatNumber: '12A', seatClass: 'economy' },
+      ],
+    })) as SavePayloadWithPassthrough;
+    const guest = (withGuest.passengers as Array<{ guestName: string | null; seatNumber: string | null }>).find(s => s.guestName);
+    expect(guest?.seatNumber).toBe('30C');
+  });
+
+  it('writes the flight reason both on the flight and on the passenger', () => {
+    const payload = buildSavePayload(reservation(), newShape()) as SavePayloadWithPassthrough;
+    expect(payload.flightReason).toBe('leisure');
+    expect(own(payload.passengers)).toMatchObject({ flightReason: 'leisure' });
+  });
+
+  it('recovers the reason from the passenger when the flight no longer carries one', () => {
+    const res = reservation({ metadata: JSON.stringify({ seat: '12A' }) });
+    const payload = buildSavePayload(res, newShape()) as SavePayloadWithPassthrough;
+    expect(payload.flightReason).toBe('leisure');
+  });
+
+  it('still fills the manifest from the old shape', () => {
+    const payload = buildSavePayload(reservation(), existingFlight()) as SavePayloadWithPassthrough;
+    expect(own(payload.passengers)).toMatchObject({ seatNumber: '12A' });
+    expect(own(payload.seats)).toMatchObject({ seatNumber: '12A' });
+  });
+
+  it('falls back to the key-owner placeholder when the flight has no manifest at all', () => {
+    const payload = buildSavePayload(reservation(), newShape({ passengers: [] })) as SavePayloadWithPassthrough;
+    expect(payload.passengers).toHaveLength(1);
+    expect(own(payload.passengers)).toMatchObject({ userId: '<USER_ID>', seatNumber: '12A' });
   });
 });

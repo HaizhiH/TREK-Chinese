@@ -1,4 +1,5 @@
-import type { PluginContext, PluginDefinition, PluginRequest, PluginResponse, Trip, Place, Day, Reservation, PackingItem, TripFile, BudgetItem, User, NotificationMessage, PluginActionResult } from './index.js';
+import { PLUGIN_SESSION_MAX_KEYS, PLUGIN_SESSION_MAX_KEY_LENGTH, PLUGIN_SESSION_MAX_VALUE_BYTES } from './index.js';
+import type { PluginContext, PluginDefinition, PluginRequest, PluginResponse, Trip, Place, Day, Reservation, PackingItem, TripFile, BudgetItem, User, NotificationMessage, PluginActionResult, PluginSessionStorage } from './index.js';
 import { CHANNEL_EVENTS } from './manifest.js';
 import { PermissionDenied, HOOK_PERMISSION, USER_DATA_PERMISSION, EVENTS_PERMISSION, JOBS_PERMISSION } from './permissions.js';
 
@@ -49,6 +50,8 @@ export interface MockHostOptions {
   queryResults?: Record<string, unknown[]>;
   /** The host-bound acting user for costs.* (a job/onLoad has none → refused). */
   actingUserId?: number;
+  /** Trip bound to the mock plugin UI's `session` helper. Required for scope: 'trip'. */
+  sessionTripId?: number | string;
   /** Whether the Costs (budget) addon is enabled; gates all costs.* (default true). */
   budgetAddonEnabled?: boolean;
   /** Same idea for the other gated subsystems (default true): journey gates
@@ -69,10 +72,12 @@ export interface MockHostOptions {
    * refuses it (and the SDK client swallows the rejection, so subscribers silently
    * never see it). Unset = record every emit, as before. */
   declaredEmits?: string[];
-  /** Action keys this plugin declares in its manifest `actions`. When set, driving an
+  /** Action keys this plugin declares in its manifest `actions`, as plain keys or
+   * `{ key, scope }` entries (the scope is accepted for fixture fidelity; the mock runs
+   * both scopes with the acting-user ctx, as the host does). When set, driving an
    * undeclared key throws — production refuses it before the child is ever woken.
    * Unset = any key the plugin implements can be driven. */
-  declaredActions?: string[];
+  declaredActions?: Array<string | { key: string; scope?: 'user' | 'instance' }>;
   /** Hosts an ADMIN supplies at runtime to an `operatorEgress: true` plugin, which by
    * definition cannot name them in its manifest. Only `trek-plugin dev` reads this (to
    * widen its egress guard); the mock ctx makes no network calls of its own. It lives
@@ -104,6 +109,18 @@ export interface MockHostOptions {
   aiResults?: Record<string, unknown>[];
   /** The acting user's connected-service token for ctx.oauth.getAccessToken (default null). */
   oauthAccessToken?: string | null;
+  /** Daily cap on ctx.ai.complete/ctx.ai.extract calls, mirroring the host's
+   * per-plugin daily-budget broker (daily-budget.ts). Default 200; `0` disables
+   * the broker entirely, so the FIRST call fails with the exhaustion string.
+   * Unlike the real host, this is a plain in-memory counter for the life of this
+   * mock host: it never rolls over at UTC midnight — there is no timer here, and
+   * no wall-clock window. A test that wants to see the budget "reset" should
+   * create a fresh mock host rather than wait. */
+  aiPerDay?: number;
+  /** Same idea as `aiPerDay`, for ctx.notify.send. Default 100; `0` disables the
+   * broker (first call fails with the exhaustion string). See `aiPerDay` for the
+   * no-rollover caveat — this counter never resets on its own either. */
+  notifyPerDay?: number;
 }
 
 /** Drives a plugin's OWN entry points against the mock ctx — the missing half of a
@@ -157,6 +174,8 @@ export interface MockHost {
    * read or write refuses with RESOURCE_FORBIDDEN). Shares this host's fixtures,
    * grants and recorders. */
   userlessCtx: PluginContext;
+  /** In-memory equivalent of `window.trek.session`, with production quota enforcement. */
+  session: PluginSessionStorage;
   /** Everything the plugin did, for assertions. */
   calls: { method: string; args: unknown[] }[];
   logs: { level: string; msg: string }[];
@@ -197,11 +216,14 @@ function stripLeadingComments(sql: string): string {
 // The host's stripEmoji (text-sanitize.ts), copied so notify.send cleans/rejects the
 // same strings without a server import: colour emoji + sequence glue removed, then
 // the horizontal gaps they leave are collapsed. An all-emoji title becomes ''.
-const EMOJI_RE = /\p{Emoji_Presentation}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u200D\uFE00-\uFE0F\u20E3\u{E0020}-\u{E007F}]/gu;
+const EMOJI_RE = /\p{Emoji_Presentation}|\p{Emoji_Modifier}|\p{Regional_Indicator}|\u200D|[\uFE00-\uFE0F\u20E3\u{E0020}-\u{E007F}]/gu;
 function stripEmoji(s: string): string {
   const stripped = s.replace(EMOJI_RE, '');
   if (stripped === s) return s;
-  return stripped.replace(/[^\S\r\n]{2,}/g, ' ').replace(/ +$/gm, '').trim();
+  // Trailing-space trim as the host spells it: the char in front of the run (or the
+  // line start) comes into the match and goes back out, so the run is only walked
+  // from its own start instead of restarting inside every space of a long one.
+  return stripped.replace(/[^\S\r\n]{2,}/g, ' ').replace(/(^|[^ ]) +$/gm, '$1').trim();
 }
 
 // The host's settings-key rules (install/manifest.ts). A field the host would refuse to
@@ -229,6 +251,13 @@ function settingsBlob(src: Record<string, unknown> | undefined, what: string): R
 const PLACE_STR_LIMITS: Record<string, number> = { name: 200, description: 2000, address: 500, notes: 2000 };
 const TRIP_STR_LIMITS: Record<string, number> = { title: 200, description: 2000 };
 
+// ctx.meta quotas, mirrored from meta.rpc.ts's disk-DoS guard: value size (characters
+// of the serialized JSON, matching the host — UTF-16 code units, not UTF-8 bytes),
+// key length, and keys per (plugin, entity).
+const META_VALUE_MAX = 64 * 1024;
+const META_KEY_MAX = 256;
+const META_KEYS_MAX = 100;
+
 export function createMockHost(opts: MockHostOptions = {}): MockHost {
   const grants = new Set(opts.grants ?? []);
   const calls: MockHost['calls'] = [];
@@ -236,6 +265,60 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
   const broadcasts: MockHost['broadcasts'] = [];
   const emitted: MockHost['emitted'] = [];
   const notifications: MockHost['notifications'] = [];
+  const sessionValues = new Map<string, string>();
+  // The real bridge rejects with a plain Error carrying the code on `.code`
+  // (ui/kit.ts). Keep the `CODE: message` text the rest of this mock uses, but
+  // attach `.code` too, so a plugin that branches on it behaves the same here.
+  const sessionError = (code: string, message: string) => {
+    const err = new Error(`${code}: ${message}`) as Error & { code: string };
+    err.code = code;
+    return err;
+  };
+  const sessionPrefix = (scope: 'plugin' | 'trip') => {
+    if (scope === 'trip' && opts.sessionTripId === undefined) {
+      throw sessionError('NO_TRIP_CONTEXT', 'trip session storage requires a trip context');
+    }
+    return scope === 'trip' ? `trip:${opts.sessionTripId}:` : 'plugin:';
+  };
+  const sessionKey = (key: string, scope: 'plugin' | 'trip') => {
+    // Scope before key, in the host's order — otherwise the same bad call
+    // reports a different code here than it does in the app.
+    const prefix = sessionPrefix(scope);
+    if (!key || key.length > PLUGIN_SESSION_MAX_KEY_LENGTH) {
+      throw sessionError('SESSION_INVALID_KEY', `session key must be 1-${PLUGIN_SESSION_MAX_KEY_LENGTH} characters`);
+    }
+    return `${prefix}${key}`;
+  };
+  const session: PluginSessionStorage = {
+    async get(key, options) {
+      const raw = sessionValues.get(sessionKey(key, options?.scope === 'trip' ? 'trip' : 'plugin'));
+      return raw === undefined ? undefined : JSON.parse(raw);
+    },
+    async set(key, value, options) {
+      const fullKey = sessionKey(key, options?.scope === 'trip' ? 'trip' : 'plugin');
+      const serialized = JSON.stringify(value);
+      if (serialized === undefined) throw sessionError('SESSION_INVALID_VALUE', 'session value must be JSON-serialisable');
+      const valueBytes = Buffer.byteLength(serialized, 'utf8');
+      if (valueBytes > PLUGIN_SESSION_MAX_VALUE_BYTES) {
+        throw sessionError('SESSION_VALUE_TOO_LARGE', `session value exceeds ${PLUGIN_SESSION_MAX_VALUE_BYTES} bytes`);
+      }
+      const prefix = sessionPrefix(options?.scope === 'trip' ? 'trip' : 'plugin');
+      const scopedKeyCount = [...sessionValues.keys()].filter((storedKey) => storedKey.startsWith(prefix)).length;
+      if (!sessionValues.has(fullKey) && scopedKeyCount >= PLUGIN_SESSION_MAX_KEYS) {
+        throw sessionError('SESSION_KEY_LIMIT', `plugin session storage allows at most ${PLUGIN_SESSION_MAX_KEYS} keys`);
+      }
+      sessionValues.set(fullKey, serialized);
+    },
+    async remove(key, options) {
+      sessionValues.delete(sessionKey(key, options?.scope === 'trip' ? 'trip' : 'plugin'));
+    },
+    async clear(options) {
+      const prefix = sessionPrefix(options?.scope === 'trip' ? 'trip' : 'plugin');
+      for (const key of sessionValues.keys()) {
+        if (key.startsWith(prefix)) sessionValues.delete(key);
+      }
+    },
+  };
   // Validated once, up front: a fixture the host could never have installed should fail
   // the test at construction, not silently at the first get().
   const userSettings = settingsBlob(opts.userSettings, 'userSettings');
@@ -292,6 +375,10 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
   const bucketItems: unknown[] = [...(opts.atlasBucketList ?? [])];
   const journals: unknown[] = [...(opts.journals ?? [])];
   const journalEntries: unknown[] = [...(opts.journalEntries ?? [])];
+  // Photos a plugin attached in this session; the mock keeps them so a test can
+  // assert on what it wrote without a real gallery behind it.
+  const journalPhotos: unknown[] = [];
+  let journalPhotoSeq = 1;
   const savedPlaces: unknown[] = [];
   const vacayEntries = new Set<string>();
   const vacayHolidays = new Set<string>();
@@ -312,6 +399,14 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
   // In-memory namespaced metadata store for ctx.meta (per mock plugin).
   const metaStore: Record<string, unknown> = {};
   const metaKey = (et: string, eid: number, key: string) => `${et}:${eid}:${key}`;
+
+  // Per-host daily budgets for ai.*/notify.send, mirroring daily-budget.ts. Plain
+  // counters, no timers: this mock never rolls the window over at UTC midnight (see
+  // the MockHostOptions docblocks) — a test wanting a fresh budget creates a new host.
+  const aiPerDay = opts.aiPerDay ?? 200;
+  const notifyPerDay = opts.notifyPerDay ?? 100;
+  let aiUsed = 0;
+  let notifyUsed = 0;
 
   const buildCtx = (actingUserId: number | undefined): PluginContext => {
     const requireActingUser = (): number => {
@@ -757,6 +852,8 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
             if (!input.link.startsWith('/') || input.link.startsWith('//')) throw new Error('link must be an in-app path starting with /');
             link = input.link.slice(0, 512);
           }
+          if (notifyUsed >= notifyPerDay) throw new Error('daily notification budget exhausted (resets at UTC midnight)');
+          notifyUsed += 1;
           notifications.push({ title, body, ...(link ? { link } : {}), scope, targetId: input.targetId });
           return { sent: true };
         },
@@ -764,10 +861,14 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
       ai: {
         async complete() {
           need('ai:invoke', 'ai.complete');
+          if (aiUsed >= aiPerDay) throw new Error('daily AI budget exhausted (resets at UTC midnight)');
+          aiUsed += 1;
           return { text: opts.aiText ?? '' };
         },
         async extract() {
           need('ai:invoke', 'ai.extract');
+          if (aiUsed >= aiPerDay) throw new Error('daily AI budget exhausted (resets at UTC midnight)');
+          aiUsed += 1;
           return { results: opts.aiResults ?? [] };
         },
       },
@@ -914,6 +1015,24 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
           const entry = { id: journalEntries.length + 1, journey_id: journeyId, ...input };
           journalEntries.push(entry);
           return entry;
+        },
+        async addEntryPhoto(entryId, input) {
+          need('db:write:journal', 'journal.addEntryPhoto');
+          requireActingUser();
+          requireAddon(opts.journeyAddonEnabled, 'journey');
+          const entry = rows(journalEntries).find((x) => x.id === entryId);
+          if (!entry) throw new Error(`RESOURCE_FORBIDDEN: no editable journal entry ${entryId} for this user`);
+          if (typeof input?.name !== 'string' || input.name.trim() === '') throw new Error('invalid photo input: name is required');
+          if (typeof input?.content_base64 !== 'string' || input.content_base64 === '') throw new Error('invalid photo input: content_base64 is required');
+          // Same refusals the host applies, so a plugin fails here rather than in production.
+          const ext = (input.name.slice(input.name.lastIndexOf('.')) || '').toLowerCase();
+          if (!['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.heif'].includes(ext)) {
+            throw new Error(`photo extension '${ext || '(none)'}' is not an allowed image type`);
+          }
+          if (input.content_base64.length > 14 * 1024 * 1024) throw new Error('photo exceeds the 10MB plugin upload cap');
+          const photo = { id: journalPhotoSeq++, photo_id: journalPhotoSeq, entry_id: entryId, caption: input.caption };
+          journalPhotos.push(photo);
+          return photo;
         },
         async createJourney(input) {
           need('db:write:journal', 'journal.createJourney');
@@ -1292,7 +1411,21 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
         async set(entityType, entityId, key, value) {
           need('db:meta', 'meta.set');
           metaGate(entityType, entityId);
-          metaStore[metaKey(entityType, entityId, key)] = value ?? null;
+          // Quota order mirrors meta.rpc.ts: key length -> value size -> key count.
+          if (key.length > META_KEY_MAX) throw new Error(`metadata key too long (>${META_KEY_MAX} chars)`);
+          const json = JSON.stringify(value ?? null);
+          // Matches the host exactly: json.length (UTF-16 code units of the serialized
+          // JSON), not Buffer.byteLength (UTF-8 bytes) — see meta.rpc.ts:71.
+          if (json.length > META_VALUE_MAX) {
+            throw new Error(`metadata value too large (>${META_VALUE_MAX} bytes)`);
+          }
+          const fullKey = metaKey(entityType, entityId, key);
+          if (!(fullKey in metaStore)) {
+            const prefix = `${entityType}:${entityId}:`;
+            const count = Object.keys(metaStore).filter((k) => k.startsWith(prefix)).length;
+            if (count >= META_KEYS_MAX) throw new Error(`too many metadata keys on this ${entityType} (max ${META_KEYS_MAX})`);
+          }
+          metaStore[fullKey] = value ?? null;
           return { key, value: value ?? null };
         },
         async list(entityType, entityId) {
@@ -1449,7 +1582,8 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
       return impl[fn](...args, name === 'notificationChannel' ? userlessCtx : ctx) as never;
     },
     action: async (key) => {
-      if (opts.declaredActions && !opts.declaredActions.includes(key)) {
+      const declared = opts.declaredActions?.map((a) => (typeof a === 'string' ? a : a.key));
+      if (declared && !declared.includes(key)) {
         throw new Error(`RESOURCE_FORBIDDEN: plugin did not declare action "${key}"`);
       }
       const fn = def.actions?.[key];
@@ -1486,7 +1620,7 @@ export function createMockHost(opts: MockHostOptions = {}): MockHost {
     },
   });
 
-  return { ctx, userlessCtx, calls, logs, broadcasts, emitted, notifications, scheduled: scheduledTasks, run };
+  return { ctx, userlessCtx, session, calls, logs, broadcasts, emitted, notifications, scheduled: scheduledTasks, run };
 }
 
 // `trek-plugin-sdk/testing` resolves to this module, so re-export what a test needs to

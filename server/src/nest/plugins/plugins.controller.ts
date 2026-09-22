@@ -1,16 +1,24 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpException, Param, Post, Put, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
-import { PluginsService } from './plugins.service';
+import { PluginsService, MissingRequiredSettingError } from './plugins.service';
 import { PluginRuntimeService, PluginConsentRequired, PluginDependencyError } from './plugin-runtime.service';
 import { DependencyCycleError } from './dependencies';
 import { PluginRegistryService, RegistryError } from './registry/registry.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { getClientIp } from '../../services/auditLog';
+import { getClientIp } from '../audit/client-ip';
 import { pluginsEnabled } from './kill-switch';
 import { devLinkEnabled } from './dev-link';
+import { PluginActivateDto, PluginConfigDto, PluginEgressHostsDto, PluginInstallDto, PluginLinkDto, PluginRetrustDto, PluginUninstallDto, PluginUpdateDto } from './plugins.dto';
+import { ManagedForbidden, isManagedBlocked, MANAGED_FORBIDDEN_ERROR } from '../common/managed';
+import type { PluginActionResult, PluginInstanceConfigResponse, PluginInstanceConfigUpdated } from '@trek/shared';
+import { RuntimeEnvService } from '../app-config/runtime-env.service';
+// Straight from sessionManager, not the src/mcp barrel: that one evaluates
+// readEnv().mcp at module scope and installs the sweep interval, which a domain
+// module must not drag into every test that mocks app-config partially.
+import { invalidateMcpSessions } from '../../mcp/sessionManager';
 
 /**
  * Flatten a registry/install failure into the error envelope — CARRYING THE CODE.
@@ -47,6 +55,7 @@ export class PluginsController {
     private readonly plugins: PluginsService,
     private readonly runtime: PluginRuntimeService,
     private readonly registry: PluginRegistryService,
+    private readonly env: RuntimeEnvService,
   ) {}
 
   @Get()
@@ -70,25 +79,38 @@ export class PluginsController {
 
   @Post('install')
   @HttpCode(200)
-  async install(@Body() body: { id?: string; version?: string; constraint?: string; withDependencies?: boolean }) {
+  async install(@Body() body: PluginInstallDto) {
     if (!pluginsEnabled()) throw new HttpException({ error: 'Plugins are disabled by server configuration' }, 503);
     if (!body?.id) throw new HttpException({ error: 'id is required' }, 400);
     try {
       // withDependencies (used by the "resolve missing dependency" admin flow) pulls
       // the target + its transitive plugin deps, resolving each to its latest
       // compatible version and reporting addons the admin still has to enable.
+      // Dependency resolution pins versions internally but never DELIBERATELY, so
+      // only the plain path below recomputes the update hold.
       if (body.withDependencies) return await this.registry.installWithDependencies(body.id, body.constraint);
-      return await this.registry.install(body.id, { version: body.version, constraint: body.constraint });
+      const res = await this.registry.install(body.id, { version: body.version, constraint: body.constraint });
+      await this.registry.recomputeUpdateHold(res.id, res.version, !!body.version);
+      return res;
     } catch (e) {
       throw registryFailure(e, 'install failed');
     }
   }
 
   /** Sideload a plugin from an uploaded .zip/.tar.gz (registers INACTIVE). */
+  @ManagedForbidden(
+    'a sideloaded archive skips the signature check every registry install performs',
+    { enforcedInHandler: true },
+  )
   @Post('upload')
   @HttpCode(200)
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 + 4096 } }))
   async upload(@UploadedFile() file?: Express.Multer.File) {
+    // In the handler, not the guard: guards run before the multipart parser and
+    // the client would get an ECONNRESET rather than this 403 (PROFILE-015).
+    if (isManagedBlocked(this.env)) {
+      throw new HttpException(MANAGED_FORBIDDEN_ERROR, 403);
+    }
     if (!pluginsEnabled()) throw new HttpException({ error: 'Plugins are disabled by server configuration' }, 503);
     if (!file?.buffer?.length) throw new HttpException({ error: 'no file uploaded' }, 400);
     try {
@@ -102,9 +124,10 @@ export class PluginsController {
    * DEV-ONLY: register a plugin from a LOCAL built directory and hot-reload it
    * against real data. Gated by TREK_PLUGINS_DEV_LINK on top of admin + kill-switch.
    */
+  @ManagedForbidden('a linked directory skips the signature check the registry install performs')
   @Post('link')
   @HttpCode(200)
-  async link(@Body() body: { path?: string }) {
+  async link(@Body() body: PluginLinkDto) {
     if (!pluginsEnabled()) throw new HttpException({ error: 'Plugins are disabled by server configuration' }, 503);
     if (!devLinkEnabled()) throw new HttpException({ error: 'Dev-link is disabled (set TREK_PLUGINS_DEV_LINK=1)' }, 403);
     const dir = body?.path?.trim();
@@ -117,13 +140,84 @@ export class PluginsController {
   }
 
   @Get(':id/config')
-  getConfig(@Param('id') id: string) {
-    return { config: this.plugins.getInstanceConfig(id) };
+  getConfig(@Param('id') id: string): PluginInstanceConfigResponse {
+    return {
+      fields: this.plugins.instanceSettingsFields(id),
+      config: this.plugins.getInstanceConfig(id),
+      actions: this.runtime.actionsOf(id, 'instance'),
+    };
   }
 
+  /**
+   * Save the admin-owned `scope:'instance'` settings. A RUNNING plugin gets its config
+   * once, in the child's init envelope — so a save re-spawns it (like the egress-hosts
+   * PUT), and `restarted` tells the UI whether that happened. A respawn that fails
+   * answers 409 `{ error, code: 'RESTART_FAILED', config }`: the save itself landed,
+   * so the envelope still carries the stored config.
+   */
   @Put(':id/config')
-  updateConfig(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return { config: this.plugins.updateInstanceConfig(id, body || {}) };
+  async updateConfig(@Param('id') id: string, @Body() body: PluginConfigDto): Promise<PluginInstanceConfigUpdated> {
+    // Same gate as the egress-hosts twin: the respawn below is a spawn, and the kill
+    // switch is read live, so a save must not start a child while plugins are off.
+    if (!pluginsEnabled()) throw new HttpException({ error: 'Plugins are disabled by server configuration' }, 503);
+    let config: Record<string, unknown>;
+    try {
+      config = this.plugins.updateInstanceConfig(id, body || {});
+    } catch (e) {
+      if (e instanceof MissingRequiredSettingError) throw new HttpException({ error: e.message }, 400);
+      throw e;
+    }
+    try {
+      return { config, restarted: await this.runtime.respawnIfActive(id) };
+    } catch (e) {
+      // The config IS written by this point, only bringing the child back up failed
+      // (a widened permission set awaiting re-consent, a dependency that went away).
+      // Reporting that as a failed save would be a lie, so the envelope carries the
+      // saved config and names the restart as the part that broke. `disable()` leaves
+      // the row enabled while no child runs, so record the plugin as off: the enable
+      // toggle is where the real reason is offered as a decision the admin can take.
+      await this.runtime.deactivate(id).catch(() => {});
+      const reason = e instanceof Error ? e.message : 'restart failed';
+      throw new HttpException(
+        { error: `Settings saved, but ${id} could not be restarted: ${reason}`, code: 'RESTART_FAILED', config },
+        409,
+      );
+    }
+  }
+
+  /**
+   * Run one of the plugin's `scope:'instance'` actions ("Purge cache", "Test SMTP").
+   * ADMIN-INITIATED: the acting user is the clicking admin, bound host-side, so the
+   * handler sees `ctx.config` plus the admin's own settings and any trip read is checked
+   * against them. The scope is fixed by this route — a user-tab key is refused here.
+   *
+   * Returns the SAME 404 `{ error: 'Plugin is not active' }` body as
+   * PluginUserSettingsController.runAction, and a failing action is a RESULT, not a
+   * server error, on both — but the two routes reach 404 by checking DIFFERENT things.
+   * This route asks `runtime.isActive(id)`, the supervisor's live-process check: is
+   * there actually a forked child to run the action in. The user route instead reads
+   * the plugin's DB `status` column. They can disagree — a plugin can be `status =
+   * 'active'` in the DB with no live child (e.g. it crashed and hasn't been
+   * respawned yet) — so a 404 here does not always mean the row says inactive; it can
+   * also mean a stale-active row with nothing behind it. The client (`useInstanceSettings`)
+   * treats this 404 as authoritative and flips its own `active` flag to match.
+   */
+  @Post(':id/actions/:key')
+  @HttpCode(200)
+  async runAction(
+    @Param('id') id: string,
+    @Param('key') key: string,
+    @Req() req: Request & { user?: { id: number } },
+  ): Promise<PluginActionResult> {
+    const adminId = req.user?.id;
+    if (!pluginsEnabled() || adminId == null || !this.runtime.isActive(id)) {
+      throw new HttpException({ error: 'Plugin is not active' }, 404);
+    }
+    try {
+      return await this.runtime.invokeAction(id, key, adminId, 'instance');
+    } catch (e) {
+      return { ok: false, message: (e instanceof Error ? e.message : 'Action failed').slice(0, 200) };
+    }
   }
 
   /**
@@ -138,7 +232,7 @@ export class PluginsController {
   }
 
   @Put(':id/egress-hosts')
-  async setEgressHosts(@Param('id') id: string, @Body() body: { hosts?: unknown } = {}) {
+  async setEgressHosts(@Param('id') id: string, @Body() body: PluginEgressHostsDto) {
     if (!pluginsEnabled()) throw new HttpException({ error: 'Plugins are disabled by server configuration' }, 503);
     const hosts = Array.isArray(body.hosts) ? body.hosts.map(String) : [];
     try {
@@ -150,7 +244,7 @@ export class PluginsController {
 
   @Post(':id/activate')
   @HttpCode(200)
-  async activate(@Param('id') id: string, @Body() body: { consent?: boolean } = {}) {
+  async activate(@Param('id') id: string, @Body() body: PluginActivateDto) {
     if (!pluginsEnabled()) throw new HttpException({ error: 'Plugins are disabled by server configuration' }, 503);
     try {
       await this.runtime.activate(id, !!body?.consent);
@@ -170,6 +264,7 @@ export class PluginsController {
       }
       throw new HttpException({ error: e instanceof Error ? e.message : 'activation failed' }, 400);
     }
+    invalidateMcpSessions();
     return { status: this.runtime.isActive(id) ? 'active' : 'error' };
   }
 
@@ -179,10 +274,12 @@ export class PluginsController {
     // Cascade: disabling a plugin also disables everything that depends on it (a
     // dependent can't run without its dependency). The client refresh reflects it.
     await this.runtime.deactivateWithDependents(id);
+    invalidateMcpSessions();
     return { status: 'inactive' };
   }
 
   /** DEV-ONLY: re-fork a dev-linked plugin so it picks up rebuilt code. */
+  @ManagedForbidden('reloading from disk reintroduces whatever a sideload put there')
   @Post(':id/reload')
   @HttpCode(200)
   async reload(@Param('id') id: string) {
@@ -206,13 +303,30 @@ export class PluginsController {
 
   @Post(':id/update')
   @HttpCode(200)
-  async update(@Param('id') id: string) {
+  async update(@Param('id') id: string, @Body() body?: PluginUpdateDto) {
     if (!pluginsEnabled()) throw new HttpException({ error: 'Plugins are disabled by server configuration' }, 503);
     try {
-      return await this.runtime.update(id);
+      // An explicit version is the rollback path: install exactly what the admin picked
+      // (the TREK-compat gate still refuses in selectVersion). Absent, the runtime
+      // resolves the newest compatible version itself.
+      const res = await this.runtime.update(id, { version: body?.version });
+      // A deliberate non-latest pick holds future updates; landing on the newest
+      // (any path) releases a stale hold. Only after success — a failed update
+      // changed nothing and must not touch the flag.
+      await this.registry.recomputeUpdateHold(id, res.version, !!body?.version);
+      invalidateMcpSessions();
+      return res;
     } catch (e) {
       throw registryFailure(e, 'update failed');
     }
+  }
+
+  /** Release a per-plugin update hold (set by a deliberate non-latest install). */
+  @Post(':id/resume-updates')
+  @HttpCode(200)
+  resumeUpdates(@Param('id') id: string) {
+    if (!this.plugins.resumeUpdates(id)) throw new HttpException({ error: `plugin ${id} not found` }, 404);
+    return { updateHold: false };
   }
 
   /**
@@ -231,7 +345,7 @@ export class PluginsController {
   @HttpCode(200)
   async retrust(
     @Param('id') id: string,
-    @Body() body: { version?: string; publicKey?: string },
+    @Body() body: PluginRetrustDto,
     @CurrentUser() user: { id: number },
     @Req() req: Request,
   ) {
@@ -239,7 +353,9 @@ export class PluginsController {
     if (!body?.version) throw new HttpException({ error: 'version is required' }, 400);
     if (!body?.publicKey) throw new HttpException({ error: 'publicKey is required' }, 400);
     try {
-      return await this.runtime.retrust(id, body.version, body.publicKey, { userId: user?.id ?? null, ip: getClientIp(req) });
+      const res = await this.runtime.retrust(id, body.version, body.publicKey, { userId: user?.id ?? null, ip: getClientIp(req) });
+      invalidateMcpSessions();
+      return res;
     } catch (e) {
       throw registryFailure(e, 'retrust failed');
     }
@@ -247,8 +363,9 @@ export class PluginsController {
 
   @Post(':id/uninstall')
   @HttpCode(200)
-  async uninstall(@Param('id') id: string, @Body() body: { deleteData?: boolean }) {
+  async uninstall(@Param('id') id: string, @Body() body: PluginUninstallDto) {
     await this.runtime.uninstall(id, !!body?.deleteData);
+    invalidateMcpSessions();
     return { status: 'uninstalled' };
   }
 

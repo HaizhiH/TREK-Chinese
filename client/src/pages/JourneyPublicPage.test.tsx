@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '../../tests/helpers/render';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../tests/helpers/msw/server';
 import { resetAllStores, seedStore } from '../../tests/helpers/store';
@@ -11,8 +11,8 @@ import userEvent from '@testing-library/user-event';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
   return { ...actual, useParams: () => ({ token: 'test-share-token' }) };
 });
 
@@ -33,10 +33,6 @@ vi.mock('leaflet', () => {
   };
   return { default: L, ...L };
 });
-
-vi.mock('react-dom/server', () => ({
-  renderToStaticMarkup: vi.fn(() => '<svg></svg>'),
-}));
 
 // Mock JourneyMap since it uses vanilla Leaflet (L.map) which requires a real DOM
 vi.mock('../components/Journey/JourneyMap', () => ({
@@ -539,5 +535,49 @@ describe('JourneyPublicPage', () => {
       const images = document.querySelectorAll('.grid img');
       expect(images.length).toBeGreaterThan(0);
     });
+  });
+
+  // #1962 — the marker number used to be the stop's position within its day while
+  // the day heading showed the day number, so the same digit appeared repeatedly in
+  // different colours with no key. Both now count stops across the whole journey.
+  it('FE-PAGE-PUBLICJOURNEY-021: numbers each stop once, and the timeline carries the same number', async () => {
+    setupSuccess();
+    render(<JourneyPublicPage />);
+
+    await waitFor(() => expect(screen.getByText('Shibuya Crossing')).toBeInTheDocument());
+
+    // Two geocoded entries on two different days: stops 1 and 2, not 1 and 1.
+    const shibuya = document.querySelector('[data-entry-id="10"]') as HTMLElement;
+    const sensoji = document.querySelector('[data-entry-id="11"]') as HTMLElement;
+    expect(shibuya).toBeTruthy();
+    expect(sensoji).toBeTruthy();
+
+    const badge = (el: HTMLElement) =>
+      Array.from(el.querySelectorAll('span')).find(s => /^\d+$/.test(s.textContent || ''))?.textContent;
+
+    expect(badge(shibuya)).toBe('1');
+    expect(badge(sensoji)).toBe('2');
+  });
+
+  // #1614 — a journey shared mid-trip reads like a blog. Only the reading order
+  // flips; the stop numbers stay chronological so the map still matches.
+  it('FE-PAGE-PUBLICJOURNEY-022: the reader can flip the order without renumbering the trip', async () => {
+    setupSuccess();
+    render(<JourneyPublicPage />);
+
+    await waitFor(() => expect(screen.getByText('Shibuya Crossing')).toBeInTheDocument());
+
+    const order = () =>
+      Array.from(document.querySelectorAll('[data-entry-id]')).map(el => el.getAttribute('data-entry-id'));
+    expect(order()).toEqual(['10', '11']);
+
+    fireEvent.click(screen.getByRole('button', { name: /first/i }));
+
+    await waitFor(() => expect(order()).toEqual(['11', '10']));
+
+    // Numbering is unchanged: entry 10 is still stop 1 even though it is shown last.
+    const shibuya = document.querySelector('[data-entry-id="10"]') as HTMLElement;
+    const badge = Array.from(shibuya.querySelectorAll('span')).find(s => /^\d+$/.test(s.textContent || ''));
+    expect(badge?.textContent).toBe('1');
   });
 });

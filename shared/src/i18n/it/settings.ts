@@ -16,6 +16,7 @@ const settings: TranslationStrings = {
   'settings.plugins.subtitle': 'Le tue impostazioni personali per i plugin che usi (chiavi API, preferenze).',
   'settings.plugins.empty': 'Nessun plugin attivo.',
   'settings.plugins.saved': 'Impostazioni salvate',
+  'settings.plugins.requiredMissing': '"{field}" è obbligatorio',
   'settings.tabs.account': 'Account',
   'settings.tabs.offline': 'Offline',
   'settings.tabs.about': 'Informazioni',
@@ -23,7 +24,11 @@ const settings: TranslationStrings = {
   'settings.mapTemplate': 'Modello Mappa',
   'settings.mapTemplatePlaceholder.select': 'Seleziona modello...',
   'settings.mapDefaultHint': 'Lascia vuoto per OpenStreetMap (predefinito)',
-  'settings.mapTemplatePlaceholder': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  'settings.routingBase': 'Motore di percorso proprio',
+  'settings.routingBaseHint': 'Una tua istanza OSRM. Vuoto usa i server pubblici, che consentono circa una richiesta al secondo: sufficiente per un giorno, poco per un viaggio in auto. Ha effetto dopo il riavvio del server.',
+  'settings.valhallaBase': 'Istanza Valhalla propria',
+  'settings.valhallaBaseHint':
+    'TREK usa per impostazione predefinita la Valhalla pubblica di FOSSGIS per evitare pedaggi, autostrade e traghetti. Inserisci qui l’URL della tua Valhalla per usarla al suo posto. Se è configurata solo un’istanza di routing personalizzata, la Valhalla pubblica non viene usata. Dopo aver inserito un URL personalizzato, riavvia il server e ricarica la pagina.',
   'settings.mapHint': 'Modello URL per i tile della mappa',
   'settings.mapProvider': 'Provider mappa',
   'settings.mapProviderHint': 'Influisce sulle mappe Trip Planner e Journey. Atlas usa sempre Leaflet.',
@@ -34,6 +39,11 @@ const settings: TranslationStrings = {
   'settings.mapMapboxToken': 'Token di accesso Mapbox',
   'settings.mapMapboxTokenHint': 'Token pubblico (pk.*) da',
   'settings.mapMapboxTokenLink': 'mapbox.com → Token di accesso',
+  'settings.mapCartoKey': 'Chiave API CARTO',
+  'settings.mapCartoKeyHint': 'Le mappe base CARTO mostrano una filigrana senza chiave. Gratuita e senza account, da',
+  'settings.mapCartoKeyLink': 'chiave API mappe base di carto.com',
+  'settings.mapCartoKeyMissing':
+    'Questo modello è una mappa base CARTO. Senza chiave, CARTO stampa "API KEY REQUIRED" su ogni tassello. Finché non inserisci una chiave, TREK mostra la mappa base predefinita.',
   'settings.mapStyle': 'Stile mappa',
   'settings.mapStylePlaceholder': 'Seleziona uno stile Mapbox',
   'settings.mapStyleHint': 'Preset o il tuo URL mapbox://styles/USER/ID',
@@ -80,6 +90,10 @@ const settings: TranslationStrings = {
   'settings.notifyTripReminder': 'Promemoria di viaggio',
   'settings.notifyTodoDue': 'Attività in scadenza',
   'settings.notifyVacayInvite': 'Inviti fusione Vacay',
+  'settings.notifyVacayShare': 'Condivisioni calendario Vacay',
+  'settings.notifyCollectionInvite': 'Inviti alle raccolte',
+  'settings.notifySynologySessionCleared': 'Sessione Synology rimossa',
+  'settings.notifyPluginNotification': 'Notifiche dei plugin',
   'settings.notifyPhotosShared': 'Foto condivise (Immich)',
   'settings.notifyCollabMessage': 'Messaggi chat (Collab)',
   'settings.notifyPackingTagged': 'Lista valigia: assegnazioni',
@@ -153,7 +167,7 @@ const settings: TranslationStrings = {
   'settings.oauth.modal.redirectUris': 'URI di reindirizzamento',
   'settings.oauth.modal.redirectUrisPlaceholder': 'https://your-app.com/callback\nhttps://your-app.com/auth',
   'settings.oauth.modal.redirectUrisHint':
-    'Un URI per riga. HTTPS richiesto (localhost esente). Corrispondenza esatta richiesta.',
+    'Un URI per riga. HTTPS, HTTP di loopback o uno schema privato come myapp://. Corrispondenza esatta, tranne la porta di loopback.',
   'settings.oauth.modal.scopes': 'Ambiti consentiti',
   'settings.oauth.modal.scopesHint':
     "list_trips e get_trip_summary sono sempre disponibili — nessun ambito richiesto. Permettono all'IA di scoprire gli ID viaggio necessari.",
@@ -183,6 +197,10 @@ const settings: TranslationStrings = {
   'settings.about.featureRequest': 'Richiedi funzionalità',
   'settings.about.featureRequestHint': 'Suggerisci una nuova funzionalità',
   'settings.about.wikiHint': 'Documentazione e guide',
+  'settings.about.descriptionManaged':
+    'TREK helps you organize your trips from the first idea to the last memory. Day planning, budget, packing lists, photos and much more — all in one place.',
+  'settings.about.sourceTitle': 'Source code',
+  'settings.about.sourceHint': 'TREK is open source, licensed AGPL-3.0',
   'settings.about.supporters.badge': 'Sostenitori Mensili',
   'settings.about.supporters.title': 'Compagni di viaggio per TREK',
   'settings.about.supporters.subtitle':
@@ -233,6 +251,7 @@ const settings: TranslationStrings = {
   'settings.avatarUploaded': 'Immagine del profilo aggiornata',
   'settings.avatarRemoved': 'Immagine del profilo rimossa',
   'settings.avatarError': 'Impossibile caricare',
+  'settings.avatarRemoveError': 'Rimozione non riuscita',
   'settings.mfa.title': 'Autenticazione a due fattori (2FA)',
   'settings.mfa.description':
     "Aggiunge un secondo passaggio quando accedi con email e password. Usa un'app authenticator (Google Authenticator, Authy, ecc.).",
@@ -264,6 +283,7 @@ const settings: TranslationStrings = {
   'settings.bookingLabelsHint':
     "Mostra i nomi di stazioni / aeroporti sulla mappa. Se disattivato, viene mostrata solo l'icona.",
   'settings.notifyVersionAvailable': 'Nuova versione disponibile',
+  'settings.notifyReplicaFailure': "Errore di replica dell'archiviazione",
   'settings.notificationPreferences.noChannels':
     'Nessun canale di notifica configurato. Chiedi a un amministratore di configurare notifiche via e-mail o webhook.',
   'settings.webhookUrl.label': 'URL webhook',
@@ -299,8 +319,9 @@ const settings: TranslationStrings = {
   'settings.notificationPreferences.webhook': 'Webhook',
   'settings.notificationPreferences.email': 'Email',
   'settings.notificationPreferences.ntfy': 'Ntfy',
-  'settings.currency': 'Currency',
-  'settings.currencyHint': 'All amounts in Costs are converted to and shown in this currency.',
+  'settings.currency': 'Valuta di visualizzazione',
+  'settings.currencyHint':
+    'Gli importi in Costi vengono mostrati convertiti in questa valuta solo per la visualizzazione — gli importi originali restano invariati.',
   'settings.currencyTrip': 'Valuta del viaggio',
   'settings.passkey.title': 'Passkey',
   'settings.passkey.description':
@@ -348,11 +369,13 @@ const settings: TranslationStrings = {
   'settings.airtrail.test.failed': 'Connessione fallita',
   'settings.aiParsing.title': 'Analisi AI',
   'settings.aiParsing.hint':
-    "Usa il tuo modello AI per estrarre le prenotazioni dai file caricati. Vale solo se l'amministratore non ha configurato un modello per l'intera istanza.",
+    "Scegli il modello AI usato per estrarre le prenotazioni dai file caricati. Vale solo se l'amministratore non ha configurato un modello per l'intera istanza.",
   'settings.aiParsing.provider': 'Provider',
   'settings.aiParsing.providerLocal': 'Locale (Ollama)',
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
+  'settings.aiParsing.localAdminOnly':
+    "Un endpoint locale (Ollama) si configura una sola volta per l'intera istanza nelle impostazioni di amministrazione. Qui puoi comunque usare la tua chiave OpenAI o Anthropic.",
   'settings.aiParsing.model': 'Modello',
   'settings.aiParsing.baseUrl': 'URL di base',
   'settings.aiParsing.baseUrlHint':
@@ -428,8 +451,31 @@ const settings: TranslationStrings = {
   'settings.appearance.example.normal': 'Place names, descriptions',
   'settings.appearance.example.small': 'Addresses, labels',
   'settings.appearance.experimental': 'Experimental',
+  'settings.appearance.mobileNav': 'Barra di navigazione inferiore',
+  'settings.appearance.mobileNav.hint':
+    'Scegli quali elementi appaiono nella barra e quali sotto «Altro». La Dashboard resta sempre per prima.',
+  'settings.appearance.mobileNav.inBar': 'Nella barra',
+  'settings.appearance.mobileNav.underMore': 'Sotto «Altro»',
+  'settings.appearance.mobileNav.moreEmpty': 'Ancora niente qui — tutto entra nella barra.',
+  'settings.appearance.mobileNav.pinned': 'Fisso',
+  'settings.appearance.mobileNav.toMore': 'Sposta sotto «Altro»',
+  'settings.appearance.mobileNav.toBar': 'Sposta nella barra',
+  'settings.appearance.dashOrder': 'Ordine della dashboard',
+  'settings.appearance.dashOrder.hint':
+    'Riorganizza come si impilano l’elenco dei viaggi e i widget nella dashboard del telefono. Il viaggio in evidenza resta sempre in cima.',
+  'settings.appearance.dashOrder.trips': 'Viaggi',
+  'settings.appearance.dashOrder.hidden': 'Nascosto',
   'settings.general.languageRegion': 'Language & region',
   'settings.general.travelMap': 'Travel & map',
+  'settings.general.startup': 'Avvio',
+  'settings.startPage': 'Pagina iniziale',
+  'settings.startPageDashboard': 'Dashboard',
+  'settings.startPageActiveTrip': 'Viaggio attivo',
+  'settings.startPageHint':
+    'TREK si apre direttamente sul viaggio in corso, o sul prossimo in arrivo. È lo stesso viaggio che la dashboard mette in evidenza.',
+  'settings.startTripTab': 'Scheda iniziale',
+  'settings.startTripTabHint':
+    'La scheda con cui si apre il viaggio. Se appartiene a un componente aggiuntivo disattivato, si apre la vista Programma.',
 
   // ── Offline (#1135)
   'settings.offline.cache.title': 'Cache offline',
@@ -457,6 +503,14 @@ const settings: TranslationStrings = {
   'settings.offline.storage.tripsTitle': 'Viaggi',
   'settings.offline.storage.tripOn': 'Archiviato offline',
   'settings.offline.storage.tripOff': 'Non archiviato',
+  'settings.offline.storage.tripFinished': 'Terminato. Salvato solo se lo attivi.',
+  'settings.offline.notice.stored': '{count} viaggio/i salvato/i su questo dispositivo',
+  'settings.offline.notice.nothing': 'Niente da salvare. Attiva i viaggi che vuoi conservare.',
+  'settings.offline.notice.busy': 'Una sincronizzazione è già in corso. Riprova tra un momento.',
+  'settings.offline.notice.offline': 'Nessuna connessione. Connettiti per salvare i viaggi offline.',
+  'settings.offline.notice.signedOut': 'La tua sessione è scaduta. Accedi di nuovo per sincronizzare.',
+  'settings.offline.notice.failed': 'Il download non è stato completato. Controlla la connessione e riprova.',
+  'settings.offline.notice.loadFailed': 'Impossibile leggere l’archivio offline di questo dispositivo. Di solito basta svuotare la cache.',
   'settings.offline.clear': 'Svuota la cache',
   'settings.offline.clearConfirm':
     'Cancellare tutti i dati di viaggio offline? Puoi risincronizzare in qualsiasi momento quando sei online.',
@@ -494,7 +548,53 @@ const settings: TranslationStrings = {
   'settings.pluginActivity.columns.when': 'Quando',
   'settings.pluginActivity.columns.status': 'Esito',
   'settings.alwaysShowRoutes': 'Mostra sempre i percorsi delle prenotazioni',
-  'settings.alwaysShowRoutesHint': 'Mostra automaticamente sulla mappa il percorso di ogni volo, treno e altra prenotazione, senza doverlo attivare singolarmente.',
+  'settings.alwaysShowRoutesHint':
+    'Mostra automaticamente sulla mappa il percorso di ogni volo, treno e altra prenotazione, senza doverlo attivare singolarmente.',
+
+  // Public API keys (Settings -> Integrations)
+  // ── API keys: what a key may read ─────────────────────────────────────────
+  'settings.apiScopes.title': 'Cosa può leggere questa chiave',
+  'settings.apiScopes.hint':
+    'Lascia tutto attivo per una chiave che deve vedere ogni cosa. Ciò che disattivi viene rifiutato per questa chiave, non semplicemente omesso dalla risposta.',
+  'settings.apiScopes.all': 'Tutto',
+  'settings.apiScopes.noneSelected': 'Scegli almeno un\'area, altrimenti la chiave non potrebbe leggere nulla.',
+  'settings.apiScopes.limited': '{count} di {total}',
+  'settings.apiScopes.trips': 'Viaggi',
+  'settings.apiScopes.days': 'Giorni',
+  'settings.apiScopes.places': 'Luoghi',
+  'settings.apiScopes.notes': 'Note del giorno',
+  'settings.apiScopes.reservations': 'Prenotazioni',
+  'settings.apiScopes.accommodations': 'Alloggio',
+  'settings.apiScopes.travellers': 'Chi partecipa',
+  'settings.apiScopes.bucket-list': 'Lista dei desideri',
+  'settings.apiScopes.stats': 'Totali',
+  'settings.apiKeys.title': 'Chiavi API',
+  'settings.apiKeys.description': 'Chiavi per l\'API pubblica, così altri software possono leggere i tuoi viaggi. Sola lettura: una chiave non può modificare né eliminare nulla.',
+  'settings.apiKeys.create': 'Crea chiave',
+  'settings.apiKeys.empty': 'Nessuna chiave. Creane una per collegare altri software.',
+  'settings.apiKeys.createdAt': 'creata',
+  'settings.apiKeys.usedAt': 'ultimo uso',
+  'settings.apiKeys.deleteTitle': 'Elimina chiave',
+  'settings.apiKeys.deleteMessage': 'Tutto ciò che usa questa chiave smette di funzionare subito. L\'operazione non è reversibile.',
+  'settings.apiKeys.deleted': 'Chiave eliminata',
+  'settings.apiKeys.deleteFailed': 'Impossibile eliminare la chiave',
+  'settings.apiKeys.createFailed': 'Impossibile creare la chiave',
+  'settings.apiKeys.copy': 'Copia',
+  'settings.apiKeys.docsHint': 'Invia la chiave come "Authorization: Bearer ..." oppure "X-API-Key: ..." a /api/v1.',
+  'settings.apiKeys.endpoint': 'Endpoint',
+  'settings.apiKeys.neverUsed': 'mai usata',
+  'settings.apiKeys.loadFailed': 'Impossibile caricare le tue chiavi. Ricarica la pagina per riprovare.',
+  'settings.apiKeys.limitReached': 'Hai {max} chiavi, il massimo per un account. Eliminane una che non usi più per crearne un\'altra.',
+  'settings.apiKeys.copyFailed': 'Impossibile copiare. Seleziona il testo e copialo a mano.',
+  'settings.apiKeys.modal.createTitle': 'Crea chiave API',
+  'settings.apiKeys.modal.name': 'Nome',
+  'settings.apiKeys.modal.namePlaceholder': 'ad es. Dawarich',
+  'settings.apiKeys.modal.nameHint': 'Solo per te, per riconoscere la chiave in seguito.',
+  'settings.apiKeys.modal.creating': 'Creazione...',
+  'settings.apiKeys.modal.create': 'Crea',
+  'settings.apiKeys.modal.createdTitle': 'Chiave API creata',
+  'settings.apiKeys.modal.createdWarning': 'Copia la chiave adesso. Viene mostrata una sola volta e non può essere recuperata in seguito.',
+  'settings.apiKeys.modal.done': 'Fatto',
 };
 
 export default settings;

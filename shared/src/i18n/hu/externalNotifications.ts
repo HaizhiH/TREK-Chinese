@@ -28,6 +28,10 @@ const hu: NotificationLocale = {
       title: 'Vacay Fusion meghívó',
       body: `${p.actor} meghívott a nyaralási tervek összevonásához. Nyissa meg a TREK-et az elfogadáshoz vagy elutasításhoz.`,
     }),
+    vacay_share: (p) => ({
+      title: 'Vacay naptár megosztva',
+      body: `${p.actor} megosztotta veled a szabadságnaptárát. Nyissa meg a TREK-et a megtekintéshez.`,
+    }),
     collection_invite: (p) => ({
       title: 'Gyűjtemény meghívó',
       body: `${p.actor} meghívott egy gyűjtemény megosztására. Nyissa meg a TREK-et az elfogadáshoz vagy elutasításhoz.`,
@@ -47,6 +51,12 @@ const hu: NotificationLocale = {
     version_available: (p) => ({
       title: 'Új TREK verzió érhető el',
       body: `A TREK ${p.version} elérhető. Látogasson el az adminisztrációs panelre a frissítéshez.`,
+    }),
+    replica_failure: (p) => ({
+      title: 'Tárhely-replika hiba',
+      body:
+        `Sikertelen írás a(z) '${p.backend}' replikán: ${p.op} / ${p.key} — ${p.error}.` +
+        (p.suppressed !== '0' ? ` Az utolsó értesítés óta ${p.suppressed} további hiba lett elnyomva.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Synology munkamenet törölve',

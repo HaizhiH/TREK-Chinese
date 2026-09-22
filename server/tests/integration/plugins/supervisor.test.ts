@@ -14,6 +14,17 @@ import path from 'node:path';
 import { PluginSupervisor, type SupervisorHooks, type SupervisorTuning } from '../../../src/nest/plugins/supervisor/plugin-supervisor';
 import { PluginRpcHost, type HostDeps } from '../../../src/nest/plugins/host/rpc-host';
 import { PluginDataDb } from '../../../src/nest/plugins/host/plugin-data.service';
+import { createTestPluginRegistry } from '../../../src/nest/plugins/host/rpc-kit/testing';
+import { DbRpc } from '../../../src/nest/plugins/host/rpc/db.rpc';
+import type { PluginUserSettingsService } from '../../../src/nest/plugins/plugin-user-settings.service';
+
+/**
+ * DbRpc also carries `settings.get`, which needs the per-user settings store. No
+ * fixture below calls it, and none of these plugins has a stored setting anyway, so
+ * the stub is the one read DbRpc makes, typed off the real signature and answering
+ * "nothing stored" exactly as the real service would.
+ */
+const stubUserSettings: Pick<PluginUserSettingsService, 'readOne'> = { readOne: () => undefined };
 
 let codeRoot: string;
 let dataRoot: string;
@@ -31,12 +42,12 @@ function makeSupervisor(events: Array<{ topic: string; data: unknown }>, tuning:
   const createRpcHost = (id: string, granted: ReadonlySet<string>): PluginRpcHost => {
     const deps: HostDeps = {
       data: new PluginDataDb(id),
-      db: { prepare: () => ({ all: () => [], get: () => null }) },
-      canAccessTrip: () => undefined,
-      broadcastToTrip: (tripId, event, payload) => broadcasts.push({ tripId, event, payload }),
-      broadcastToUser: () => {},
+      callPlugin: async () => undefined,
+      emitPluginEvent: (event, payload) => broadcasts.push({ id, event, payload }),
     };
-    return new PluginRpcHost(id, granted, deps);
+    // Only db.* is exercised from a child here; the rest of the surface has its own
+    // unit suites and would drag every domain service into this integration test.
+    return new PluginRpcHost(id, granted, deps, createTestPluginRegistry([new DbRpc(stubUserSettings as PluginUserSettingsService)]));
   };
   const hooks: SupervisorHooks = {
     onEvent: (_id, topic, data) => events.push({ topic, data }),
@@ -127,6 +138,53 @@ describe('PluginSupervisor — isolated runtime', () => {
     await sup.invoke('provider', 'invoke.event', { event: 'place:created', tripId: 3 }, { actingUserId: undefined });
     const got = logMeta<{ event: string; tripId: number }>(events, 'got-event');
     expect(got).toEqual({ event: 'place:created', tripId: 3 });
+  });
+
+  it('reports its MCP tools at load and dispatches a tool call as the requesting user', async () => {
+    // plugin-host-entry.ts is excluded from coverage (it runs in a forked
+    // subprocess), so this is the only thing proving the loaded payload and the
+    // invoke path for mcpToolProvider.
+    const events: Array<{ topic: string; data: unknown }> = [];
+    sup = makeSupervisor(events);
+    writePlugin(
+      'toolbox',
+      `module.exports = {
+        hooks: {
+          mcpToolProvider: {
+            tools: ['echo', 'whoami'],
+            async callTool(call, ctx) { return { name: call.name, args: call.args }; },
+          },
+        },
+      };`,
+    );
+    await sup.activate('toolbox', new Set(['mcp:tools']), {});
+
+    expect(sup.mcpToolsOf('toolbox')).toEqual(['echo', 'whoami']);
+    expect(sup.providersOf('mcpToolProvider')).toContain('toolbox');
+    expect([...sup.grantsOf('toolbox')]).toContain('mcp:tools');
+
+    const res = await sup.invoke(
+      'toolbox',
+      'invoke.hook',
+      { hook: 'mcpToolProvider', fn: 'callTool', args: [{ name: 'echo', args: { v: 1 } }] },
+      { actingUserId: 5 },
+    );
+    expect(res).toEqual({ name: 'echo', args: { v: 1 } });
+  });
+
+  it('stops reporting MCP tools once the plugin is no longer active', async () => {
+    const events: Array<{ topic: string; data: unknown }> = [];
+    sup = makeSupervisor(events);
+    writePlugin(
+      'toolbox2',
+      `module.exports = { hooks: { mcpToolProvider: { tools: ['echo'], async callTool() { return 1; } } } };`,
+    );
+    await sup.activate('toolbox2', new Set(['mcp:tools']), {});
+    expect(sup.mcpToolsOf('toolbox2')).toEqual(['echo']);
+
+    await sup.disable('toolbox2');
+    expect(sup.mcpToolsOf('toolbox2')).toEqual([]);
+    expect(sup.providersOf('mcpToolProvider')).not.toContain('toolbox2');
   });
 
   it('seals the raw IPC surface: a plugin cannot forge/sniff over process.send/on(message), and a forged init cannot reopen egress', async () => {

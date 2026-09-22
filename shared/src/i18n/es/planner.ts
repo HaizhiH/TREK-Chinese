@@ -30,8 +30,8 @@ const planner: TranslationStrings = {
   'planner.noEntries': 'No hay entradas para este día',
   'planner.addPlace': 'Añadir lugar/actividad',
   'planner.addPlaceShort': '+ Añadir lugar/actividad',
-  'planner.resPending': 'Reserva pendiente · ',
-  'planner.resConfirmed': 'Reserva confirmada · ',
+  'planner.resPending': 'Reserva pendiente',
+  'planner.resConfirmed': 'Reserva confirmada',
   'planner.notePlaceholder': 'Nota…',
   'planner.noteTimePlaceholder': 'Hora (opcional)',
   'planner.noteExamplePlaceholder':
@@ -49,6 +49,7 @@ const planner: TranslationStrings = {
   'planner.route': 'Ruta',
   'planner.optimize': 'Optimizar',
   'planner.openGoogleMaps': 'Abrir en Google Maps',
+  'planner.openCoMaps': 'Abrir en CoMaps',
   'planner.selectDayHint': 'Selecciona un día de la lista izquierda para ver su plan',
   'planner.noPlacesForDay': 'Aún no hay lugares para este día',
   'planner.addPlacesLink': 'Añadir lugares →',

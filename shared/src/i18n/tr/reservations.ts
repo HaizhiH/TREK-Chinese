@@ -70,6 +70,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Dolaşmak',
   'reservations.type.event': 'Etkinlik',
   'reservations.type.tour': 'Tur',
+  'reservations.type.parking': 'Otopark',
   'reservations.type.other': 'Diğer',
   'reservations.type.bus': 'Otobüs',
   'reservations.type.ferry': 'Feribot',
@@ -127,6 +128,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': 'Varış',
   'reservations.span.inTransit': 'Yolda',
   'reservations.span.pickup': 'Alış',
+  'reservations.span.dropOff': 'Teslim',
   'reservations.span.return': 'İade',
   'reservations.span.active': 'Aktif',
   'reservations.span.start': 'Başlangıç',
@@ -162,6 +164,8 @@ const reservations: TranslationStrings = {
     'AirTrail ile senkronize edildi — düzenlemeler iki yönlü olarak senkronize kalır.',
   'reservations.airtrail.notSynced': 'Senkronize değil',
   'reservations.airtrail.notSyncedHint': "Bu uçuş AirTrail'de kaldırıldı ve artık senkronize edilmiyor.",
+  'reservations.airtrail.layoverHint':
+    "AirTrail'den içe aktarıldı. Aktarmalı, çok bacaklı bir uçuşun eşitlenecek tek bir AirTrail uçuşu yoktur, bu nedenle tek seferlik içe aktarma olarak kalır.",
   'reservations.airtrail.loadError': 'AirTrail uçuşlarınız yüklenemedi.',
   'reservations.airtrail.imported': '{count} uçuş içe aktarıldı',
   'reservations.airtrail.skippedDuplicate': '{count} zaten bu gezide, atlandı',
@@ -181,5 +185,8 @@ const reservations: TranslationStrings = {
   'reservations.removeExpense': 'Remove expense',
   'reservations.urlLabel': 'Bağlantı',
   'reservations.urlPlaceholder': 'https://...',
+  'reservations.travelers.label': 'Yolcular',
+  'reservations.travelers.assign': 'Yolcu ata',
+  'reservations.travelers.none': 'Henüz gezi üyesi yok.',
 };
 export default reservations;

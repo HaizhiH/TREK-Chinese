@@ -5,15 +5,26 @@ import { UnifiedMemoriesController } from '../../../src/nest/memories/unified.co
 import { ImmichMemoriesController } from '../../../src/nest/memories/immich.controller';
 import { SynologyMemoriesController } from '../../../src/nest/memories/synology.controller';
 import type { MemoriesService } from '../../../src/nest/memories/memories.service';
+import type { AddTripPhotosDto, SynologySettingsDto } from '../../../src/nest/memories/memories.dto';
 import type { User } from '../../../src/types';
 
 const { getClientIp } = vi.hoisted(() => ({ getClientIp: vi.fn(() => '1.2.3.4') }));
-vi.mock('../../../src/services/auditLog', () => ({ getClientIp }));
+vi.mock('../../../src/nest/audit/client-ip', () => ({ getClientIp }));
 
 const user = { id: 7, role: 'user', email: 'u@example.test' } as User;
 
 function makeService(overrides: Partial<MemoriesService> = {}): MemoriesService {
   return { ...overrides } as unknown as MemoriesService;
+}
+
+/**
+ * A DTO type describes a body that already passed the Zod pipe. The two cases
+ * that use this hand a controller a value the pipe would reject, because what
+ * they pin is the hand-rolled coercion running after validation — the leniency
+ * the Express routers had, which the controllers still carry.
+ */
+function offContractBody<T>(body: Record<string, unknown>): T {
+  return body as unknown as T;
 }
 
 type MockRes = Response & {
@@ -78,7 +89,13 @@ describe('UnifiedMemoriesController (parity with /api/integrations/memories/unif
     it('ignores a non-array selections payload', async () => {
       const addTripPhotos = vi.fn().mockResolvedValue({ data: { added: 0 } });
       const svc = makeService({ addTripPhotos });
-      await new UnifiedMemoriesController(svc).addPhotos(user, '5', { selections: 'nope', shared: true }, 'sock', makeRes());
+      await new UnifiedMemoriesController(svc).addPhotos(
+        user,
+        '5',
+        offContractBody<AddTripPhotosDto>({ selections: 'nope', shared: true }),
+        'sock',
+        makeRes(),
+      );
       expect(addTripPhotos).toHaveBeenCalledWith('5', 7, true, [], 'sock');
     });
 
@@ -567,7 +584,11 @@ describe('SynologyMemoriesController (parity with /api/integrations/memories/syn
       expect(synologyUpdateSettings).toHaveBeenCalledWith(7, 'u', 'a', '', true);
 
       const svc2 = makeService({ synologyUpdateSettings: vi.fn().mockResolvedValue({ success: true, data: {} }) });
-      await new SynologyMemoriesController(svc2).putSettings(user, { synology_url: 'u', synology_username: 'a', synology_skip_ssl: 'no' }, makeRes());
+      await new SynologyMemoriesController(svc2).putSettings(
+        user,
+        offContractBody<SynologySettingsDto>({ synology_url: 'u', synology_username: 'a', synology_skip_ssl: 'no' }),
+        makeRes(),
+      );
       expect(svc2.synologyUpdateSettings).toHaveBeenCalledWith(7, 'u', 'a', '', false);
     });
   });
@@ -642,14 +663,14 @@ describe('SynologyMemoriesController (parity with /api/integrations/memories/syn
       const synologySearchPhotos = vi.fn().mockResolvedValue({ success: true, data: { assets: [] } });
       const svc = makeService({ synologySearchPhotos });
       await new SynologyMemoriesController(svc).search(user, {}, makeRes());
-      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 0, 100);
+      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 0, 100, 0);
     });
 
     it('forwards from/to and uses size as the limit when size > 0', async () => {
       const synologySearchPhotos = vi.fn().mockResolvedValue({ success: true, data: { assets: [] } });
       const svc = makeService({ synologySearchPhotos });
       await new SynologyMemoriesController(svc).search(user, { from: '2024-01-01', to: '2024-02-01', size: 30 }, makeRes());
-      expect(synologySearchPhotos).toHaveBeenCalledWith(7, '2024-01-01', '2024-02-01', 0, 30);
+      expect(synologySearchPhotos).toHaveBeenCalledWith(7, '2024-01-01', '2024-02-01', 0, 30, 0);
     });
 
     it('derives the offset from a 1-based page using the limit', async () => {
@@ -657,21 +678,43 @@ describe('SynologyMemoriesController (parity with /api/integrations/memories/syn
       const svc = makeService({ synologySearchPhotos });
       await new SynologyMemoriesController(svc).search(user, { page: 3, limit: 20 }, makeRes());
       // page-1 = 2, offset = 2 * 20 = 40
-      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 40, 20);
+      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 40, 20, 0);
     });
 
     it('keeps the explicit offset when page resolves to <= 0', async () => {
       const synologySearchPhotos = vi.fn().mockResolvedValue({ success: true, data: { assets: [] } });
       const svc = makeService({ synologySearchPhotos });
       await new SynologyMemoriesController(svc).search(user, { page: 1, offset: 5, limit: 10 }, makeRes());
-      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 5, 10);
+      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 5, 10, 0);
     });
 
     it('falls back to defaults when numeric fields are non-finite', async () => {
       const synologySearchPhotos = vi.fn().mockResolvedValue({ success: true, data: { assets: [] } });
       const svc = makeService({ synologySearchPhotos });
-      await new SynologyMemoriesController(svc).search(user, { offset: 'x', limit: 'y', page: 'z', size: 'q' }, makeRes());
-      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 0, 100);
+      await new SynologyMemoriesController(svc).search(user, { offset: 'x', limit: 'y', page: 'z', size: 'q', utc_offset_minutes: 'q' }, makeRes());
+      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 0, 100, 0);
+    });
+
+    it('forwards the zone the dates are meant in, apart from the row offset', async () => {
+      const synologySearchPhotos = vi.fn().mockResolvedValue({ success: true, data: { assets: [] } });
+      const svc = makeService({ synologySearchPhotos });
+      // A UTC+10 reader paging: 600 is the zone, 40 is the row offset. Sharing
+      // one name would have made the NAS skip 600 photos instead (#2336).
+      await new SynologyMemoriesController(svc).search(user, { page: 3, limit: 20, utc_offset_minutes: 600 }, makeRes());
+      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 40, 20, 600);
+    });
+
+    it('clamps an impossible zone to the range real ones live in', async () => {
+      const synologySearchPhotos = vi.fn().mockResolvedValue({ success: true, data: { assets: [] } });
+      const svc = makeService({ synologySearchPhotos });
+      await new SynologyMemoriesController(svc).search(user, { utc_offset_minutes: 99999 }, makeRes());
+      expect(synologySearchPhotos).toHaveBeenCalledWith(7, undefined, undefined, 0, 100, 840);
+
+      await new SynologyMemoriesController(svc).search(user, { utc_offset_minutes: '-99999' }, makeRes());
+      expect(synologySearchPhotos).toHaveBeenLastCalledWith(7, undefined, undefined, 0, 100, -720);
+
+      await new SynologyMemoriesController(svc).search(user, { utc_offset_minutes: 90.7 }, makeRes());
+      expect(synologySearchPhotos).toHaveBeenLastCalledWith(7, undefined, undefined, 0, 100, 90);
     });
   });
 

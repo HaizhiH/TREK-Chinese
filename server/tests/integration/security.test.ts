@@ -136,6 +136,35 @@ describe('API key encryption', () => {
     expect(row.openweather_api_key).toMatch(/^enc:v1:/);
   });
 
+  it('SEC-008 — saving keys audits the names and never the values (#1939)', async () => {
+    const { user } = createUser(testDb);
+
+    const save = () =>
+      request(app)
+        .put('/api/auth/me/api-keys')
+        .set('Cookie', authCookie(user.id))
+        .send({ openweather_api_key: 'test-api-key-12345' });
+
+    const first = await save();
+    expect(first.status).toBe(200);
+    // changedKeys is internal: the client body is what it always was.
+    expect(first.body).not.toHaveProperty('changedKeys');
+
+    const rows = () =>
+      testDb
+        .prepare("SELECT details FROM audit_log WHERE action = 'settings.api_keys_update'")
+        .all() as { details: string | null }[];
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].details).toContain('openweather_api_key');
+    expect(rows()[0].details).not.toContain('test-api-key-12345');
+
+    // The same value again writes no second row. This is the real test of the
+    // cleartext comparison: encryption uses a random IV, so the stored blob
+    // differs on every save even when the key does not.
+    await save();
+    expect(rows()).toHaveLength(1);
+  });
+
   it('SEC-008 — GET /api/auth/me does not return plaintext API key', async () => {
     const { user } = createUser(testDb);
     await request(app)
@@ -192,7 +221,10 @@ describe('File download path traversal', () => {
     const res = await request(app)
       .get(`/api/trips/${trip.id}/files/${fileId}/download`)
       .set(authHeader(user.id));
-    // resolveFilePath strips traversal via path.basename; normalized file does not exist in uploads
-    expect(res.status).not.toBe(200);
+    // path.basename() strips traversal in the download controller; the normalized
+    // name does not exist in uploads, so the answer is the same 404 a missing file
+    // gets. Pinned exactly: a 500 from a thrown guard would also be "not 200".
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'File not found' });
   });
 });

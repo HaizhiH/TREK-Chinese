@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'Voyages',
   'oauth.scope.group.places': 'Lieux',
+  'oauth.scope.group.collections': 'Collections',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': 'Bagages',
   'oauth.scope.group.todos': 'Tâches',
@@ -27,6 +28,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'Lire les lieux, affectations de jours, étiquettes et catégories',
   'oauth.scope.places:write.label': 'Gérer les lieux',
   'oauth.scope.places:write.description': 'Créer, modifier et supprimer des lieux, affectations et étiquettes',
+  'oauth.scope.collections:read.label': 'Voir les collections',
+  'oauth.scope.collections:read.description':
+    'Consulter les collections de lieux enregistrés, ainsi que leurs lieux, notes, étiquettes et membres',
+  'oauth.scope.collections:write.label': 'Gérer les collections',
+  'oauth.scope.collections:write.description':
+    'Créer/modifier des collections, enregistrer, noter, étiqueter et copier des lieux, et partager des listes',
   'oauth.scope.atlas:read.label': "Voir l'Atlas",
   'oauth.scope.atlas:read.description': 'Lire les pays visités, régions et liste de souhaits',
   'oauth.scope.atlas:write.label': "Gérer l'Atlas",
@@ -90,5 +97,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'Fichiers',
+  'oauth.scope.group.settings': 'Paramètres',
+  'oauth.scope.files:read.label': 'Voir les fichiers du voyage',
+  'oauth.scope.files:read.description': 'Lister les documents d’un voyage : noms, tailles, qui les a envoyés et ce à quoi ils sont liés',
+  'oauth.scope.files:write.label': 'Gérer les fichiers du voyage',
+  'oauth.scope.files:write.description': 'Renommer et décrire les fichiers, les lier aux réservations et aux lieux, les épingler et les mettre à la corbeille',
+  'oauth.scope.files:content.label': 'Lire le contenu des fichiers',
+  'oauth.scope.files:content.description': 'Lire le contenu d’un document envoyé, par exemple un PDF de réservation ou un billet',
+  'oauth.scope.settings:read.label': 'Voir vos préférences',
+  'oauth.scope.settings:read.description': 'Lire les unités, le format horaire, la langue, la devise par défaut et la page d’accueil',
+  'oauth.scope.settings:write.label': 'Modifier vos préférences',
+  'oauth.scope.settings:write.description': 'Modifier les unités, le format horaire, la langue, la devise par défaut et la page d’accueil. Jamais les clés API enregistrées',
+  'oauth.scope.group.plugins': 'Extensions',
+  'oauth.scope.plugins:use.label': 'Exécuter les outils d\'extension',
+  'oauth.scope.plugins:use.description': 'Autorise ce client à appeler les outils publiés par les extensions installées et approuvées par un administrateur. Chaque extension agit avec les accès qui lui ont déjà été accordés, et non avec les portées de ce jeton',
 };
 export default oauth;

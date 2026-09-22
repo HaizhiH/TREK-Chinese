@@ -3,6 +3,7 @@ import { avatarSrc } from '../../utils/avatarSrc'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import { sanitizedMarkdownPlugins, sanitizedMarkdownComponents } from '../shared/markdownSanitize'
 import { Trash2, Pin, PinOff, Pencil, Maximize2 } from 'lucide-react'
 import { FONT } from './CollabNotes.constants'
 import { AuthedImg } from './CollabNotesAuthedImg'
@@ -80,26 +81,26 @@ export function NoteCard({ note, currentUser, canEdit, onUpdate, onDelete, onEdi
             display: 'flex', gap: 2,
           }}>
             {note.content && (
-              <button onClick={() => onView?.(note)} title={t('collab.notes.expand') || 'Expand'}
+              <button type="button" onClick={() => onView?.(note)} title={t('collab.notes.expand') || 'Expand'}
                 style={{ padding: 3, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', display: 'flex' }}
                 onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
                 onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
                 <Maximize2 size={10} />
               </button>
             )}
-            {canEdit && <button onClick={handleTogglePin} title={note.pinned ? t('collab.notes.unpin') : t('collab.notes.pin')}
+            {canEdit && <button type="button" onClick={handleTogglePin} title={note.pinned ? t('collab.notes.unpin') : t('collab.notes.pin')}
               style={{ padding: 3, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = color}
               onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               {note.pinned ? <PinOff size={10} /> : <Pin size={10} />}
             </button>}
-            {canEdit && <button onClick={() => onEdit?.(note)} title={t('collab.notes.edit')}
+            {canEdit && <button type="button" onClick={() => onEdit?.(note)} title={t('collab.notes.edit')}
               style={{ padding: 3, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
               onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               <Pencil size={10} />
             </button>}
-            {canEdit && <button onClick={handleDelete} title={t('collab.notes.delete')}
+            {canEdit && <button type="button" onClick={handleDelete} title={t('collab.notes.delete')}
               style={{ padding: 3, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
               onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
@@ -142,7 +143,7 @@ export function NoteCard({ note, currentUser, canEdit, onUpdate, onDelete, onEdi
                 maxHeight: '4.5em', overflow: 'hidden',
                 wordBreak: 'break-word', fontFamily: FONT,
               }}>
-                <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{note.content}</Markdown>
+                <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={sanitizedMarkdownPlugins} components={sanitizedMarkdownComponents}>{note.content}</Markdown>
               </div>
             )}
           </div>
@@ -171,17 +172,18 @@ export function NoteCard({ note, currentUser, canEdit, onUpdate, onDelete, onEdi
                         onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)' }}
                         onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }} />
                     ) : (
-                      <div key={a.id} title={a.original_name} onClick={() => onPreviewFile?.(a)}
+                      <button type="button" key={a.id} title={a.original_name} aria-label={a.original_name} onClick={() => onPreviewFile?.(a)}
                         style={{
                           width: 48, height: 48, borderRadius: 8, cursor: 'pointer',
                           background: a.mime_type === 'application/pdf' ? '#ef44441a' : 'var(--bg-secondary)',
+                          border: 'none', padding: 0, fontFamily: 'inherit',
                           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
                           transition: 'transform 0.12s, box-shadow 0.12s',
                         }}
                         onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)' }}
                         onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }}>
                         <span style={{ fontSize: 'calc(9px * var(--fs-scale-caption, 1))', fontWeight: 700, color: a.mime_type === 'application/pdf' ? '#ef4444' : 'var(--text-muted)', letterSpacing: 0.3 }}>{ext}</span>
-                      </div>
+                      </button>
                     )
                   })}
                   {(note.attachments?.length || 0) > (note.website ? 1 : 2) && (

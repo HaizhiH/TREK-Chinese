@@ -7,7 +7,12 @@ vi.mock('../../../src/config', () => ({
   updateJwtSecret: () => {},
 }));
 
-import { encrypt_api_key, decrypt_api_key, maybe_encrypt_api_key } from '../../../src/services/apiKeyCrypto';
+import {
+  encrypt_api_key,
+  decrypt_api_key,
+  maybe_encrypt_api_key,
+  is_encrypted_api_key,
+} from '../../../src/nest/common/crypto/apiKeyCrypto';
 
 describe('apiKeyCrypto', () => {
   const PLAINTEXT_KEY = 'my-secret-api-key-12345';
@@ -74,6 +79,17 @@ describe('apiKeyCrypto', () => {
       const encrypted = encrypt_api_key(PLAINTEXT_KEY);
       const result = maybe_encrypt_api_key(encrypted);
       expect(result).toBe(encrypted);
+    });
+  });
+
+  describe('is_encrypted_api_key', () => {
+    it('is true exactly for enc:v1: envelopes', () => {
+      expect(is_encrypted_api_key(encrypt_api_key('s'))).toBe(true);
+      expect(is_encrypted_api_key('enc:v1:AAAA')).toBe(true);
+      expect(is_encrypted_api_key('plaintext')).toBe(false);
+      expect(is_encrypted_api_key('')).toBe(false);
+      expect(is_encrypted_api_key(null)).toBe(false);
+      expect(is_encrypted_api_key(42)).toBe(false);
     });
   });
 });

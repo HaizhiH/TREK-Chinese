@@ -1,6 +1,6 @@
 {
   "name": "trek-plugin-sdk",
-  "version": "1.5.0",
+  "version": "1.7.1",
   "description": "SDK for building TREK plugins: types, definePlugin, a mock host, manifest validation, and the create-trek-plugin / trek-plugin CLIs.",
   "type": "module",
   "license": "MIT",
@@ -71,12 +71,14 @@
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/finish-cjs.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "prepublishOnly": "npm run build && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
     "@types/semver": "^7.7.1",
     "@types/update-notifier": "^6.0.8",
+    "@vitest/coverage-v8": "^4.1.9",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"
   },

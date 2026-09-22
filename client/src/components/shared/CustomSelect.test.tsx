@@ -80,6 +80,71 @@ describe('CustomSelect', () => {
     expect(screen.queryByText('Cherry')).toBeNull();
   });
 
+  // #2078 — the panel is portaled to document.body and positioned fixed, so its
+  // scroll chain runs to the viewport, not to the sheet it visually sits in. On a
+  // phone a flick past either end of the list moved the page instead.
+  it('FE-COMP-SELECT-009: the option list keeps its scroll to itself', async () => {
+    const user = userEvent.setup();
+    render(<CustomSelect value="" onChange={onChange} options={OPTIONS} />);
+    await user.click(screen.getByRole('button'));
+
+    const list = screen.getByText('Apple').closest('div[style*="overflow"]') as HTMLElement;
+    expect(list.style.overscrollBehavior).toBe('contain');
+  });
+
+  it('FE-COMP-SELECT-010: it is still a bounded scroller, not a contained page', async () => {
+    const user = userEvent.setup();
+    render(<CustomSelect value="" onChange={onChange} options={OPTIONS} />);
+    await user.click(screen.getByRole('button'));
+
+    // Guards the other half: containment without a height cap would just make the
+    // panel grow off screen.
+    const list = screen.getByText('Apple').closest('div[style*="overflow"]') as HTMLElement;
+    expect(list.style.overflowY).toBe('auto');
+    expect(Number.parseInt(list.style.maxHeight, 10)).toBeGreaterThan(0);
+  });
+
+  // A select squeezed into a narrow flex row still has to offer readable options: the
+  // trigger shortens to share its row with the control beside it, the menu does not.
+  it('FE-COMP-SELECT-011: the menu is as wide as its trigger by default', async () => {
+    const user = userEvent.setup();
+    render(<CustomSelect value="" onChange={onChange} options={OPTIONS} />);
+    await user.click(screen.getByRole('button'));
+
+    const panel = screen.getByText('Apple').closest('div[style*="position: fixed"]') as HTMLElement;
+    expect(panel.style.width).not.toBe('max-content');
+    expect(panel.style.maxWidth).toBe('');
+  });
+
+  it('FE-COMP-SELECT-012: menuFit content grows the menu to its options, bounded twice', async () => {
+    const user = userEvent.setup();
+    render(<CustomSelect value="" onChange={onChange} options={OPTIONS} menuFit="content" />);
+    await user.click(screen.getByRole('button'));
+
+    const panel = screen.getByText('Apple').closest('div[style*="position: fixed"]') as HTMLElement;
+    expect(panel.style.width).toBe('max-content');
+    // Never narrower than the trigger, never wider than what the window still has.
+    expect(panel.style.minWidth).not.toBe('');
+    expect(Number.parseInt(panel.style.maxWidth, 10)).toBeGreaterThan(0);
+  });
+
+  it('FE-COMP-SELECT-013: a content-fitted menu stops at the edge of its panel', async () => {
+    const user = userEvent.setup();
+    render(
+      <div data-testid="panel">
+        <CustomSelect value="" onChange={onChange} options={OPTIONS} menuFit="content" />
+      </div>,
+    );
+    // jsdom measures everything as zero, so the panel says how wide it is.
+    const panel = screen.getByTestId('panel');
+    panel.getBoundingClientRect = () => ({ left: 0, right: 180, width: 180, top: 0, bottom: 32, height: 32, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+
+    await user.click(screen.getByRole('button'));
+
+    const menu = screen.getByText('Apple').closest('div[style*="position: fixed"]') as HTMLElement;
+    expect(menu.style.maxWidth).toBe('180px');
+  });
+
   it('FE-COMP-SELECT-008: disabled state prevents the dropdown from opening', async () => {
     const user = userEvent.setup();
     render(<CustomSelect value="" onChange={onChange} options={OPTIONS} disabled={true} placeholder="Pick" />);

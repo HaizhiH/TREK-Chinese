@@ -41,14 +41,21 @@ describe('filesSlice', () => {
     });
 
     it('FE-FILES-002: loadFiles silently catches errors', async () => {
+      const existing = buildTripFile({ trip_id: 1, filename: 'existing.pdf' });
+      seedStore(useTripStore, { files: [existing] });
+
       server.use(
         http.get('/api/trips/1/files', () =>
           HttpResponse.json({ message: 'Error' }, { status: 500 })
         ),
       );
 
-      // Should not throw
-      await useTripStore.getState().loadFiles(1);
+      // Swallows the failure instead of rejecting, and leaves the list alone
+      await expect(useTripStore.getState().loadFiles(1)).resolves.toBeUndefined();
+
+      const files = useTripStore.getState().files;
+      expect(files).toHaveLength(1);
+      expect(files[0].filename).toBe('existing.pdf');
     });
   });
 

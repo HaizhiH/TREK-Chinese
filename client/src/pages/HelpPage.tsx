@@ -1,5 +1,5 @@
 import { Children, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Search, ChevronRight, Loader2, AlertCircle, BookOpen, PanelLeft, X } from 'lucide-react'
@@ -72,7 +72,7 @@ export default function HelpPage() {
         {/* Content */}
         <main className="flex-1 min-w-0" ref={contentRef}>
           {/* Mobile nav toggle */}
-          <button
+          <button type="button"
             onClick={() => setNavOpen(true)}
             className="lg:hidden inline-flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-surface-card border border-edge text-[13px] font-medium text-content"
           >
@@ -99,17 +99,18 @@ export default function HelpPage() {
 
       {/* Mobile sidebar drawer */}
       {navOpen && (
-        <div className="lg:hidden fixed inset-0 z-[120]" onClick={() => setNavOpen(false)}>
+        <div className="lg:hidden fixed inset-0 z-[120]" role="presentation" onClick={() => setNavOpen(false)}>
           <div className="absolute inset-0 bg-black/40" />
           <div
             className="absolute left-0 top-0 bottom-0 w-[280px] bg-surface-card p-5 overflow-y-auto shadow-xl"
+            role="presentation"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
               <span className="text-[14px] font-bold text-content flex items-center gap-2">
                 <BookOpen size={16} className="text-accent" /> {t('help.title')}
               </span>
-              <button onClick={() => setNavOpen(false)} className="text-content-faint">
+              <button type="button" onClick={() => setNavOpen(false)} className="text-content-faint">
                 <X size={18} />
               </button>
             </div>

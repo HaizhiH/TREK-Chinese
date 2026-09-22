@@ -5,6 +5,7 @@ import { notificationHandlers } from './notifications';
 import { vacayHandlers } from './vacay';
 import { tripsHandlers } from './trips';
 import { placesHandlers } from './places';
+import { pluginSearchHandlers } from './pluginSearch';
 import { assignmentsHandlers } from './assignments';
 import { packingHandlers } from './packing';
 import { todoHandlers } from './todo';
@@ -15,6 +16,7 @@ import { tagsHandlers } from './tags';
 import { dayNotesHandlers } from './dayNotes';
 import { adminHandlers } from './admin';
 import { sharedHandlers } from './shared';
+import { externalHandlers } from './external';
 
 export const defaultHandlers = [
   ...authHandlers,
@@ -24,6 +26,7 @@ export const defaultHandlers = [
   ...vacayHandlers,
   ...tripsHandlers,
   ...placesHandlers,
+  ...pluginSearchHandlers,
   ...assignmentsHandlers,
   ...packingHandlers,
   ...todoHandlers,
@@ -34,4 +37,5 @@ export const defaultHandlers = [
   ...dayNotesHandlers,
   ...adminHandlers,
   ...sharedHandlers,
+  ...externalHandlers,
 ];

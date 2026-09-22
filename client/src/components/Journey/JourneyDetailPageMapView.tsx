@@ -23,11 +23,7 @@ export function MapView({ entries, mapEntries, sortedDates, activeLocationId, fu
     if (!byDate.has(d)) byDate.set(d, [])
     byDate.get(d)!.push({ entry: e, globalIdx: i })
   })
-  const dates = [...byDate.keys()].sort()
-
-  // find first and last entry indices
-  const firstId = mapEntries[0]?.id
-  const lastId = mapEntries[mapEntries.length - 1]?.id
+  const dates = [...byDate.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 
   const mapItems = useMemo(() => mapEntries.map(e => ({
     id: String(e.id),
@@ -85,15 +81,14 @@ export function MapView({ entries, mapEntries, sortedDates, activeLocationId, fu
                 {/* Location items */}
                 {items.map(({ entry: e, globalIdx }, itemIdx) => {
                   const isActive = activeLocationId === String(e.id)
-                  const isFirst = e.id === firstId
-                  const isLast = e.id === lastId
                   const showConnector = itemIdx < items.length - 1
 
                   return (
                     <div key={e.id}>
-                      <div
+                      <button
+                        type="button"
                         onClick={() => onLocationClick(String(e.id))}
-                        className={`flex items-center gap-3 p-3 rounded-[14px] cursor-pointer transition-all ${
+                        className={`w-full text-left flex items-center gap-3 p-3 rounded-[14px] cursor-pointer transition-all ${
                           isActive
                             ? 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-900 dark:border-zinc-100 translate-x-0.5'
                             : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 hover:translate-x-0.5'
@@ -120,7 +115,7 @@ export function MapView({ entries, mapEntries, sortedDates, activeLocationId, fu
 
                         {/* Chevron */}
                         <ChevronRight size={14} className={`flex-shrink-0 ${isActive ? 'text-zinc-900 dark:text-white' : 'text-zinc-300 dark:text-zinc-600'}`} />
-                      </div>
+                      </button>
 
                       {/* Connector line */}
                       {showConnector && (

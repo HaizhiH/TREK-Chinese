@@ -1,20 +1,20 @@
-import ReactDOM from 'react-dom'
-import { Upload } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { FileDown } from 'lucide-react'
 import type { PackingState } from './usePackingListPanel'
 
 export function BulkImportModal(S: PackingState) {
   const { setShowImportModal, t, importText, setImportText, csvInputRef, handleCsvFile, handleBulkImport, parseImportLines } = S
-  return ReactDOM.createPortal(
+  return createPortal(
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(3px)',
-    }} onClick={() => setShowImportModal(false)}>
+    }} role="presentation" onClick={e => { if (e.target === e.currentTarget) setShowImportModal(false) }}>
       <div style={{
         width: 420, maxHeight: '80vh', background: 'var(--bg-card)', borderRadius: 16,
         boxShadow: '0 16px 48px rgba(0,0,0,0.22)', padding: '22px 22px 18px',
         display: 'flex', flexDirection: 'column', gap: 14,
-      }} onClick={e => e.stopPropagation()}>
+      }}>
         <div style={{ fontSize: 'calc(15px * var(--fs-scale-subtitle, 1))', fontWeight: 600, color: 'var(--text-primary)' }}>{t('packing.importTitle')}</div>
         <div style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: 'var(--text-faint)', lineHeight: 1.5 }}>{t('packing.importHint')}</div>
         <div style={{ display: 'flex', border: '1px solid var(--border-primary)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg-input)' }}>
@@ -43,20 +43,20 @@ export function BulkImportModal(S: PackingState) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <input ref={csvInputRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={handleCsvFile} />
-            <button onClick={() => csvInputRef.current?.click()} style={{
+            <button type="button" onClick={() => csvInputRef.current?.click()} style={{
               display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px',
               border: '1px dashed var(--border-primary)', borderRadius: 8, background: 'none',
               fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', cursor: 'pointer', fontFamily: 'inherit',
             }}>
-              <Upload size={11} /> {t('packing.importCsv')}
+              <FileDown size={11} /> {t('packing.importCsv')}
             </button>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setShowImportModal(false)} style={{
+            <button type="button" onClick={() => setShowImportModal(false)} style={{
               fontSize: 'calc(12px * var(--fs-scale-body, 1))', background: 'none', border: '1px solid var(--border-primary)',
               borderRadius: 8, padding: '6px 14px', cursor: 'pointer', color: 'var(--text-muted)', fontFamily: 'inherit',
             }}>{t('common.cancel')}</button>
-            <button onClick={handleBulkImport} disabled={!importText.trim()} style={{
+            <button type="button" onClick={handleBulkImport} disabled={!importText.trim()} style={{
               fontSize: 'calc(12px * var(--fs-scale-body, 1))', background: 'var(--accent)', color: 'var(--accent-text)',
               border: 'none', borderRadius: 8, padding: '6px 16px', cursor: 'pointer', fontWeight: 600,
               fontFamily: 'inherit', opacity: importText.trim() ? 1 : 0.5,

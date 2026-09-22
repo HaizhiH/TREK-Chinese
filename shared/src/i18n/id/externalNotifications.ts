@@ -28,6 +28,10 @@ const id: NotificationLocale = {
       title: 'Undangan Penggabungan Vacay',
       body: `${p.actor} mengundang Anda untuk menggabungkan rencana liburan. Buka TREK untuk menerima atau menolak.`,
     }),
+    vacay_share: (p) => ({
+      title: 'Kalender Vacay Dibagikan',
+      body: `${p.actor} membagikan kalender cutinya dengan Anda. Buka TREK untuk melihatnya.`,
+    }),
     collection_invite: (p) => ({
       title: 'Undangan koleksi',
       body: `${p.actor} mengundang Anda untuk berbagi koleksi. Buka TREK untuk menerima atau menolak.`,
@@ -47,6 +51,12 @@ const id: NotificationLocale = {
     version_available: (p) => ({
       title: 'Versi TREK baru tersedia',
       body: `TREK ${p.version} sekarang tersedia. Kunjungi panel admin untuk memperbarui.`,
+    }),
+    replica_failure: (p) => ({
+      title: 'Kegagalan replika penyimpanan',
+      body:
+        `Penulisan replika gagal pada '${p.backend}': ${p.op} dari ${p.key} — ${p.error}.` +
+        (p.suppressed !== '0' ? ` ${p.suppressed} kegagalan lainnya diabaikan sejak notifikasi terakhir.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Sesi Synology dihapus',

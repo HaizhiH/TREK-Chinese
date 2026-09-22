@@ -1,6 +1,8 @@
-import { db } from '../../../db/database';
+import { readEnv } from '../../../app-config';
+import { DatabaseService } from '../../database/database.service';
 import { discoverPlugins } from '../install/discovery';
-import { hostSatisfies, hostVersion, normalizedHost } from '../install/host-compat';
+import { bypassedRange, hostSatisfies, hostVersion, normalizedHost, trekRangeBypassed, warnRangeBypass } from '../install/host-compat';
+import type { TrekRangeBypass } from '../install/host-compat';
 import type { PluginDependency } from '../install/manifest';
 import { parseJsonText, parseManifest } from '../install/manifest';
 import { scanForNativeBinaries } from '../install/native-scan';
@@ -14,6 +16,8 @@ import { Injectable } from '@nestjs/common';
 import fs from 'node:fs';
 import path from 'node:path';
 import semver from 'semver';
+import { MCP_TOOLS_MAX, TOOL_DESCRIPTION_MAX, TOOL_TITLE_MAX } from '../mcp-tool-schema';
+import { sanitiseAssistantText } from '../text-sanitize';
 
 /**
  * TREK-side of the plugin registry (#plugins, M5). Fetches the single aggregated
@@ -24,9 +28,8 @@ import semver from 'semver';
  * (registers INACTIVE). Nothing executes on install; activation is separate.
  */
 
-const REGISTRY_URL =
-  process.env.TREK_PLUGIN_REGISTRY_URL ||
-  'https://raw.githubusercontent.com/liketrek/TREK-Plugins/main/dist/index.json';
+// Frozen at import on purpose (legacy timing) — the registry URL is boot-stable.
+const REGISTRY_URL = readEnv().plugins.registryUrl;
 const CACHE_TTL = 30 * 60 * 1000;
 const MANIFEST_MAX_BYTES = 256 * 1024;
 // Sideload upload ceiling — matches the SDK `pack` limit (50 MB) plus zip overhead.
@@ -118,6 +121,21 @@ export interface ManifestPreview {
   icon: string | null;
   requiredAddons: string[];
   pluginDependencies: PluginDependency[];
+  /**
+   * The UI-facing slice of `capabilities`. A plugin that replaces planner tabs hides core
+   * UI, so the reviewer has to see it BEFORE installing, not only on the installed row.
+   */
+  capabilities: {
+    widget?: { slot?: string };
+    tripPage?: { replaces?: string[] };
+    /**
+     * The tools this plugin will publish into every user's assistant context if
+     * `mcp:tools` is granted. Carried in the PREVIEW, not just on the installed
+     * row, because the whole point is that an admin reads the text before
+     * approving the grant rather than meeting it later inside a chat.
+     */
+    mcpTools?: Array<{ name: string; title?: string; description: string }>;
+  };
 }
 
 let _cache: { data: Registry; expiresAt: number } | null = null;
@@ -147,6 +165,12 @@ export class RegistryError extends Error {
 
 @Injectable()
 export class PluginRegistryService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   /**
    * Fetch the aggregated registry (cached, soft-fail, stale-serve). Pass
    * force=true (the admin "rescan" button) to bypass the 30-min cache and also
@@ -234,7 +258,9 @@ export class PluginRegistryService {
   private hostCompat(entry: RegistryEntry): HostCompat {
     const latest = entry.versions[0] ?? null;
     const compatible = latest ? hostCompatible(latest, normalizedHost()) : false;
-    const fallback = compatible ? null : this.latestCompatible(entry);
+    // The verdict is the TRUTH, so it asks the strict predicate even when the picker is
+    // bypassed: "latest compatible" must keep naming a version the author vouched for.
+    const fallback = compatible ? null : this.latestCompatible(entry, undefined, hostCompatible);
     return {
       trek: latest?.trek ?? null,
       hostVersion: hostVersion(),
@@ -293,6 +319,17 @@ export class PluginRegistryService {
       screenshotUrl: entry.screenshotUrl ?? (latest ? rawFileUrl(entry.repo, latest.commitSha, 'docs/screenshot.png') : null),
       signed: !!entry.authorPublicKey && !!latest?.signature,
       authorPublicKey: entry.authorPublicKey ?? null,
+      // The version picker's data: every published version with its OWN server-computed
+      // compat verdict. The client has no semver and must never re-derive range logic —
+      // a picker that disagreed with the install gate would offer a version that 400s.
+      versions: entry.versions.map((v) => ({
+        version: v.version,
+        publishedAt: v.publishedAt ?? null,
+        size: v.size ?? null,
+        signed: !!entry.authorPublicKey && !!v.signature,
+        trek: trekRequirementOrNull(v),
+        compatible: hostCompatible(v, normalizedHost()),
+      })),
       ...this.hostCompat(entry),
       manifest,
     };
@@ -324,12 +361,20 @@ export class PluginRegistryService {
     return v;
   }
 
-  /** The newest version of `entry` that satisfies `constraint` AND admits the running TREK. */
-  private latestCompatible(entry: RegistryEntry, constraint?: string): RegistryVersion | null {
+  /**
+   * The newest version of `entry` that satisfies `constraint` AND admits the running TREK.
+   * `admits` defaults to the picker's rule (which honours TREK_PLUGINS_IGNORE_TREK_RANGE);
+   * the UI verdict passes the strict {@link hostCompatible} instead.
+   */
+  private latestCompatible(
+    entry: RegistryEntry,
+    constraint?: string,
+    admits: (v: RegistryVersion, host: string | null) => boolean = installable,
+  ): RegistryVersion | null {
     const host = normalizedHost();
     const candidates = entry.versions.filter((v) => {
       if (constraint && !semver.satisfies(v.version, constraint, { includePrerelease: true })) return false;
-      return hostCompatible(v, host);
+      return admits(v, host);
     });
     if (!candidates.length) return null;
     return [...candidates].sort((a, b) => semver.rcompare(a.version, b.version))[0];
@@ -346,7 +391,7 @@ export class PluginRegistryService {
     if (opts?.version) {
       const ver = entry.versions.find((v) => v.version === opts.version);
       if (!ver) throw new RegistryError(`version ${opts.version} not found for ${entry.id}`);
-      if (!hostCompatible(ver, normalizedHost())) {
+      if (!installable(ver, normalizedHost())) {
         throw new RegistryError(
           `${entry.id} ${ver.version} requires TREK ${trekRequirement(ver)} — this is TREK ${hostVersion()}`,
           'TREK_VERSION_INCOMPATIBLE',
@@ -385,7 +430,7 @@ export class PluginRegistryService {
   async install(
     id: string,
     opts?: { version?: string; constraint?: string; retrustKey?: string },
-  ): Promise<{ id: string; version: string }> {
+  ): Promise<{ id: string; version: string; trekRangeBypassed: TrekRangeBypass | null }> {
     const reg = await this.fetchRegistry();
     const entry = reg.plugins.find((p) => p.id === id);
     if (!entry) throw new RegistryError(`plugin ${id} not in registry`);
@@ -403,7 +448,7 @@ export class PluginRegistryService {
     try {
       this.verifySignatureAndTofu(id, bytes, entry, ver, opts?.retrustKey);
     } catch (e) {
-      if (e instanceof RegistryError && isSignatureCode(e.code)) setUpdateBlock(id, e.code, e.message, ver.version);
+      if (e instanceof RegistryError && isSignatureCode(e.code)) setUpdateBlock(this.dbs.connection, id, e.code, e.message, ver.version);
       throw e;
     }
 
@@ -425,7 +470,7 @@ export class PluginRegistryService {
       // published entries usually carry a lower bound and no upper one at all, so a
       // plugin that declares "<4.0.0" passes the pre-download filter on TREK 4 and is
       // caught only here.
-      assertHostCompatible(manifest.trekRange, id);
+      const trekRangeBypassed = assertHostCompatible(manifest.trekRange, id);
       if (scanForNativeBinaries(pluginRoot).length) throw new RegistryError('artifact contains native binaries');
 
       // 6. atomic move into place
@@ -435,8 +480,8 @@ export class PluginRegistryService {
       fs.renameSync(pluginRoot, dest);
 
       // 7. register INACTIVE (record provenance)
-      discoverPlugins(db);
-      db.prepare('UPDATE plugins SET source_repo = ?, source_commit = ?, sha256 = ?, reviewed_at = ? WHERE id = ?').run(
+      discoverPlugins(this.db);
+      this.db.prepare('UPDATE plugins SET source_repo = ?, source_commit = ?, sha256 = ?, reviewed_at = ? WHERE id = ?').run(
         entry.repo,
         ver.commitSha,
         ver.sha256,
@@ -448,12 +493,12 @@ export class PluginRegistryService {
       // to a key the artifact just verified under; NEVER cleared to NULL, because a
       // NULL pin re-opens the "was never signed" path that accepts an unsigned update.
       if (entry.authorPublicKey) {
-        db.prepare('UPDATE plugins SET author_pubkey = ? WHERE id = ?').run(entry.authorPublicKey, id);
+        this.db.prepare('UPDATE plugins SET author_pubkey = ? WHERE id = ?').run(entry.authorPublicKey, id);
       }
       // The plugin is now on new code that passed every check — whatever refusal was
       // recorded before no longer describes reality.
-      clearUpdateBlock(id);
-      return { id, version: ver.version };
+      clearUpdateBlock(this.dbs.connection, id);
+      return { id, version: ver.version, trekRangeBypassed };
     } finally {
       fs.rmSync(staging, { recursive: true, force: true });
     }
@@ -469,9 +514,10 @@ export class PluginRegistryService {
   async installWithDependencies(
     id: string,
     constraint?: string,
-  ): Promise<{ installed: string[]; requiredAddons: string[] }> {
+  ): Promise<{ installed: string[]; requiredAddons: string[]; trekRangeBypassed: TrekRangeBypass | null }> {
+    let trekRangeBypassed: TrekRangeBypass | null = null;
     const installedNow = new Set(
-      (db.prepare('SELECT id FROM plugins').all() as Array<{ id: string }>).map((r) => r.id),
+      (this.db.prepare('SELECT id FROM plugins').all() as Array<{ id: string }>).map((r) => r.id),
     );
     const done = new Set<string>();
     const installed: string[] = [];
@@ -485,7 +531,10 @@ export class PluginRegistryService {
         // Install the version we just RESOLVED. Passing the range back (or nothing, for
         // the root) made install() re-pick on its own and land on entry.versions[0] —
         // so the compatible version resolveVersion had chosen was computed and discarded.
-        await this.install(pid, { version: ver.version });
+        const res = await this.install(pid, { version: ver.version });
+        // The admin asked for the root; that is the bypass they are warned about (a
+        // dependency's own bypass still lands in the log).
+        if (pid === id) trekRangeBypassed = res.trekRangeBypassed;
         installed.push(pid);
         installedNow.add(pid);
       }
@@ -494,7 +543,31 @@ export class PluginRegistryService {
       for (const dep of ver.pluginDependencies ?? []) await visit(dep.id, dep.version, [...stack, pid]);
     };
     await visit(id, constraint, []);
-    return { installed, requiredAddons: [...requiredAddons] };
+    return { installed, requiredAddons: [...requiredAddons], trekRangeBypassed };
+  }
+
+  /**
+   * Recompute the per-plugin update hold after a successful install/update.
+   *
+   * The hold exists so a DELIBERATE rollback isn't immediately nagged away by the
+   * update banner. It is set only when `explicit` (the admin picked this exact
+   * version) AND a newer TREK-compatible version exists; every other outcome writes
+   * 0, so landing back on the newest compatible version — by any path — releases a
+   * stale hold. An unresolvable registry never sets a hold: refusing to pin on
+   * missing information beats silently muting future updates.
+   */
+  async recomputeUpdateHold(id: string, installedVersion: string, explicit: boolean): Promise<boolean> {
+    let hold = false;
+    if (explicit) {
+      try {
+        const newest = await this.resolveVersion(id);
+        hold = semver.lt(installedVersion, newest.version);
+      } catch {
+        hold = false;
+      }
+    }
+    this.db.prepare('UPDATE plugins SET update_hold = ? WHERE id = ?').run(hold ? 1 : 0, id);
+    return hold;
   }
 
   /**
@@ -505,7 +578,7 @@ export class PluginRegistryService {
    * binaries) — only the registry sha256/signature checks are absent, because a
    * sideload has no registry entry. Throws (and self-cleans staging) on failure.
    */
-  stageUpload(bytes: Buffer): { id: string; version: string; root: string; stagingDir: string } {
+  stageUpload(bytes: Buffer): { id: string; version: string; root: string; stagingDir: string; trekRangeBypassed: TrekRangeBypass | null } {
     if (bytes.length > MAX_UPLOAD_BYTES) throw new RegistryError('archive exceeds the 50MB limit');
     const stagingDir = path.join(pluginsDataRoot(), '.staging', `upload-${Date.now()}`);
     try {
@@ -515,9 +588,9 @@ export class PluginRegistryService {
       const manifest = parseManifest(parseJsonText(fs.readFileSync(path.join(root, 'trek-plugin.json'), 'utf8')), {
         requireTrek: true,
       });
-      assertHostCompatible(manifest.trekRange, manifest.id);
+      const trekRangeBypassed = assertHostCompatible(manifest.trekRange, manifest.id);
       if (scanForNativeBinaries(root).length) throw new RegistryError('artifact contains native binaries');
-      return { id: manifest.id, version: manifest.version, root, stagingDir };
+      return { id: manifest.id, version: manifest.version, root, stagingDir, trekRangeBypassed };
     } catch (e) {
       fs.rmSync(stagingDir, { recursive: true, force: true });
       throw e;
@@ -536,7 +609,7 @@ export class PluginRegistryService {
       fs.mkdirSync(pluginsCodeRoot(), { recursive: true });
       fs.rmSync(dest, { recursive: true, force: true });
       fs.renameSync(staged.root, dest);
-      discoverPlugins(db);
+      discoverPlugins(this.db);
       // Provenance for a sideload, plus a hard INACTIVE floor: discoverPlugins keeps
       // an existing row's status, so replacing a plugin that was active must not
       // leave the new code marked active — the admin re-activates (and re-consents
@@ -546,7 +619,7 @@ export class PluginRegistryService {
       // plugin has just left the registry trust model entirely — the code is now whatever
       // the admin uploaded. Leaving the block would have the row insist an update was
       // blocked over a signing key that no longer applies to the code that is running.
-      db.prepare(
+      this.db.prepare(
         `UPDATE plugins SET source_repo = ?, source_commit = ?, sha256 = ?, reviewed_at = ?, author_pubkey = NULL,
                             update_block_code = NULL, update_block_detail = NULL, update_block_version = NULL,
                             status = 'inactive', enabled = 0
@@ -585,7 +658,7 @@ export class PluginRegistryService {
     retrustKey?: string,
   ): void {
     const pinned =
-      (db.prepare('SELECT author_pubkey FROM plugins WHERE id = ?').get(id) as { author_pubkey?: string } | undefined)
+      (this.db.prepare('SELECT author_pubkey FROM plugins WHERE id = ?').get(id) as { author_pubkey?: string } | undefined)
         ?.author_pubkey ?? null;
 
     if (!entry.authorPublicKey && !ver.signature) {
@@ -637,7 +710,7 @@ export class PluginRegistryService {
    * rendered, the admin would be blessing a key they never saw.
    */
   async assertRetrustable(id: string, publicKey: string): Promise<RegistryEntry> {
-    const row = db.prepare('SELECT source_repo, author_pubkey FROM plugins WHERE id = ?').get(id) as
+    const row = this.db.prepare('SELECT source_repo, author_pubkey FROM plugins WHERE id = ?').get(id) as
       | { source_repo?: string | null; author_pubkey?: string | null }
       | undefined;
     if (!row) throw new RegistryError(`plugin ${id} not found`, 'NOT_FOUND');
@@ -689,27 +762,52 @@ function hostCompatible(v: RegistryVersion, host: string | null): boolean {
 }
 
 /**
+ * Whether the registry picker may offer `v`: it fits the host, or the operator set
+ * TREK_PLUGINS_IGNORE_TREK_RANGE and asked for the newest published version regardless.
+ * Only the PICKER uses this — the compat verdict the UI shows (hostCompat/detail) stays
+ * on {@link hostCompatible}, so a bypassed install is still labelled as outside its range.
+ */
+function installable(v: RegistryVersion, host: string | null): boolean {
+  return trekRangeBypassed() || hostCompatible(v, host);
+}
+
+/**
  * Refuse an artifact whose declared TREK range doesn't admit the running host. Shared by
  * every install front door (registry, sideload, dev-link) so they all fail the same way,
  * with a code the admin UI can act on rather than prose it would have to string-match.
+ *
+ * Under TREK_PLUGINS_IGNORE_TREK_RANGE the refusal becomes a log warning, and the
+ * returned marker is what the front door hands back so the admin is told too. Null
+ * means the range fits and nothing was bypassed.
  */
-export function assertHostCompatible(range: string | null, id: string): void {
-  if (hostSatisfies(range)) return;
+export function assertHostCompatible(range: string | null, id: string): TrekRangeBypass | null {
+  if (hostSatisfies(range)) return null;
+  const bypass = bypassedRange(range);
+  if (bypass) {
+    warnRangeBypass(id, bypass);
+    return bypass;
+  }
   throw new RegistryError(`${id} requires TREK ${range} — this is TREK ${hostVersion()}`, 'TREK_VERSION_INCOMPATIBLE');
 }
 
 /**
- * How a version's TREK requirement reads in an error/UI string. Each bound is optional —
- * an entry may declare only a ceiling, or (once `trek` is absent too) nothing at all — so
- * this composes whatever bounds exist rather than interpolating a missing one as "null".
+ * A version's declared TREK requirement as a range string, or null when the entry
+ * carries no bounds at all. Each bound is optional — an entry may declare only a
+ * ceiling, or (once `trek` is absent too) nothing — so this composes whatever
+ * bounds exist rather than interpolating a missing one as "null".
  */
-function trekRequirement(v: RegistryVersion): string {
+function trekRequirementOrNull(v: RegistryVersion): string | null {
   if (v.trek) return v.trek;
   const bounds = [
     v.minTrekVersion ? `>=${v.minTrekVersion}` : null,
     v.maxTrekVersion ? `<=${v.maxTrekVersion}` : null,
   ].filter(Boolean);
-  return bounds.length ? bounds.join(' ') : 'any version';
+  return bounds.length ? bounds.join(' ') : null;
+}
+
+/** How a version's TREK requirement reads in an error/UI string. */
+function trekRequirement(v: RegistryVersion): string {
+  return trekRequirementOrNull(v) ?? 'any version';
 }
 
 /**
@@ -717,7 +815,14 @@ function trekRequirement(v: RegistryVersion): string {
  * empty lists instead of throwing — a future manifest field must never break
  * browsing (strict validation happens against the downloaded artifact instead).
  */
-function previewManifest(raw: unknown): ManifestPreview {
+/**
+ * The reviewer-facing slice of a registry manifest.
+ *
+ * Exported for its unit test: this function is the reason the admin dialog can
+ * show anything at all before install, and a field it forgets to carry makes
+ * the corresponding UI section silently dead.
+ */
+export function previewManifest(raw: unknown): ManifestPreview {
   const m = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const operatorEgress = m.operatorEgress === true;
   const strings = (v: unknown): string[] =>
@@ -743,6 +848,37 @@ function previewManifest(raw: unknown): ManifestPreview {
         }))
         .filter((d) => d.id && d.version)
     : [];
+  const rawCaps = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}) as Record<
+    string,
+    unknown
+  >;
+  const widget = (rawCaps.widget && typeof rawCaps.widget === 'object' ? rawCaps.widget : null) as {
+    slot?: unknown;
+  } | null;
+  const tripPage = (rawCaps.tripPage && typeof rawCaps.tripPage === 'object' ? rawCaps.tripPage : null) as {
+    replaces?: unknown;
+  } | null;
+  const capabilities: ManifestPreview['capabilities'] = {};
+  if (widget) capabilities.widget = typeof widget.slot === 'string' ? { slot: widget.slot } : {};
+  if (tripPage) capabilities.tripPage = { replaces: strings(tripPage.replaces) };
+  // Sanitised here too. This text comes from a registry entry the host has not
+  // installed or verified yet, and it is about to be rendered in the admin's
+  // own chrome, so it gets the same treatment as the advertised copy rather
+  // than being trusted because it came from the registry.
+  if (Array.isArray(rawCaps.mcpTools)) {
+    const tools = rawCaps.mcpTools
+      .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object' && !Array.isArray(t))
+      .slice(0, MCP_TOOLS_MAX)
+      .map((t) => ({
+        name: sanitiseAssistantText(t.name, 96),
+        title: sanitiseAssistantText(t.title, TOOL_TITLE_MAX),
+        description: sanitiseAssistantText(t.description, TOOL_DESCRIPTION_MAX),
+      }))
+      .filter((t) => t.name)
+      .map((t) => ({ name: t.name, ...(t.title ? { title: t.title } : {}), description: t.description }));
+    if (tools.length) capabilities.mcpTools = tools;
+  }
+
   return {
     permissions: strings(m.permissions),
     egress: strings(m.egress),
@@ -752,6 +888,7 @@ function previewManifest(raw: unknown): ManifestPreview {
     icon: typeof m.icon === 'string' ? m.icon : null,
     requiredAddons: strings(m.requiredAddons),
     pluginDependencies,
+    capabilities,
   };
 }
 

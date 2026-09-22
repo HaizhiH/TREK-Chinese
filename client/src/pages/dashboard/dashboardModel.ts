@@ -6,6 +6,7 @@
  */
 
 import type { Trip } from '../../types'
+import { localIsoDate } from '../../utils/localDate'
 
 // The dashboard works with the canonical Trip shape returned by the list/get
 // endpoints (it already carries the computed day_count/place_count/is_owner/
@@ -22,12 +23,31 @@ export interface Place {
 export interface HeroBundle { members: Member[]; places: Place[] }
 export interface TravelStats { totalTrips?: number; totalDays?: number; totalPlaces?: number; totalDistanceKm?: number; countries?: string[] }
 export interface UpcomingReservation {
-  id: number; trip_id: number; title: string; type: string
+  /** Unique per `type`, not on its own: a stay's two moments carry the
+   *  accommodation id, which can collide with a reservation id. */
+  id: number; trip_id: number; title: string
+  /** A reservation type, or 'checkin' / 'checkout' for a stay's two moments. */
+  type: string
+  status?: string | null
   reservation_time?: string | null; day_date?: string | null
   location?: string | null; place_name?: string | null; trip_title?: string | null
 }
 
+/** Stable list key — see the note on `id`. */
+export function upcomingKey(r: UpcomingReservation): string {
+  return `${r.type}:${r.id}`
+}
+
 export const MS_PER_DAY = 86400000
+
+/**
+ * Today as a local-calendar 'YYYY-MM-DD' — see utils/localDate for why this
+ * must never come from toISOString(). Trip dates are wall-clock dates
+ * (daysUntil below parses them as local midnight).
+ */
+export function localIsoToday(): string {
+  return localIsoDate()
+}
 
 export function daysUntil(dateStr: string | null | undefined): number | null {
   if (!dateStr) return null
@@ -37,7 +57,7 @@ export function daysUntil(dateStr: string | null | undefined): number | null {
 }
 
 export function getTripStatus(trip: DashboardTrip): 'ongoing' | 'today' | 'tomorrow' | 'future' | 'past' | null {
-  const today = new Date().toISOString().split('T')[0]
+  const today = localIsoToday()
   if (trip.start_date && trip.end_date && trip.start_date <= today && trip.end_date >= today) return 'ongoing'
   const until = daysUntil(trip.start_date)
   if (until === null) return null
@@ -48,7 +68,7 @@ export function getTripStatus(trip: DashboardTrip): 'ongoing' | 'today' | 'tomor
 }
 
 export function sortTrips(trips: DashboardTrip[]): DashboardTrip[] {
-  const today = new Date().toISOString().split('T')[0]
+  const today = localIsoToday()
   const rank = (t: DashboardTrip) => {
     if (t.start_date && t.end_date && t.start_date <= today && t.end_date >= today) return 0
     if (t.start_date && t.start_date >= today) return 1

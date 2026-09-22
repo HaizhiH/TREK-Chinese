@@ -30,8 +30,8 @@ const planner: TranslationStrings = {
   'planner.noEntries': 'Καμία καταχώρηση για αυτή την ημέρα',
   'planner.addPlace': 'Προσθήκη τοποθεσίας/δραστηριότητας',
   'planner.addPlaceShort': '+ Προσθήκη τοποθεσίας/δραστηριότητας',
-  'planner.resPending': 'Κράτηση σε εκκρεμότητα · ',
-  'planner.resConfirmed': 'Κράτηση επιβεβαιωμένη · ',
+  'planner.resPending': 'Κράτηση σε εκκρεμότητα',
+  'planner.resConfirmed': 'Κράτηση επιβεβαιωμένη',
   'planner.notePlaceholder': 'Σημείωση\u2026',
   'planner.noteTimePlaceholder': 'Ώρα (προαιρετικό)',
   'planner.noteExamplePlaceholder':
@@ -49,6 +49,7 @@ const planner: TranslationStrings = {
   'planner.route': 'Διαδρομή',
   'planner.optimize': 'Βελτιστοποίηση',
   'planner.openGoogleMaps': 'Άνοιγμα στο Google Maps',
+  'planner.openCoMaps': 'Άνοιγμα στο CoMaps',
   'planner.selectDayHint': 'Επιλέξτε μια ημέρα από την αριστερή λίστα για να δείτε το πρόγραμμα',
   'planner.noPlacesForDay': 'Δεν υπάρχουν τοποθεσίες για αυτή την ημέρα ακόμη',
   'planner.addPlacesLink': 'Προσθήκη τοποθεσιών \u2192',

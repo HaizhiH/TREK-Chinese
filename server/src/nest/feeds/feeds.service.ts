@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { db } from '../../db/database';
-import { exportICS } from '../../services/tripService';
+import { DatabaseService } from '../database/database.service';
+import { CalendarService, CALENDAR_HEADER, foldICS } from '../calendar/calendar.service';
+
+/** Subscribable calendars advertise how often to re-fetch; the one-time download does not. */
+const FEED_REFRESH_HINTS = 'REFRESH-INTERVAL;VALUE=DURATION:PT1H\r\nX-PUBLISHED-TTL:PT1H\r\n';
 
 const ninetyDaysAgo = () => {
   const d = new Date();
@@ -15,10 +18,19 @@ function feedUrl(token: string, scope: 'trip' | 'user', base: string): string {
 
 @Injectable()
 export class FeedsService {
+  constructor(
+    private readonly dbs: DatabaseService,
+    private readonly calendar: CalendarService,
+  ) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   // ── Trip feed token ─────────────────────────────────────────────────────
 
   private tripTokenRow(tripId: string, userId: number) {
-    return db
+    return this.db
       .prepare(
         'SELECT feed_token FROM trips WHERE id = ? AND (user_id = ? OR id IN (SELECT trip_id FROM trip_members WHERE user_id = ?))',
       )
@@ -30,31 +42,47 @@ export class FeedsService {
     return { feed_url: row?.feed_token ? feedUrl(row.feed_token, 'trip', base) : null };
   }
 
+  /**
+   * The three writes carry the acting user and scope the UPDATE to a trip that
+   * user can reach, the same predicate tripTokenRow reads through. The route
+   * guard is what decides whether they may manage the credential at all; this is
+   * the second lock, so a caller that reaches the service another way cannot
+   * mint or clear a token on a trip id it merely guessed.
+   */
+  private static readonly REACHABLE =
+    'id = ? AND (user_id = ? OR id IN (SELECT trip_id FROM trip_members WHERE user_id = ?))';
+
   /** Enable (idempotent): mint a token only if the trip has none yet. */
   generateTripToken(tripId: string, userId: number, base: string): { feed_url: string } {
     const row = this.tripTokenRow(tripId, userId);
     if (row?.feed_token) return { feed_url: feedUrl(row.feed_token, 'trip', base) };
     const token = randomUUID();
-    db.prepare('UPDATE trips SET feed_token = ? WHERE id = ?').run(token, tripId);
+    this.db
+      .prepare(`UPDATE trips SET feed_token = ? WHERE ${FeedsService.REACHABLE}`)
+      .run(token, tripId, userId, userId);
     return { feed_url: feedUrl(token, 'trip', base) };
   }
 
   /** Rotate: always issue a fresh token, invalidating the previous URL. */
-  rotateTripToken(tripId: string, base: string): { feed_url: string } {
+  rotateTripToken(tripId: string, userId: number, base: string): { feed_url: string } {
     const token = randomUUID();
-    db.prepare('UPDATE trips SET feed_token = ? WHERE id = ?').run(token, tripId);
+    this.db
+      .prepare(`UPDATE trips SET feed_token = ? WHERE ${FeedsService.REACHABLE}`)
+      .run(token, tripId, userId, userId);
     return { feed_url: feedUrl(token, 'trip', base) };
   }
 
   /** Disable: clear the token so the public URL stops resolving. */
-  disableTripToken(tripId: string): void {
-    db.prepare('UPDATE trips SET feed_token = NULL WHERE id = ?').run(tripId);
+  disableTripToken(tripId: string, userId: number): void {
+    this.db
+      .prepare(`UPDATE trips SET feed_token = NULL WHERE ${FeedsService.REACHABLE}`)
+      .run(tripId, userId, userId);
   }
 
   // ── User (all-trips) feed token ──────────────────────────────────────────
 
   getUserToken(userId: number, base: string): { feed_url: string | null } {
-    const row = db.prepare('SELECT feed_token FROM users WHERE id = ?').get(userId) as
+    const row = this.db.prepare('SELECT feed_token FROM users WHERE id = ?').get(userId) as
       | { feed_token: string | null }
       | undefined;
     return { feed_url: row?.feed_token ? feedUrl(row.feed_token, 'user', base) : null };
@@ -64,44 +92,48 @@ export class FeedsService {
     const existing = this.getUserToken(userId, base);
     if (existing.feed_url) return { feed_url: existing.feed_url };
     const token = randomUUID();
-    db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
+    this.db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
     return { feed_url: feedUrl(token, 'user', base) };
   }
 
   rotateUserToken(userId: number, base: string): { feed_url: string } {
     const token = randomUUID();
-    db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
+    this.db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
     return { feed_url: feedUrl(token, 'user', base) };
   }
 
   disableUserToken(userId: number): void {
-    db.prepare('UPDATE users SET feed_token = NULL WHERE id = ?').run(userId);
+    this.db.prepare('UPDATE users SET feed_token = NULL WHERE id = ?').run(userId);
   }
 
   // ── ICS generation ───────────────────────────────────────────────────────
 
   buildTripIcs(token: string): { ics: string; filename: string } | null {
-    const row = db.prepare('SELECT id FROM trips WHERE feed_token = ?').get(token) as
+    const row = this.db.prepare('SELECT id FROM trips WHERE feed_token = ?').get(token) as
       | { id: number }
       | undefined;
     if (!row) return null;
     try {
-      const { ics, filename } = exportICS(row.id);
-      // Inject calendar-subscription refresh hints into the VCALENDAR header so
-      // clients re-fetch hourly. The one-time download path (exportICS) is left
-      // untouched; this is feed-only.
-      const withHints = ics.replace(
-        'METHOD:PUBLISH\r\n',
-        'METHOD:PUBLISH\r\nREFRESH-INTERVAL;VALUE=DURATION:PT1H\r\nX-PUBLISHED-TTL:PT1H\r\n',
+      const cal = this.calendar.buildTripCalendar(row.id);
+      // Same document as the one-time download, plus the subscription refresh
+      // hints so clients re-fetch hourly. Assembled from the calendar's parts
+      // rather than string-surgeried into the finished text.
+      const ics = foldICS(
+        CALENDAR_HEADER +
+          FEED_REFRESH_HINTS +
+          `X-WR-CALNAME:${cal.calName}\r\n` +
+          [...cal.timezones.values()].join('') +
+          cal.events.join('') +
+          'END:VCALENDAR\r\n',
       );
-      return { ics: withHints, filename };
+      return { ics, filename: cal.filename };
     } catch {
       return null;
     }
   }
 
   buildUserIcs(token: string): { ics: string; calName: string } | null {
-    const user = db.prepare('SELECT id, username FROM users WHERE feed_token = ?').get(token) as
+    const user = this.db.prepare('SELECT id, username FROM users WHERE feed_token = ?').get(token) as
       | { id: number; username: string }
       | undefined;
     if (!user) return null;
@@ -110,7 +142,7 @@ export class FeedsService {
     // "All Trips" means every trip the user can open — trips they own AND trips shared with
     // them as a member — mirroring the single-trip feed's access (tripTokenRow/assertAccess).
     // A membership WHERE on trips selects each row once, so owned + member trips don't dupe.
-    const trips = db
+    const trips = this.db
       .prepare(
         `SELECT id FROM trips
          WHERE (user_id = ? OR id IN (SELECT trip_id FROM trip_members WHERE user_id = ?))
@@ -121,71 +153,35 @@ export class FeedsService {
       .all(user.id, user.id, cutoff) as { id: number }[];
 
     const esc = (s: string) =>
-      s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+      s.replaceAll('\\', '\\\\').replaceAll(';', '\\;').replaceAll(',', '\\,').replace(/\r?\n/g, '\\n');
 
     const calName = `${user.username} – All Trips`;
-    let header =
-      'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//TREK//Travel Planner//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n';
+    let header = CALENDAR_HEADER;
     header += `X-WR-CALNAME:${esc(calName)}\r\n`;
-    header += 'REFRESH-INTERVAL;VALUE=DURATION:PT1H\r\nX-PUBLISHED-TTL:PT1H\r\n';
+    header += FEED_REFRESH_HINTS;
 
     // VTIMEZONE blocks are deduped by TZID across all trips and emitted once in
     // the combined header, before any VEVENT, so per-trip TZID references still
-    // resolve after extractVEvents strips everything but the events (#1453).
+    // resolve (#1453). The parts come from the calendar itself now — this used
+    // to scan each finished document back apart line by line.
     const zones = new Map<string, string>();
     let events = '';
     for (const { id } of trips) {
       try {
-        const { ics } = exportICS(id);
-        for (const vtz of extractVTimezones(ics)) {
-          const tzid = vtz.match(/\r\nTZID:(.+)\r\n/)?.[1];
-          if (tzid && !zones.has(tzid)) zones.set(tzid, vtz);
+        const cal = this.calendar.buildTripCalendar(id);
+        for (const [tzid, block] of cal.timezones) {
+          if (!zones.has(tzid)) zones.set(tzid, block);
         }
-        events += extractVEvents(ics);
+        events += cal.events.join('');
       } catch {
         // skip failed trips
       }
     }
 
-    const combined = header + [...zones.values()].join('') + events + 'END:VCALENDAR\r\n';
+    // Only the body is folded. The header carries a user-chosen display name and
+    // has never been folded here; folding it now would wrap X-WR-CALNAME for
+    // anyone with a long username.
+    const combined = header + foldICS([...zones.values()].join('') + events) + 'END:VCALENDAR\r\n';
     return { ics: combined, calName };
   }
-}
-
-// Pull the VEVENT blocks out of a single-trip calendar by structural line
-// scanning rather than a lazy regex on "END:VEVENT". User-supplied text (escaped
-// onto a SUMMARY/DESCRIPTION line) can legitimately contain the literal
-// "END:VEVENT", which a non-greedy regex would mistake for a terminator and
-// truncate the event. Folded continuation lines always begin with a space, so a
-// bare "BEGIN:VEVENT"/"END:VEVENT" only ever appears as a real delimiter.
-function extractVEvents(ics: string): string {
-  let out = '';
-  let inside = false;
-  for (const line of ics.split('\r\n')) {
-    if (line === 'BEGIN:VEVENT') inside = true;
-    if (inside) out += line + '\r\n';
-    if (line === 'END:VEVENT') inside = false;
-  }
-  return out;
-}
-
-// Pull out each VTIMEZONE block (same structural line scan as extractVEvents) so
-// the combined all-trips feed can carry the zone definitions its events' TZID
-// parameters reference.
-function extractVTimezones(ics: string): string[] {
-  const blocks: string[] = [];
-  let current = '';
-  let inside = false;
-  for (const line of ics.split('\r\n')) {
-    if (line === 'BEGIN:VTIMEZONE') {
-      inside = true;
-      current = '';
-    }
-    if (inside) current += line + '\r\n';
-    if (line === 'END:VTIMEZONE') {
-      inside = false;
-      blocks.push(current);
-    }
-  }
-  return blocks;
 }

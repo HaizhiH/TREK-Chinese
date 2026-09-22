@@ -1,11 +1,16 @@
-import { gcj02ToWgs84, wgs84ToGcj02 } from '../../../src/services/amapProvider';
-import { AmapProvider } from '../../../src/services/amapProvider';
+import type { AmapConfigService } from '../../../src/nest/amap/amap-config.service';
+import { gcj02ToWgs84, wgs84ToGcj02 } from '../../../src/nest/amap/amap.provider';
+import { AmapProvider } from '../../../src/nest/amap/amap.provider';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/services/amapConfig', () => ({
-  getAmapConfig: () => ({ enabled: true, webServiceKey: 'server-only-key' }),
+vi.mock('node:dns/promises', () => ({
+  default: {
+    lookup: vi.fn(async (host: string) => ({ address: /^\d+\./.test(host) ? host : '123.125.10.1', family: 4 })),
+  },
 }));
+
+const config = { getAmapConfig: () => ({ enabled: true, webServiceKey: 'server-only-key' }) } as AmapConfigService;
 
 const distanceMeters = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
   const lat = (((a.lat + b.lat) / 2) * Math.PI) / 180;
@@ -60,7 +65,7 @@ describe('Amap route adapter', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const route = await new AmapProvider().route(
+    const route = await new AmapProvider(config).route(
       [
         { lat: 39.9042, lng: 116.4074 },
         { lat: 39.1333, lng: 117.2 },
@@ -75,5 +80,20 @@ describe('Amap route adapter', () => {
     expect(route.distance).toBe(3000);
     expect(route.duration).toBe(360);
     expect(distanceMeters(route.geometry[0], { lat: 39.9042, lng: 116.4074 })).toBeLessThan(1000);
+  });
+});
+
+describe('Amap SSRF protection', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('blocks a redirect to cloud metadata', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(new AmapProvider(config).search('Beijing')).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
   });
 });

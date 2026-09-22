@@ -16,9 +16,15 @@ import { usePluginStore } from '../store/pluginStore'
 import { useSettings } from './settings/useSettings'
 
 export default function SettingsPage(): React.ReactElement {
+  // ViewportRoute in App.tsx picks the branch now, so the phone screen is a
+  // chunk of its own instead of a dead limb in this one.
+  return <SettingsPageDesktop />
+}
+
+function SettingsPageDesktop(): React.ReactElement {
   const { t } = useTranslation()
   // Page = wiring container: addon/version loading + active-tab state in the hook.
-  const { hasIntegrations, appVersion, activeTab, setActiveTab } = useSettings()
+  const { hasIntegrations, appVersion, activeTab, setActiveTab, managed } = useSettings()
   const hasPlugins = usePluginStore(s => s.plugins.length > 0)
 
   const tabs: PageSidebarTab[] = [
@@ -34,7 +40,11 @@ export default function SettingsPage(): React.ReactElement {
       : []),
     { id: 'offline', label: t('settings.tabs.offline'), icon: CloudOff },
     { id: 'account', label: t('settings.tabs.account'), icon: User },
-    ...(appVersion
+    // About is where the project lives: what TREK is, where to report a bug,
+    // where to support it. A customer of a hosted instance is the audience for
+    // none of that, so the tab goes and the sidebar footer below carries the one
+    // thing that has to stay — the link to the source (AGPL §13).
+    ...(appVersion && !managed
       ? [{ id: 'about', label: t('settings.tabs.about'), icon: Info }]
       : []),
   ]
@@ -59,7 +69,22 @@ export default function SettingsPage(): React.ReactElement {
             tabs={tabs}
             activeTab={activeTab}
             onTabChange={setActiveTab}
-            footer={appVersion ? `v${appVersion} · self-hosted` : 'self-hosted'}
+            footer={
+              appVersion
+                ? managed
+                  // No About tab here, so this is the prominent source offer
+                  // AGPL §13 asks for when people use it over a network.
+                  ? <a
+                      href="https://github.com/liketrek/TREK"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="no-underline text-content-faint hover:text-content-secondary"
+                    >
+                      v{appVersion}
+                    </a>
+                  : `v${appVersion}`
+                : ''
+            }
           >
             {activeTab === 'display' && <DisplaySettingsTab />}
             {activeTab === 'appearance' && <AppearanceSettingsTab />}

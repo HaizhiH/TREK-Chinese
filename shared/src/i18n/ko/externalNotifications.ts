@@ -28,6 +28,10 @@ const ko: NotificationLocale = {
       title: 'Vacay Fusion 초대',
       body: `${p.actor}이(가) 휴가 계획을 합치도록 초대했습니다. TREK을 열어 수락하거나 거절하세요.`,
     }),
+    vacay_share: (p) => ({
+      title: 'Vacay 캘린더 공유됨',
+      body: `${p.actor}이(가) 휴가 캘린더를 공유했습니다. TREK을 열어 확인하세요.`,
+    }),
     collection_invite: (p) => ({
       title: '컬렉션 초대',
       body: `${p.actor}이(가) 컬렉션 공유에 초대했습니다. TREK을 열어 수락하거나 거절하세요.`,
@@ -47,6 +51,12 @@ const ko: NotificationLocale = {
     version_available: (p) => ({
       title: '새 TREK 버전 사용 가능',
       body: `TREK ${p.version}을 사용할 수 있습니다. 관리자 패널에서 업데이트하세요.`,
+    }),
+    replica_failure: (p) => ({
+      title: '스토리지 복제본 오류',
+      body:
+        `복제본 '${p.backend}'에 쓰기가 실패했습니다: ${p.op} / ${p.key} — ${p.error}.` +
+        (p.suppressed !== '0' ? `마지막 알림 이후 ${p.suppressed}개의 추가 실패가 억제되었습니다.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Synology 세션이 초기화되었습니다',

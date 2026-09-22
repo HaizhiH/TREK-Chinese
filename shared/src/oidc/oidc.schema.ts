@@ -8,6 +8,15 @@ import { z } from 'zod';
  * /login, and the auth-code on /exchange). These schemas pin those query shapes;
  * the cryptographic verification + provisioning live in the OIDC service.
  */
+export const oidcLoginQuerySchema = z.object({
+  invite: z.string().optional(),
+  // '1' → remember-me session (SESSION_DURATION_REMEMBER), '0' → browser-session
+  // cookie, absent → the historical default duration. String flags because the
+  // value survives a redirect query, not a JSON body.
+  remember: z.enum(['0', '1']).optional(),
+});
+export type OidcLoginQuery = z.infer<typeof oidcLoginQuerySchema>;
+
 export const oidcCallbackQuerySchema = z.object({
   code: z.string().optional(),
   state: z.string().optional(),

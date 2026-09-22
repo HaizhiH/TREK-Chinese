@@ -31,7 +31,7 @@ publish_files.each do |filename|
   steps = workflow.fetch("jobs").values.flat_map { |job| job.fetch("steps", []) }
   logins = steps.select { |step| step["uses"] == "docker/login-action@v3" }
   acr_logins = logins.select { |step| step["name"] == "Log in to Alibaba Cloud ACR" }
-  expected_acr_logins = filename == "docker-publish.yml" ? 1 : 2
+  expected_acr_logins = 2
   unless acr_logins.length == expected_acr_logins && acr_logins.all? { |step| step.fetch("with") == acr_login }
     abort "FAIL #{filename}: every publishing job must log in to ACR with repository settings"
   end
@@ -49,19 +49,9 @@ publish_files.each do |filename|
     abort "FAIL #{filename}: provenance and SBOM attestations must be explicitly disabled for ACR compatibility"
   end
 
-  if filename == "docker-publish.yml"
-    unless build.fetch("platforms") == "linux/amd64,linux/arm64" && build.fetch("push") == true
-      abort "FAIL #{filename}: continuous publish must push one amd64/arm64 build"
-    end
-    tags = steps.find { |step| step["name"] == "Set image tags" }.fetch("run")
-    %w[$IMAGE_NAME:latest $IMAGE_NAME:sha- $ACR_IMAGE:latest $ACR_IMAGE:sha-].each do |tag|
-      abort "FAIL #{filename}: missing tag #{tag}" unless tags.include?(tag)
-    end
-  else
-    output = build.fetch("outputs")
-    expected_output = 'type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true'
-    abort "FAIL #{filename}: architecture build must export one digest to both registries" unless output == expected_output
-  end
+  output = build.fetch("outputs")
+  expected_output = 'type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true'
+  abort "FAIL #{filename}: architecture build must export one digest to both registries" unless output == expected_output
 
   puts "PASS #{filename}: dual-registry publish contract with attestations disabled"
 end

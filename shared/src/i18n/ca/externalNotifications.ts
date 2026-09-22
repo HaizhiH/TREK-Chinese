@@ -28,6 +28,10 @@ const ca: NotificationLocale = {
       title: 'Invitació a Vacay Fusion',
       body: `${p.actor} et va convidar a fusionar plans de vacances. Obre TREK per acceptar o rebutjar.`,
     }),
+    vacay_share: (p) => ({
+      title: 'Calendari de Vacay compartit',
+      body: `${p.actor} va compartir el seu calendari de vacances amb tu. Obre TREK per veure'l.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} fotos compartides`,
       body: `${p.actor} va compartir ${p.count} foto(s) a "${p.trip}".`,
@@ -43,6 +47,12 @@ const ca: NotificationLocale = {
     version_available: (p) => ({
       title: 'Versió nova de TREK disponible',
       body: `TREK ${p.version} ja està disponible. Visita el panell d'administració per actualitzar.`,
+    }),
+    replica_failure: (p) => ({
+      title: "Error de rèplica d'emmagatzematge",
+      body:
+        `L'escriptura a la rèplica '${p.backend}' ha fallat: ${p.op} de ${p.key} — ${p.error}.` +
+        (p.suppressed !== '0' ? ` S'han suprimit ${p.suppressed} errors més des de l'última notificació.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Sessió de Synology tancada',

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { validateManifest } from '../src/index.js';
 import { scaffold } from '../src/cli/create.js';
-import { PERMISSION_CATALOG, PERMISSION_FAMILIES, KNOWN_PERMISSIONS, isInteractive, missingArgs } from '../src/cli/ui.js';
+import { PERMISSION_CATALOG, PERMISSION_FAMILIES, PICKER_PERMISSIONS, isInteractive, missingArgs } from '../src/cli/ui.js';
 // The authoritative set — what the HOST accepts at activation. The picker must match it.
 import { KNOWN_PERMISSIONS as MANIFEST_PERMISSIONS } from '../src/manifest.js';
 import { resolveMenuChoice, PRIMARY_MENU, ADVANCED_MENU } from '../src/cli/menu.js';
@@ -47,7 +47,7 @@ describe('permission catalog', () => {
   // list the host actually honours — so a new TREK permission fails here until `create`
   // can offer it.
   it('offers every permission the host accepts — no more, no less', () => {
-    expect([...KNOWN_PERMISSIONS].sort()).toEqual([...MANIFEST_PERMISSIONS].sort());
+    expect([...PICKER_PERMISSIONS].sort()).toEqual([...MANIFEST_PERMISSIONS].sort());
   });
 
   it('describes every permission, and files it in exactly one family', () => {
@@ -57,7 +57,7 @@ describe('permission catalog', () => {
         .toHaveLength(1);
     }
     // No duplicates across families — a permission listed twice would render twice.
-    expect(new Set(KNOWN_PERMISSIONS).size).toBe(KNOWN_PERMISSIONS.length);
+    expect(new Set(PICKER_PERMISSIONS).size).toBe(PICKER_PERMISSIONS.length);
   });
 
   it('every family is non-empty and described (an empty one is a dead prompt entry)', () => {
@@ -243,5 +243,38 @@ describe('capabilities.notificationChannel validation', () => {
     const r = validateManifest({ ...base, permissions: ['db:own'], capabilities: { notificationChannel: { title: 'X' } } });
     expect(r.ok).toBe(false);
     expect(r.errors!.join(' ')).toMatch(/requires the "hook:notification-channel" permission/);
+  });
+});
+
+describe('scaffold oauth:client settings', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oauth-')); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  const OAUTH_KEYS = ['oauth_authorize_url', 'oauth_token_url', 'oauth_scopes', 'oauth_client_id', 'oauth_client_secret'];
+
+  it('scaffolds the five instance-scoped broker settings when oauth:client is granted', () => {
+    scaffold('oauth-plug', 'integration', tmp, { permissions: ['db:own', 'oauth:client'] });
+    const m = JSON.parse(fs.readFileSync(path.join(tmp, 'oauth-plug', 'trek-plugin.json'), 'utf8'));
+    const settings = m.settings as Array<{ key: string; secret?: boolean; scope?: string }>;
+    for (const key of OAUTH_KEYS) {
+      expect(settings.some((s) => s.key === key), `missing setting "${key}"`).toBe(true);
+    }
+    const secret = settings.find((s) => s.key === 'oauth_client_secret')!;
+    expect(secret.secret).toBe(true);
+    for (const key of OAUTH_KEYS) {
+      const s = settings.find((x) => x.key === key)!;
+      expect(s.scope, `${key}.scope`).toBe('instance');
+    }
+    expect(validateManifest(m).ok).toBe(true);
+  });
+
+  it('scaffolds none of the broker settings without oauth:client', () => {
+    scaffold('plain-oauth-plug', 'integration', tmp, { permissions: ['db:own'] });
+    const m = JSON.parse(fs.readFileSync(path.join(tmp, 'plain-oauth-plug', 'trek-plugin.json'), 'utf8'));
+    const settings = (m.settings ?? []) as Array<{ key: string }>;
+    for (const key of OAUTH_KEYS) {
+      expect(settings.some((s) => s.key === key), `unexpected setting "${key}"`).toBe(false);
+    }
   });
 });

@@ -6,5 +6,9 @@ const pdf: TranslationStrings = {
   'pdf.costLabel': 'التكلفة',
   'pdf.preview': 'معاينة PDF',
   'pdf.saveAsPdf': 'حفظ كـ PDF',
+  'pdf.pageBreakPerDay': 'فاصل صفحة لكل يوم',
+  'pdf.mapTitle': 'نظرة عامة على المسار',
+  'pdf.distanceLabel': 'المسافة',
+  'pdf.mapCredit': 'حدود الدول: geoBoundaries (CC BY 4.0)',
 };
 export default pdf;

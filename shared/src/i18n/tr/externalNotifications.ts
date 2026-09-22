@@ -28,6 +28,10 @@ const tr: NotificationLocale = {
       title: 'Vacay Fusion Daveti',
       body: `${p.actor} sizi tatil planlarını birleştirmeye davet etti. Kabul etmek veya reddetmek için TREK'i açın.`,
     }),
+    vacay_share: (p) => ({
+      title: 'Vacay Takvimi Paylaşıldı',
+      body: `${p.actor} tatil takvimini sizinle paylaştı. Görüntülemek için TREK'i açın.`,
+    }),
     collection_invite: (p) => ({
       title: 'Koleksiyon daveti',
       body: `${p.actor} sizi bir koleksiyonu paylaşmaya davet etti. Kabul etmek veya reddetmek için TREK’i açın.`,
@@ -47,6 +51,12 @@ const tr: NotificationLocale = {
     version_available: (p) => ({
       title: 'Yeni TREK sürümü mevcut',
       body: `TREK ${p.version} artık mevcut. Güncellemek için yönetici panelini ziyaret edin.`,
+    }),
+    replica_failure: (p) => ({
+      title: 'Depolama kopyası hatası',
+      body:
+        `'${p.backend}' kopyasına yazma başarısız oldu: ${p.op} (${p.key}) — ${p.error}.` +
+        (p.suppressed !== '0' ? ` Son bildirimden bu yana ${p.suppressed} hata daha bastırıldı.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Synology oturumu temizlendi',

@@ -1,12 +1,62 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useNavigate } from 'react-router'
 import { getIntlLanguage, getLocaleForLanguage, useTranslation } from '../../i18n'
 import { useSettingsStore } from '../../store/settingsStore'
+import { useTileUrl } from '../../hooks/useTileUrl'
+import { OFM_DARK, OFM_POSITRON } from '../../constants/mapDefaults'
+import { attachVectorBasemap, detachBasemapLayer, hideLabelLayers, restyleBasemap, type BasemapLayer } from '../../components/Map/VectorBasemap'
+import { isVectorStyle } from '../../utils/tileUrl'
 import apiClient, { mapsApi, pluginsApi, type PluginAtlasLayer } from '../../api/client'
 import L from 'leaflet'
 import type { GeoJsonFeatureCollection } from '../../types'
-import { A2_TO_A3, normalizeRegionName, type AtlasData, type CountryDetail, type BucketItem } from './atlasModel'
-import { continentForCountry } from '@trek/shared'
+import { A2_TO_A3, countryStatus, visitMonth, findBucketDuplicate, isBucketDuplicateError, isCountryVisible, normalizeRegionName, regionCacheEvictions, withCountryMarkedVisited, wishlistA3Codes, countryColor, REGION_CACHE_MAX, bucketTooltipWidth, bucketTooltipPlacement, bucketTooltipNeedsScroll, type AtlasData, type AtlasPlaceHit, type CountryDetail, type BucketItem } from './atlasModel'
+import { continentForCountry, escapeHtml, type VisitStatus } from '@trek/shared'
+import { useGlassGlare } from '../../components/Atlas/useGlassGlare'
+import { dawarichApi } from '../../api/dawarich'
+import { useToast } from '../../components/shared/Toast'
+import { getApiErrorMessage } from '../../types'
+
+const PLANNED_KEY = 'trek_atlas_show_planned'
+
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '')
+  const r = Number.parseInt(clean.substring(0, 2), 16)
+  const g = Number.parseInt(clean.substring(2, 4), 16)
+  const b = Number.parseInt(clean.substring(4, 6), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+// Diagonal-stripe CanvasPattern for the wishlist country fill, in that
+// country's own "if visited" color — built once per render pass so it
+// survives Leaflet's Canvas renderer (ctx.fillStyle accepts a CanvasPattern
+// object same as a color string). Returns null in environments without a
+// real 2D canvas context (e.g. jsdom in tests), so callers must fall back to
+// a plain color.
+function createWishlistPattern(color: string, dark: boolean): CanvasPattern | null {
+  try {
+    const size = 8
+    const patternCanvas = document.createElement('canvas')
+    patternCanvas.width = size
+    patternCanvas.height = size
+    const ctx = patternCanvas.getContext('2d')
+    if (!ctx) return null
+    ctx.fillStyle = hexToRgba(color, dark ? 0.14 : 0.2)
+    ctx.fillRect(0, 0, size, size)
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(-1, size + 1)
+    ctx.lineTo(size + 1, -1)
+    ctx.moveTo(-1, 1)
+    ctx.lineTo(1, -1)
+    ctx.moveTo(size - 1, size + 1)
+    ctx.lineTo(size + 1, size - 1)
+    ctx.stroke()
+    return ctx.createPattern(patternCanvas, 'repeat')
+  } catch {
+    return null
+  }
+}
 
 function useCountryNames(language: string): (code: string) => string {
   const [resolver, setResolver] = useState<(code: string) => string>(() => (code: string) => code)
@@ -24,41 +74,43 @@ function useCountryNames(language: string): (code: string) => string {
  * loading, the Leaflet map lifecycle (country + sub-national region layers,
  * bucket markers, viewport-driven region fetching), country/region mark/unmark
  * flows and the country search. AtlasPage stays a wiring container that renders
- * the returned state via its presentational SidebarContent/MobileStats helpers.
+ * the returned state via its presentational SidebarContent helper.
  * Behaviour is identical to the previous in-component logic.
  */
 export function useAtlas() {
   const { t, language } = useTranslation()
   const { settings } = useSettingsStore()
   const navigate = useNavigate()
+  const toast = useToast()
   const resolveName = useCountryNames(language)
   const dm = settings.dark_mode
   const dark = dm === true || dm === 'dark' || (dm === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  // Label-free tiles on purpose (the country fills carry the names here), so the
+  // user's own template is deliberately not read, only their CARTO key.
+  const tileUrl = useTileUrl(dark ? OFM_DARK : OFM_POSITRON, true)
+  // The template is read through a ref inside the map effect so a template change —
+  // the CARTO key arriving after the first render is the usual one — retiles the
+  // layers below instead of tearing the whole map down and building it again (#2097).
+  const tileUrlRef = useRef(tileUrl)
+  tileUrlRef.current = tileUrl
+  const tileLayersRef = useRef<L.TileLayer[]>([])
+  // GL layer or the raster stand-in a browser without WebGL gets instead (#2288).
+  const glLayerRef = useRef<BasemapLayer | null>(null)
+  // The vector basemap loads async; a map torn down before it lands must not get one.
+  const cancelledRef = useRef(false)
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<L.Map | null>(null)
   const geoLayerRef = useRef<L.GeoJSON | null>(null)
-  const glareRef = useRef<HTMLDivElement>(null)
-  const borderGlareRef = useRef<HTMLDivElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
+  // One renderer per map, not one per redraw: Leaflet registers a renderer as a layer
+  // of its own and leaves its container in the pane when the GeoJSON layer is removed,
+  // so building a fresh one on every rebuild left an orphaned canvas/svg behind that
+  // kept redrawing itself on every pan for the rest of the session (#1950).
+  const countryRendererRef = useRef<L.Canvas | null>(null)
+  const regionRendererRef = useRef<L.SVG | null>(null)
+  // The panel's hover light, shared with the Dawarich panel beside it.
+  const { panelRef, glareRef, borderGlareRef, onMouseMove: handlePanelMouseMove, onMouseLeave: handlePanelMouseLeave } =
+    useGlassGlare(dark)
   const country_layer_by_a2_ref = useRef<Record<string, any>>({})
-
-  const handlePanelMouseMove = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if (!panelRef.current || !glareRef.current || !borderGlareRef.current) return
-    const rect = panelRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    // Subtle inner glow
-    glareRef.current.style.background = `radial-gradient(circle 300px at ${x}px ${y}px, ${dark ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.25)'} 0%, transparent 70%)`
-    glareRef.current.style.opacity = '1'
-    // Border glow that follows cursor
-    borderGlareRef.current.style.opacity = '1'
-    borderGlareRef.current.style.maskImage = `radial-gradient(circle 150px at ${x}px ${y}px, black 0%, transparent 100%)`
-    borderGlareRef.current.style.webkitMaskImage = `radial-gradient(circle 150px at ${x}px ${y}px, black 0%, transparent 100%)`
-  }
-  const handlePanelMouseLeave = () => {
-    if (glareRef.current) glareRef.current.style.opacity = '0'
-    if (borderGlareRef.current) borderGlareRef.current.style.opacity = '0'
-  }
 
   const [data, setData] = useState<AtlasData | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
@@ -67,12 +119,32 @@ export function useAtlas() {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null)
   const [countryDetail, setCountryDetail] = useState<CountryDetail | null>(null)
   const [geoData, setGeoData] = useState<GeoJsonFeatureCollection | null>(null)
-  const [visitedRegions, setVisitedRegions] = useState<Record<string, { code: string; name: string; placeCount: number; manuallyMarked?: boolean }[]>>({})
+  const [visitedRegions, setVisitedRegions] = useState<Record<string, { code: string; name: string; placeCount: number; manuallyMarked?: boolean; status?: VisitStatus }[]>>({})
   const [pluginLayers, setPluginLayers] = useState<PluginAtlasLayer[]>([])
   const pluginLayerRef = useRef<L.GeoJSON | null>(null)
   const regionLayerRef = useRef<L.GeoJSON | null>(null)
   const regionGeoCache = useRef<Record<string, GeoJsonFeatureCollection>>({})
+  // Cached countries, least recently in view first, capped at REGION_CACHE_MAX.
+  const regionCacheOrder = useRef<string[]>([])
+  // Countries whose /regions/geo answer is still on the way. They must not be asked
+  // for twice while a pan fires moveend over and over, and must not be evicted before
+  // their own response lands.
+  const pendingRegionCodes = useRef<Set<string>>(new Set())
+  // Which countries the drawn layer was built from, so panning inside the same set of
+  // countries costs nothing.
+  const renderedRegionSigRef = useRef<string>('')
+  const rebuildRegionLayerRef = useRef<(force?: boolean) => void>(() => {})
   const [showRegions, setShowRegions] = useState(false)
+  // Countries you only plan to visit stay off the map until asked for — the atlas is a
+  // record of where you have been, not of where you booked a flight to (#1048).
+  const [showPlanned, setShowPlanned] = useState<boolean>(() => {
+    try { return localStorage.getItem(PLANNED_KEY) === '1' } catch { return false }
+  })
+  const togglePlanned = () => setShowPlanned(v => {
+    const next = !v
+    try { localStorage.setItem(PLANNED_KEY, next ? '1' : '0') } catch { /* private mode — keep the toggle working anyway */ }
+    return next
+  })
   const [regionGeoLoaded, setRegionGeoLoaded] = useState(0)
   const regionTooltipRef = useRef<HTMLDivElement>(null)
   const loadCountryDetailRef = useRef<(code: string) => void>(() => {})
@@ -97,6 +169,18 @@ export function useAtlas() {
   const [atlas_country_search, set_atlas_country_search] = useState('')
   const [atlas_country_results, set_atlas_country_results] = useState<{ code: string; label: string }[]>([])
   const [atlas_country_open, set_atlas_country_open] = useState(false)
+  // Geocoded places beside the local country matches (#1115): searching for Milan
+  // should not require knowing it sits in Lombardy. Kept in its own list so the
+  // instant offline country filter never waits on a network round trip.
+  const [atlas_place_results, set_atlas_place_results] = useState<AtlasPlaceHit[]>([])
+  const [atlas_places_loading, set_atlas_places_loading] = useState(false)
+  const placeSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const placeSearchSeqRef = useRef(0)
+
+  // visitedCountries drives the colour palette and every "how many" number;
+  // visibleCountries drives what the map paints and what stays clickable.
+  const visitedCountries = useMemo(() => (data?.countries ?? []).filter(c => countryStatus(c) === 'visited'), [data])
+  const visibleCountries = useMemo(() => (data?.countries ?? []).filter(c => isCountryVisible(c, showPlanned)), [data, showPlanned])
 
   const atlas_country_options = useMemo(() => {
     if (!geoData) return []
@@ -124,6 +208,30 @@ export function useAtlas() {
   }, [geoData, resolveName])
 
   // Load atlas data + bucket list
+  //
+  // Re-run on `atlasEpoch` so a confirmation made elsewhere on the page — the
+  // Dawarich card ticking wishes off or marking countries (#2279) — lands in the
+  // same numbers the map is drawing, rather than only after a reload.
+  const [atlasEpoch, setAtlasEpoch] = useState(0)
+  const reloadAfterDawarich = useCallback(() => setAtlasEpoch(epoch => epoch + 1), [])
+
+  /**
+   * Undo a wish that a recording ticked off.
+   *
+   * A suggestion that cannot be taken back is not a suggestion, and this one
+   * writes into the wishlist — the one list on this page somebody curates by
+   * hand. The row is kept; only the visit is cleared.
+   */
+  const handleClearBucketVisit = useCallback(async (itemId: number) => {
+    try {
+      await dawarichApi.clearBucketVisit(itemId)
+      setBucketList(prev => prev.map(item => (
+        item.id === itemId ? { ...item, visited_at: null, visited_source: null } : item
+      )))
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, t('common.error')))
+    }
+  }, [t, toast])
   useEffect(() => {
     Promise.all([
       apiClient.get('/addons/atlas/stats'),
@@ -133,7 +241,7 @@ export function useAtlas() {
       setBucketList(bucketRes.data.items || [])
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [])
+  }, [atlasEpoch])
 
   // Load country-border GeoJSON from our API (geoBoundaries, served server-side —
   // no third-party fetch from the browser). Even gzipped the payload is a few MB, so
@@ -175,6 +283,52 @@ export function useAtlas() {
       .catch(() => setPluginLayers([]))
   }, [])
 
+  /** The view the map currently shows, or null while there is no map to ask. */
+  const viewportBounds = (): L.LatLngBounds | null => {
+    try {
+      return mapInstance.current?.getBounds() ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /** Does this country's outline touch the given view? Fail open: a country we hold no
+   *  outline for, or one whose bounds throw, counts as in view, because dropping it
+   *  would blank regions the user can see. */
+  const countryInView = (code: string, bounds: L.LatLngBounds | null): boolean => {
+    if (!bounds) return true
+    const layer = country_layer_by_a2_ref.current[code]
+    if (!layer) return true
+    try {
+      return bounds.intersects(layer.getBounds())
+    } catch {
+      return true
+    }
+  }
+
+  const touchRegionCode = (code: string): void => {
+    const order = regionCacheOrder.current
+    const at = order.indexOf(code)
+    if (at !== -1) order.splice(at, 1)
+    order.push(code)
+  }
+
+  /** Drop the countries nobody is looking at once the cache outgrows its cap. A country
+   *  still in view, or one still waiting for its response, is never dropped, or panning
+   *  across a wide country would fetch it, evict it and fetch it again. */
+  const evictRegionCache = (): void => {
+    const bounds = viewportBounds()
+    const keep = new Set<string>(pendingRegionCodes.current)
+    for (const code of regionCacheOrder.current) {
+      if (!keep.has(code) && countryInView(code, bounds)) keep.add(code)
+    }
+    for (const code of regionCacheEvictions(regionCacheOrder.current, keep, REGION_CACHE_MAX)) {
+      delete regionGeoCache.current[code]
+      const at = regionCacheOrder.current.indexOf(code)
+      if (at !== -1) regionCacheOrder.current.splice(at, 1)
+    }
+  }
+
   // Load admin-1 GeoJSON for countries visible in the current viewport
   const loadRegionsForViewportRef = useRef<() => void>(() => {})
   const loadRegionsForViewport = (): void => {
@@ -182,12 +336,21 @@ export function useAtlas() {
     const bounds = mapInstance.current.getBounds()
     const toLoad: string[] = []
     for (const [code, layer] of Object.entries(country_layer_by_a2_ref.current)) {
-      if (regionGeoCache.current[code]) continue
+      if (regionGeoCache.current[code]) {
+        // Recency means recency of being on screen. Touching every cached country wrote
+        // the order back into GeoJSON feature order on every moveend, so the eviction
+        // picked its victim by position in the dataset instead of by what the view had
+        // just left, and panning back to that country paid for a refetch.
+        if (countryInView(code, bounds)) touchRegionCode(code)
+        continue
+      }
+      if (pendingRegionCodes.current.has(code)) continue
       try {
         if (bounds.intersects((layer as any).getBounds())) toLoad.push(code)
       } catch {}
     }
     if (!toLoad.length) return
+    for (const code of toLoad) pendingRegionCodes.current.add(code)
     apiClient.get(`/addons/atlas/regions/geo?countries=${toLoad.join(',')}`)
       .then(geoRes => {
         const geo = geoRes.data
@@ -195,11 +358,12 @@ export function useAtlas() {
         let added = false
         for (const c of toLoad) {
           const features = geo.features.filter((f: any) => f.properties?.iso_a2?.toUpperCase() === c)
-          if (features.length > 0) { regionGeoCache.current[c] = { type: 'FeatureCollection', features }; added = true }
+          if (features.length > 0) { regionGeoCache.current[c] = { type: 'FeatureCollection', features }; touchRegionCode(c); added = true }
         }
-        if (added) setRegionGeoLoaded(v => v + 1)
+        if (added) { evictRegionCache(); setRegionGeoLoaded(v => v + 1) }
       })
       .catch(() => {})
+      .finally(() => { for (const code of toLoad) pendingRegionCodes.current.delete(code) })
   }
   loadRegionsForViewportRef.current = loadRegionsForViewport
 
@@ -223,36 +387,37 @@ export function useAtlas() {
 
     L.control.zoom({ position: 'bottomright' }).addTo(map)
 
-    const tileUrl = dark
-      ? 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png'
-
-    L.tileLayer(tileUrl, {
-      maxZoom: 10,
-      keepBuffer: 25,
-      updateWhenZooming: true,
-      updateWhenIdle: false,
-      tileSize: 256,
-      zoomOffset: 0,
-      crossOrigin: true,
-      referrerPolicy: 'strict-origin-when-cross-origin',
-    } as any).addTo(map)
-
-    // Preload adjacent zoom level tiles
-    L.tileLayer(tileUrl, {
-      maxZoom: 10,
-      keepBuffer: 10,
-      opacity: 0,
-      tileSize: 256,
-      crossOrigin: true,
-      referrerPolicy: 'strict-origin-when-cross-origin',
-    }).addTo(map)
+    // One layer, not two. The second raster layer existed to warm the HTTP cache
+    // of neighbouring zoom levels; a vector basemap scales what it already has, so
+    // a second one would only cost a second WebGL context and a second copy of the
+    // tiles. Labels are hidden because the country fills carry the names here.
+    if (isVectorStyle(tileUrlRef.current)) {
+      cancelledRef.current = false
+      void attachVectorBasemap(map, tileUrlRef.current, glLayerRef, () => cancelledRef.current, { hideLabels: true })
+    } else {
+      const baseTiles = L.tileLayer(tileUrlRef.current, {
+        maxZoom: 10,
+        keepBuffer: 25,
+        updateWhenZooming: true,
+        updateWhenIdle: false,
+        tileSize: 256,
+        zoomOffset: 0,
+        crossOrigin: true,
+        referrerPolicy: 'strict-origin-when-cross-origin',
+      } as any)
+      baseTiles.addTo(map)
+      tileLayersRef.current = [baseTiles]
+    }
 
     // Custom pane for region layer — above overlay (z-index 400)
     map.createPane('regionPane')
     map.getPane('regionPane')!.style.zIndex = '401'
 
     mapInstance.current = map
+    // Both renderers live as long as the map does (see the note on the refs); map.remove()
+    // disposes them along with every other layer it holds.
+    countryRendererRef.current = L.canvas({ padding: 0.5, tolerance: 5 })
+    regionRendererRef.current = L.svg({ pane: 'regionPane' })
 
     // Zoom-based region switching
     map.on('zoomend', () => {
@@ -270,6 +435,7 @@ export function useAtlas() {
           regionLayerRef.current.addTo(map)
         }
         loadRegionsForViewportRef.current()
+        rebuildRegionLayerRef.current()
       } else {
         // Physically remove region layer so its SVG paths can't intercept events
         if (regionTooltipRef.current) regionTooltipRef.current.style.display = 'none'
@@ -281,19 +447,57 @@ export function useAtlas() {
     })
 
     map.on('moveend', () => {
-      if (map.getZoom() >= 6) loadRegionsForViewportRef.current()
+      if (map.getZoom() < 6) return
+      loadRegionsForViewportRef.current()
+      // A pan that stays over the same countries changes nothing, and the rebuild
+      // notices that for itself, cheaper than working it out here.
+      rebuildRegionLayerRef.current()
     })
 
-    return () => { map.remove(); mapInstance.current = null }
+    return () => {
+      map.remove()
+      mapInstance.current = null
+      countryRendererRef.current = null
+      regionRendererRef.current = null
+      // The layer belongs to the map that just went away. Without this the next map's
+      // zoomend would re-attach it, and Leaflet would revive the old renderer by
+      // appending a second container to the pane.
+      regionLayerRef.current = null
+      renderedRegionSigRef.current = ''
+      tileLayersRef.current = []
+      cancelledRef.current = true
+      detachBasemapLayer(glLayerRef.current)
+      glLayerRef.current = null
+    }
   }, [dark, loading])
+
+  // Retile in place. A rebuild would drop every layer the effects below hold a ref
+  // to — the country layer is only re-rendered when its own data changes, so the map
+  // would come back bare — and Leaflet keeps redrawing the torn-down canvas renderer
+  // for a frame after the map goes (#2097).
+  useEffect(() => {
+    if (isVectorStyle(tileUrl)) {
+      const layer = glLayerRef.current
+      if (!layer) return
+      restyleBasemap(layer, tileUrl)
+      // setStyle drops the layer list, and style.load fires again with the new
+      // one, so the label rule has to be re-armed rather than assumed. Both calls
+      // are no-ops on the raster stand-in, which has neither styles nor layers.
+      hideLabelLayers(layer)
+      return
+    }
+    for (const layer of tileLayersRef.current) layer.setUrl(tileUrl)
+  }, [tileUrl])
 
   // Render GeoJSON countries
   useEffect(() => {
-    if (!mapInstance.current || !geoData || !data) return
+    if (!mapInstance.current || !geoData || !data || !countryRendererRef.current) return
 
-    const visitedA3 = new Set(data.countries.map(c => A2_TO_A3[c.code]).filter(Boolean))
+    const visitedA3 = new Set(visibleCountries.map(c => A2_TO_A3[c.code]).filter(Boolean))
+    const plannedA3 = new Set(visibleCountries.filter(c => countryStatus(c) !== 'visited').map(c => A2_TO_A3[c.code]).filter(Boolean))
     const countryMap = {}
-    data.countries.forEach(c => { if (A2_TO_A3[c.code]) countryMap[A2_TO_A3[c.code]] = c })
+    visibleCountries.forEach(c => { if (A2_TO_A3[c.code]) countryMap[A2_TO_A3[c.code]] = c })
+    const wishlistA3 = wishlistA3Codes(bucketList, visitedA3)
 
     // Preserve current map view
     const currentCenter = mapInstance.current.getCenter()
@@ -303,15 +507,13 @@ export function useAtlas() {
       mapInstance.current.removeLayer(geoLayerRef.current)
     }
 
-    // Generate deterministic color per country code
-    const VISITED_COLORS = ['#6366f1','#ec4899','#14b8a6','#f97316','#8b5cf6','#ef4444','#3b82f6','#22c55e','#06b6d4','#f43f5e','#a855f7','#10b981','#0ea5e9','#e11d48','#0d9488','#7c3aed','#2563eb','#dc2626','#059669','#d946ef']
-    // Assign colors in order of visit (by index in countries array) so no two neighbors share a color easily
-    const visitedA3List = [...visitedA3]
-    const colorMap = {}
-    visitedA3List.forEach((a3, i) => { colorMap[a3] = VISITED_COLORS[i % VISITED_COLORS.length] })
-    const colorForCode = (a3) => colorMap[a3] || VISITED_COLORS[0]
+    // Color per country code, hashed from the code itself (countryColor in atlasModel) —
+    // stable forever, regardless of visit order or how many countries are visited/planned/
+    // wishlisted. Also used by the region layer below, so both stay in sync.
+    const colorForCode = countryColor
+    const wishlistPatternCache = new Map<string, CanvasPattern | null>()
 
-    const canvasRenderer = L.canvas({ padding: 0.5, tolerance: 5 })
+    const canvasRenderer = countryRendererRef.current
 
     geoLayerRef.current = L.geoJSON(geoData, {
       renderer: canvasRenderer,
@@ -319,7 +521,32 @@ export function useAtlas() {
       bubblingMouseEvents: false,
       style: (feature) => {
         const a3 = feature.properties?.ADM0_A3 || feature.properties?.ISO_A3 || feature.properties?.['ISO3166-1-Alpha-3'] || feature.id
+        // Planned countries read as an outline rather than a fill: dashed border, muted
+        // wash. Deliberately not one of the VISITED_COLORS, so "been there" stays distinct.
+        if (plannedA3.has(a3)) {
+          return {
+            fillColor: dark ? '#818cf8' : '#4f46e5',
+            fillOpacity: 0.38,
+            color: dark ? '#818cf8' : '#4f46e5',
+            weight: 1,
+            dashArray: '6 4',
+          }
+        }
         const visited = visitedA3.has(a3)
+        if (!visited && wishlistA3.has(a3)) {
+          const wishlistColor = colorForCode(a3)
+          if (!wishlistPatternCache.has(wishlistColor)) {
+            wishlistPatternCache.set(wishlistColor, createWishlistPattern(wishlistColor, dark))
+          }
+          const pattern = wishlistPatternCache.get(wishlistColor)
+          return {
+            fillColor: (pattern || wishlistColor) as unknown as string,
+            fillOpacity: pattern ? 1 : 0.4,
+            color: wishlistColor,
+            weight: 1,
+            dashArray: '3 2',
+          }
+        }
         return {
           fillColor: visited ? colorForCode(a3) : (dark ? '#1e1e2e' : '#e2e8f0'),
           fillOpacity: visited ? 0.7 : 0.3,
@@ -333,24 +560,32 @@ export function useAtlas() {
         if (c) {
           country_layer_by_a2_ref.current[c.code] = layer
           const name = resolveName(c.code)
-          const formatDate = (d) => { if (!d) return '—'; const dt = new Date(d); return dt.toLocaleDateString(getLocaleForLanguage(language), { month: 'short', year: 'numeric' }) }
-          const tooltipHtml = `
-            <div style="display:flex;flex-direction:column;gap:8px;min-width:160px">
-              <div style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;padding-bottom:6px;border-bottom:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}">${name}</div>
-              <div style="display:flex;gap:14px">
-                <div><span style="font-size:16px;font-weight:800">${c.tripCount}</span> <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em">${c.tripCount === 1 ? t('atlas.tripSingular') : t('atlas.tripPlural')}</span></div>
-                <div><span style="font-size:16px;font-weight:800">${c.placeCount}</span> <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em">${c.placeCount === 1 ? t('atlas.placeVisited') : t('atlas.placesVisited')}</span></div>
-              </div>
-              <div style="display:flex;gap:2px;border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};padding-top:8px">
-                <div style="flex:1;display:flex;flex-direction:column;gap:2px">
+          const formatDate = (d) => { const month = visitMonth(d); return month ? month.toLocaleDateString(getLocaleForLanguage(language), { month: 'short', year: 'numeric' }) : '—' }
+          // "First trip / Last trip" is simply wrong for a country you haven't reached yet —
+          // a planned one gets a single departure date instead.
+          const planned = countryStatus(c) !== 'visited'
+          const datesHtml = planned
+            ? `<div style="flex:1;display:flex;flex-direction:column;gap:2px">
+                  <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;opacity:0.4">${t('atlas.plannedFor')}</span>
+                  <span style="font-size:12px;font-weight:700">${formatDate(c.firstVisit)}</span>
+                </div>`
+            : `<div style="flex:1;display:flex;flex-direction:column;gap:2px">
                   <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;opacity:0.4">${t('atlas.firstVisit')}</span>
                   <span style="font-size:12px;font-weight:700">${formatDate(c.firstVisit)}</span>
                 </div>
                 <div style="flex:1;display:flex;flex-direction:column;gap:2px">
                   <span style="font-size:9px;text-transform:uppercase;letter-spacing:0.08em;opacity:0.4">${t('atlas.lastVisitLabel')}</span>
                   <span style="font-size:12px;font-weight:700">${formatDate(c.lastVisit)}</span>
-                </div>
+                </div>`
+          const tooltipHtml = `
+            <div style="display:flex;flex-direction:column;gap:8px;min-width:160px">
+              <div style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;padding-bottom:6px;border-bottom:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}">${name}${planned ? ` <span style="font-size:9px;font-weight:700;opacity:0.55;letter-spacing:0.06em">· ${t('atlas.planned')}</span>` : ''}</div>
+              <div style="display:flex;gap:14px">
+                <div><span style="font-size:16px;font-weight:800">${c.tripCount}</span> <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em">${c.tripCount === 1 ? t('atlas.tripSingular') : t('atlas.tripPlural')}</span></div>
+                <div><span style="font-size:16px;font-weight:800">${c.placeCount}</span> <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em">${c.placeCount === 1 ? t('atlas.placeVisited') : t('atlas.placesVisited')}</span></div>
               </div>
+              <div style="display:flex;gap:2px;border-top:1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};padding-top:8px">
+                ${datesHtml}
               </div>
             </div>`
           layer.bindTooltip(tooltipHtml, {
@@ -378,7 +613,7 @@ export function useAtlas() {
           const countryCode = a3ToA2Entry ? a3ToA2Entry[0] : (isoA2 && isoA2 !== '-99' ? isoA2 : null)
           if (countryCode && countryCode !== '-99') {
             country_layer_by_a2_ref.current[countryCode] = layer
-            const name = feature.properties?.NAME || feature.properties?.ADMIN || resolveName(countryCode)
+            const name = resolveName(countryCode) || feature.properties?.NAME || feature.properties?.ADMIN || countryCode
             layer.bindTooltip(`<div style="font-size:12px;font-weight:600">${name}</div>`, {
               sticky: true, className: 'atlas-tooltip', direction: 'top', offset: [0, -10], opacity: 1
             })
@@ -396,7 +631,7 @@ export function useAtlas() {
 
     // Restore map view after re-render
     mapInstance.current.setView(currentCenter, currentZoom, { animate: false })
-  }, [geoData, data, dark])
+  }, [geoData, data, dark, visibleCountries, visitedCountries, bucketList])
 
   // Render plugin tint layers (atlasLayerProvider hook) — a dashed wash over the
   // countries a plugin flagged, in its own non-interactive pane above the country
@@ -441,41 +676,71 @@ export function useAtlas() {
     // layers fetched before that would otherwise never get drawn.
   }, [geoData, pluginLayers, dark, loading])
 
-  // Render sub-national region layer (zoom >= 5)
-  useEffect(() => {
-    if (!mapInstance.current) return
+  // Render sub-national region layer (zoom >= 5). `force` is for the changes that alter
+  // how the regions look (theme, visits, the planned toggle); the map's own zoom/pan
+  // handlers pass nothing and get a rebuild only when the countries in view changed.
+  const rebuildRegionLayer = (force = false): void => {
+    if (!mapInstance.current || !regionRendererRef.current) return
+    // Below zoom 6 a rebuild can only do harm: it drops the layer that is on the map and
+    // the add at the end of this function starts at 6, so the regions would go and stay
+    // gone. At zoom 5 they are the only clickable layer left (the country layer is dimmed
+    // and pointer-events off), so the layer built further in has to survive the zoom out.
+    if (!force && mapInstance.current.getZoom() < 6) return
+    const regionRenderer = regionRendererRef.current
+
+    // Draw only the countries that are actually on screen. The cache deliberately
+    // outlives the viewport so panning back is free, but merging all of it into one
+    // layer meant a continent's worth of admin-1 polygons stayed in the DOM, and every
+    // newly loaded country tore the whole thing down and built it again (#1950).
+    const bounds = viewportBounds()
+    const inViewCodes = Object.keys(regionGeoCache.current).filter(code => countryInView(code, bounds)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    const sig = inViewCodes.join('|')
+    if (!force && sig === renderedRegionSigRef.current) return
 
     // Remove existing region layer
     if (regionLayerRef.current) {
       mapInstance.current.removeLayer(regionLayerRef.current)
       regionLayerRef.current = null
     }
+    renderedRegionSigRef.current = sig
 
-    if (Object.keys(regionGeoCache.current).length === 0) return
+    if (inViewCodes.length === 0) return
 
-    // Build set of visited region codes and per-country name sets
+    // Build set of visited region codes and per-country name sets. Regions follow their
+    // country's status, so zooming into a planned country can't reveal "visited" regions.
     const visitedRegionCodes = new Set<string>()
+    const plannedRegionCodes = new Set<string>()
     const visitedRegionNamesByCountry = new Map<string, Set<string>>()
+    const plannedRegionNamesByCountry = new Map<string, Set<string>>()
     const regionPlaceCounts: Record<string, number> = {}
     for (const [countryCode, regions] of Object.entries(visitedRegions)) {
       const names = new Set<string>()
+      const plannedNames = new Set<string>()
       for (const r of regions) {
-        visitedRegionCodes.add(r.code)
-        names.add(normalizeRegionName(r.name))
+        const planned = (r.status ?? 'visited') !== 'visited'
+        if (planned && !showPlanned) continue
+        if (planned) {
+          plannedRegionCodes.add(r.code)
+          plannedNames.add(normalizeRegionName(r.name))
+        } else {
+          visitedRegionCodes.add(r.code)
+          names.add(normalizeRegionName(r.name))
+        }
         regionPlaceCounts[r.code] = r.placeCount
         regionPlaceCounts[`${countryCode}:${normalizeRegionName(r.name)}`] = r.placeCount
       }
       visitedRegionNamesByCountry.set(countryCode, names)
+      plannedRegionNamesByCountry.set(countryCode, plannedNames)
     }
 
     // Match feature by ISO code OR region name scoped to the feature's country. Names are
     // normalized (diacritics/dash variants folded) since the geocoder's cached region_name
     // and the bundled boundaries' name don't always agree on accenting (e.g. a cached
     // "Ile-de-France" must still match the bundle's "Île-de-France") (#atlas-region-match).
-    const isVisitedFeature = (f: any) => {
-      if (visitedRegionCodes.has(f.properties?.iso_3166_2)) return true
+    const matchesRegions = (f: any, codes: Set<string>, namesByCountry: Map<string, Set<string>>) => {
+      if (codes.has(f.properties?.iso_3166_2)) return true
       const countryA2 = (f.properties?.iso_a2 || '').toUpperCase()
-      const countryNames = visitedRegionNamesByCountry.get(countryA2)
+      const countryNames = namesByCountry.get(countryA2)
       if (!countryNames) return false
       const name = normalizeRegionName(f.properties?.name || '')
       if (countryNames.has(name)) return true
@@ -483,35 +748,41 @@ export function useAtlas() {
       if (nameEn && countryNames.has(nameEn)) return true
       return false
     }
+    const isVisitedFeature = (f: any) => matchesRegions(f, visitedRegionCodes, visitedRegionNamesByCountry)
+    const isPlannedFeature = (f: any) => matchesRegions(f, plannedRegionCodes, plannedRegionNamesByCountry)
 
-    // Include ALL region features — visited ones get colored fill, unvisited get outline only
+    // Include every region feature of the countries in view: visited ones get colored
+    // fill, unvisited get outline only (clicking one is how a region gets marked)
     const allFeatures: any[] = []
-    for (const geo of Object.values(regionGeoCache.current)) {
-      for (const f of geo.features) {
+    for (const code of inViewCodes) {
+      for (const f of regionGeoCache.current[code].features) {
         allFeatures.push(f)
       }
     }
     if (allFeatures.length === 0) return
 
-    // Use same colors as country layer
-    const VISITED_COLORS = ['#6366f1','#ec4899','#14b8a6','#f97316','#8b5cf6','#ef4444','#3b82f6','#22c55e','#06b6d4','#f43f5e','#a855f7','#10b981','#0ea5e9','#e11d48','#0d9488','#7c3aed','#2563eb','#dc2626','#059669','#d946ef']
-    const countryA3Set = data ? data.countries.map(c => A2_TO_A3[c.code]).filter(Boolean) : []
-    const countryColorMap: Record<string, string> = {}
-    countryA3Set.forEach((a3, i) => { countryColorMap[a3] = VISITED_COLORS[i % VISITED_COLORS.length] })
-    // Map country A2 code to country color
+    // Same palette as the country layer — countryColor is a pure hash of the code, so
+    // both layers always agree on a country's color without needing to share state.
     const a2ColorMap: Record<string, string> = {}
-    if (data) data.countries.forEach(c => { if (A2_TO_A3[c.code] && countryColorMap[A2_TO_A3[c.code]]) a2ColorMap[c.code] = countryColorMap[A2_TO_A3[c.code]] })
+    visitedCountries.forEach(c => { if (A2_TO_A3[c.code]) a2ColorMap[c.code] = countryColor(A2_TO_A3[c.code]) })
 
     const mergedGeo = { type: 'FeatureCollection', features: allFeatures }
 
-    const svgRenderer = L.svg({ pane: 'regionPane' })
-
     regionLayerRef.current = L.geoJSON(mergedGeo as any, {
-      renderer: svgRenderer,
+      renderer: regionRenderer,
       interactive: true,
       pane: 'regionPane',
       style: (feature) => {
         const countryA2 = (feature?.properties?.iso_a2 || '').toUpperCase()
+        if (isPlannedFeature(feature)) {
+          return {
+            fillColor: dark ? '#818cf8' : '#4f46e5',
+            fillOpacity: 0.4,
+            color: dark ? '#818cf8' : '#4f46e5',
+            weight: 1,
+            dashArray: '6 4',
+          }
+        }
         const visited = isVisitedFeature(feature)
         return visited ? {
           fillColor: a2ColorMap[countryA2] || '#6366f1',
@@ -587,7 +858,18 @@ export function useAtlas() {
     if (mapInstance.current.getZoom() >= 6) {
       regionLayerRef.current.addTo(mapInstance.current)
     }
-  }, [regionGeoLoaded, visitedRegions, dark, t])
+  }
+  // Reassigned every render so the map handlers always call a closure that sees the
+  // current visits, theme and toggle state, same pattern as loadRegionsForViewport.
+  rebuildRegionLayerRef.current = rebuildRegionLayer
+
+  useEffect(() => {
+    // Anything in the deps changes how the regions look rather than which are on screen,
+    // so it has to redraw even when the countries in view are the same ones.
+    // visitedCountries belongs here: the region colours are derived from it, and without
+    // the dep this effect kept painting regions from a stale country list.
+    rebuildRegionLayerRef.current(true)
+  }, [regionGeoLoaded, visitedRegions, dark, t, visitedCountries, showPlanned])
 
   const handleMarkCountry = (code: string, name: string): void => {
     setConfirmAction({ type: 'choose', code, name })
@@ -596,8 +878,90 @@ export function useAtlas() {
   setConfirmActionRef.current = setConfirmAction
 
   const handleUnmarkCountry = (code: string): void => {
-    const country = data?.countries.find(c => c.code === code)
     setConfirmAction({ type: 'unmark', code, name: resolveName(code) })
+  }
+
+  /** Debounced forward geocode for the atlas search box. Runs through the same
+   *  /maps/search everything else uses, so it follows the configured provider. */
+  const search_places = (raw: string): void => {
+    const query = raw.trim()
+    if (placeSearchTimerRef.current) clearTimeout(placeSearchTimerRef.current)
+    if (query.length < 3) {
+      set_atlas_place_results([])
+      set_atlas_places_loading(false)
+      return
+    }
+    set_atlas_places_loading(true)
+    // Sequence guard: a slow answer for an earlier query must not overwrite a
+    // newer one the user has already typed past.
+    const seq = ++placeSearchSeqRef.current
+    placeSearchTimerRef.current = setTimeout(() => {
+      mapsApi.search(query, language)
+        .then(result => {
+          if (seq !== placeSearchSeqRef.current) return
+          // The provider blob is deliberately open (Google and OSM disagree on
+          // fields), so narrow rather than cast.
+          const hits: AtlasPlaceHit[] = []
+          for (const raw of result.places || []) {
+            const p = raw as Record<string, unknown>
+            if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue
+            hits.push({
+              name: typeof p.name === 'string' && p.name ? p.name : query,
+              address: typeof p.address === 'string' && p.address ? p.address : null,
+              lat: p.lat,
+              lng: p.lng,
+            })
+            if (hits.length === 5) break
+          }
+          set_atlas_place_results(hits)
+        })
+        .catch(() => { if (seq === placeSearchSeqRef.current) set_atlas_place_results([]) })
+        .finally(() => { if (seq === placeSearchSeqRef.current) set_atlas_places_loading(false) })
+    }, 350)
+  }
+
+  /**
+   * Picking a geocoded place: fly there, then ask the server which country and admin1
+   * region the coordinate falls in and offer the same dialog a click on that region
+   * would. Zoom 7 because the region layer only loads from zoom 5 up, so landing
+   * closer means the highlighted region is actually on screen.
+   */
+  const select_place_from_search = async (hit: AtlasPlaceHit): Promise<void> => {
+    set_atlas_country_search(hit.name)
+    set_atlas_country_open(false)
+    set_atlas_country_results([])
+    set_atlas_place_results([])
+
+    try {
+      mapInstance.current?.setView([hit.lat, hit.lng], 7, { animate: true })
+    } catch (e) {
+      console.error('Error flying to place', e)
+    }
+
+    let info: { country_code: string | null; region_code: string | null; region_name: string | null }
+    try {
+      info = (await apiClient.get('/addons/atlas/locate', { params: { lat: hit.lat, lng: hit.lng } })).data
+    } catch {
+      return // The map already moved; a failed lookup just means no dialog.
+    }
+    if (!info.country_code) return
+
+    // No admin1 coverage for this country: fall back to the country flow, which is
+    // what the search did before it knew about places at all.
+    if (!info.region_code || !info.region_name) {
+      select_country_from_search(info.country_code)
+      return
+    }
+
+    const countryName = resolveName(info.country_code)
+    const alreadyVisited = (visitedRegions[info.country_code] || []).some(r => r.code === info.region_code)
+    setConfirmAction({
+      type: alreadyVisited ? 'unmark-region' : 'choose-region',
+      code: info.country_code,
+      name: info.region_name,
+      regionCode: info.region_code,
+      countryName,
+    })
   }
 
   const select_country_from_search = (country_code: string): void => {
@@ -639,16 +1003,7 @@ export function useAtlas() {
     // Update local state immediately (no API reload = no map re-render flash)
     if (type === 'mark') {
       apiClient.post(`/addons/atlas/country/${code}/mark`).catch(() => {})
-      setData(prev => {
-        if (!prev || prev.countries.find(c => c.code === code)) return prev
-        const cont = continentForCountry(code)
-        return {
-          ...prev,
-          countries: [...prev.countries, { code, placeCount: 0, tripCount: 0, firstVisit: null, lastVisit: null }],
-          stats: { ...prev.stats, totalCountries: prev.stats.totalCountries + 1 },
-          continents: { ...prev.continents, [cont]: (prev.continents?.[cont] || 0) + 1 },
-        }
-      })
+      setData(prev => (prev ? withCountryMarkedVisited(prev, code) : prev))
     } else {
       apiClient.delete(`/addons/atlas/country/${code}/mark`).catch(() => {})
       setSelectedCountry(null)
@@ -676,18 +1031,31 @@ export function useAtlas() {
 
   const handleAddBucketItem = async (): Promise<void> => {
     if (!bucketForm.name.trim()) return
+    const hasCoords = !!(bucketForm.lat && bucketForm.lng)
+    const lat = hasCoords ? Number.parseFloat(bucketForm.lat) : null
+    const lng = hasCoords ? Number.parseFloat(bucketForm.lng) : null
+    const targetDate = bucketForm.target_date || (bucketPoiMonth > 0 && bucketPoiYear > 0 ? `${bucketPoiYear}-${String(bucketPoiMonth).padStart(2, '0')}` : null)
+    // #1898: this form never sends a country code, so the entry it would create
+    // is identified by name, date and coordinates alone. Keep the form filled so
+    // the user can just pick another date.
+    if (findBucketDuplicate(bucketList, { name: bucketForm.name, country_code: null, target_date: targetDate, lat, lng })) {
+      toast.error(t('atlas.bucketDuplicate'))
+      return
+    }
     try {
       const data: Record<string, unknown> = { name: bucketForm.name.trim() }
       if (bucketForm.notes.trim()) data.notes = bucketForm.notes.trim()
-      if (bucketForm.lat && bucketForm.lng) { data.lat = parseFloat(bucketForm.lat); data.lng = parseFloat(bucketForm.lng) }
-      const targetDate = bucketForm.target_date || (bucketPoiMonth > 0 && bucketPoiYear > 0 ? `${bucketPoiYear}-${String(bucketPoiMonth).padStart(2, '0')}` : null)
+      if (hasCoords) { data.lat = lat; data.lng = lng }
       if (targetDate) data.target_date = targetDate
       const r = await apiClient.post('/addons/atlas/bucket-list', data)
       setBucketList(prev => [r.data.item, ...prev])
       setBucketForm({ name: '', notes: '', lat: '', lng: '', target_date: '' })
       setBucketSearch(''); setBucketSearchResults([]); setBucketPoiMonth(0); setBucketPoiYear(0)
       setShowBucketAdd(false)
-    } catch { /* */ }
+    } catch (err) {
+      // The 409 used to vanish into a silent catch, leaving the button looking broken.
+      toast.error(isBucketDuplicateError(err) ? t('atlas.bucketDuplicate') : getApiErrorMessage(err, t('common.error')))
+    }
   }
 
   const handleDeleteBucketItem = async (id: number): Promise<void> => {
@@ -733,10 +1101,54 @@ export function useAtlas() {
         iconSize: [28, 28],
         iconAnchor: [14, 14],
       })
-      return L.marker([b.lat!, b.lng!], { icon }).bindTooltip(
-        `<div style="font-size:12px;font-weight:600">${b.name}</div>${b.notes ? `<div style="font-size:10px;opacity:0.7;margin-top:2px">${b.notes}</div>` : ''}`,
-        { className: 'atlas-tooltip', direction: 'top', offset: [0, -14] }
+      const marker = L.marker([b.lat!, b.lng!], { icon })
+      // Registered before bindTooltip, so this runs ahead of Leaflet's own
+      // mouseover handler and lets it read the corrected direction/offset on open.
+      marker.on('mouseover', () => {
+        const map = mapInstance.current
+        const tooltip = marker.getTooltip()
+        if (!map || !tooltip) return
+        const containerRect = map.getContainer().getBoundingClientRect()
+        const point = map.latLngToContainerPoint(marker.getLatLng())
+        const screenX = containerRect.left + point.x
+        const screenY = containerRect.top + point.y
+        const placement = bucketTooltipPlacement(
+          { x: screenX, y: screenY },
+          { width: window.innerWidth, height: window.innerHeight },
+          bucketTooltipWidth(window.innerWidth),
+        )
+        tooltip.options.direction = placement.direction
+        tooltip.options.offset = placement.offset
+      })
+      marker.bindTooltip(
+        `<div class="atlas-tooltip-scroll-inner"><div style="font-size:12px;font-weight:600">${escapeHtml(b.name)}</div>${b.notes ? `<div style="font-size:10px;opacity:0.7;margin-top:2px">${escapeHtml(b.notes)}</div>` : ''}</div>`,
+        { className: 'atlas-tooltip atlas-tooltip-scrollable', direction: 'top', offset: [0, -14], interactive: true }
       )
+      // Leaflet closes the tooltip the instant the pointer leaves the marker's tiny
+      // hit area — replace that with a delayed close, cancelled while hovering the
+      // tooltip itself, so the pointer has a path from marker to tooltip to scroll it.
+      let closeTimer: ReturnType<typeof setTimeout> | null = null
+      const cancelClose = () => { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null } }
+      const scheduleClose = () => { closeTimer = setTimeout(() => marker.closeTooltip(), 200) }
+      marker.off('mouseout', marker.closeTooltip, marker)
+      marker.on('mouseout', scheduleClose)
+      // The way back from the tooltip onto the marker fires the tooltip's mouseleave
+      // first, so the close it just scheduled has to be taken back here.
+      marker.on('mouseover', cancelClose)
+      marker.on('tooltipopen', () => {
+        const el = marker.getTooltip()?.getElement()
+        if (!el) return
+        el.addEventListener('mouseenter', cancelClose)
+        el.addEventListener('mouseleave', scheduleClose)
+        // The tooltip pane lives inside the map container, where Leaflet cancels both
+        // gestures before they reach the note: the wheel would zoom the map and a touch
+        // swipe would pan it instead of scrolling.
+        L.DomEvent.disableScrollPropagation(el)
+        L.DomEvent.disableClickPropagation(el)
+        const inner = el.querySelector<HTMLElement>('.atlas-tooltip-scroll-inner')
+        if (inner) inner.style.overflowY = bucketTooltipNeedsScroll(inner.scrollHeight, inner.clientHeight) ? 'auto' : 'hidden'
+      })
+      return marker
     })
     bucketMarkersRef.current = L.layerGroup(markers).addTo(mapInstance.current)
   }, [bucketList])
@@ -758,11 +1170,13 @@ export function useAtlas() {
     mapRef, regionTooltipRef, panelRef, glareRef, borderGlareRef,
     handlePanelMouseMove, handlePanelMouseLeave,
     data, setData, stats, countries, selectedCountry, countryDetail,
+    visitedCountries, visibleCountries, showPlanned, togglePlanned,
     loadCountryDetail, handleUnmarkCountry, select_country_from_search,
     visitedRegions, setVisitedRegions,
     atlas_country_search, set_atlas_country_search,
     atlas_country_results, set_atlas_country_results,
     atlas_country_open, set_atlas_country_open, atlas_country_options,
+    atlas_place_results, atlas_places_loading, search_places, select_place_from_search,
     confirmAction, setConfirmAction, executeConfirmAction,
     bucketMonth, setBucketMonth, bucketYear, setBucketYear,
     bucketList, setBucketList, bucketTab, setBucketTab,
@@ -770,6 +1184,6 @@ export function useAtlas() {
     handleAddBucketItem, handleDeleteBucketItem, handleBucketPoiSearch, handleSelectBucketPoi,
     bucketSearchResults, setBucketSearchResults,
     bucketPoiMonth, setBucketPoiMonth, bucketPoiYear, setBucketPoiYear,
-    bucketSearching, bucketSearch, setBucketSearch,
+    bucketSearching, bucketSearch, setBucketSearch, reloadAfterDawarich, handleClearBucketVisit,
   }
 }

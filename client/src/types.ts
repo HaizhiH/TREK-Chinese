@@ -6,6 +6,8 @@
 // each documented against the producing service). Re-exported here so the rest
 // of the client keeps importing from '../types' unchanged.
 import type {
+  TrekWsEventName,
+  TrekWsPluginEventName,
   Trip,
   TripMember,
   Day,
@@ -20,6 +22,7 @@ import type {
   PackingBagMember,
   BudgetItem,
   BudgetItemMember,
+  BudgetItemReceipt,
   Reservation,
   ReservationEndpoint,
   Accommodation,
@@ -43,6 +46,7 @@ export type {
   PackingBagMember,
   BudgetItem,
   BudgetItemMember,
+  BudgetItemReceipt,
   Reservation,
   ReservationEndpoint,
   Accommodation,
@@ -106,6 +110,17 @@ export type DistanceUnit = 'metric' | 'imperial'
 
 export interface Settings {
   map_tile_url: string
+  /**
+   * Base URL of a self-hosted routing engine (#1797). Empty falls back to the public
+   * FOSSGIS hosts, which allow about one request a second.
+   */
+  routing_base_url?: string
+  /**
+   * Base URL of the Valhalla asked for the avoidance questions OSRM cannot answer.
+   * Undefined means the public FOSSGIS instance TREK ships with; empty means an
+   * operator turned the second engine off and "other ways" goes back to OSRM alone.
+   */
+  valhalla_base_url?: string
   dark_mode: boolean | string
   /** Display currency for Costs. Empty/null = follow each trip's own currency. */
   default_currency: string | null
@@ -120,6 +135,80 @@ export interface Settings {
   map_always_show_routes?: boolean
   optimize_from_accommodation?: boolean
   map_provider?: 'leaflet' | 'mapbox-gl' | 'maplibre-gl'
+  /** Leaflet base layer: default street tiles or a satellite/aerial view. */
+  map_base_layer?: 'default' | 'satellite'
+  /**
+   * The three road-trip driving limits (#1797). All three are personal rather than
+   * instance configuration — how long you are willing to drive and how far your car goes
+   * are properties of the traveller, so they are plain per-user settings and stay out of
+   * the defaultable list.
+   *
+   * Stored as numbers; 0 or absent means no limit. Kilometres are always kilometres in
+   * storage and converted for display, the same rule the corridor widths follow.
+   */
+  roadtrip_leg_minutes?: number
+  roadtrip_day_minutes?: number
+  roadtrip_day_start?: string
+  roadtrip_day_end?: string
+  roadtrip_day_end_mode?: 'route' | 'stop'
+  roadtrip_range_km?: number
+  /**
+   * Road classes the drive should leave out where it can, as a comma list
+   * ("toll,ferry"). Absent means route normally, which is the right meaning for absent:
+   * the settings row does not exist until somebody turns one of them on, and the first
+   * paint of every session reads this before the settings have loaded.
+   *
+   * A list rather than three booleans because it is one decision with three parts, and
+   * because it goes to the router as one request either way.
+   */
+  roadtrip_avoid?: string
+  /**
+   * What the traveller drives: 'combustion', 'electric', or absent for "did not say".
+   *
+   * Absent has to mean BOTH kinds refill, which is what the range budget did before this
+   * existed. Anything else would quietly change the warnings of every traveller who never
+   * opened the dialog.
+   */
+  roadtrip_vehicle?: string
+  /** Route the gaps between days too, so the trip is one continuous drive. */
+  roadtrip_connect_days?: boolean
+  /** Draw each day of the trip in its own colour. */
+  roadtrip_day_colors?: boolean
+  /**
+   * How full a fill-up goes, 1 to 100. Absent or 100 means all the way.
+   *
+   * Nobody charges to 100 % on the road, so an electric traveller who leaves this at full
+   * gets a range figure a fifth too generous after every stop.
+   */
+  roadtrip_fill_percent?: number
+  /**
+   * What the vehicle is made of, for travellers who would rather not do the division.
+   *
+   * Optional throughout, and stored METRIC throughout — litres and kilowatt-hours, per
+   * 100 kilometres — exactly as roadtrip_range_km is always kilometres. The dialog does
+   * the round trip into gallons, miles per gallon and kWh per 100 miles for an imperial
+   * traveller; storage stays one system so the arithmetic never has to ask.
+   *
+   * When a pair is complete it WINS over roadtrip_range_km, because it is the more
+   * specific answer. Half a pair computes nothing: a made-up range here would put the
+   * fuel warnings at the wrong place while looking exact.
+   */
+  roadtrip_tank_litres?: number
+  roadtrip_litres_per_100?: number
+  roadtrip_battery_kwh?: number
+  roadtrip_kwh_per_100?: number
+  /**
+   * Percent of the battery the years have taken. Absent means none.
+   *
+   * The one figure of ABRP's list that changes the answer here. Plug type, reference
+   * speed and drive style shape a consumption PREDICTION; this addon does not predict
+   * one, it divides a capacity by a consumption the traveller states. Degradation is
+   * different in kind: it shrinks the capacity itself, and on a five-year-old car by
+   * enough to decide whether the last leg of a day arrives.
+   */
+  roadtrip_battery_degradation?: number
+  /** CARTO basemaps watermark keyless tiles; the key is appended as ?key= (#2054). */
+  carto_api_key?: string
   mapbox_access_token?: string
   mapbox_style?: string
   maplibre_style?: string
@@ -129,6 +218,10 @@ export interface Settings {
   dashboard_fx_from?: string
   dashboard_fx_to?: string
   dashboard_timezones?: string[]
+  /** Where opening TREK lands: the dashboard, or straight in the active trip. */
+  start_page?: 'dashboard' | 'active_trip'
+  /** Which planner tab 'active_trip' opens on — a TripTabId (constants/tripTabs). */
+  start_trip_tab?: string
   // AI booking-import fallback (per-user config; used when the admin has not set
   // instance-wide config on the llm_parsing addon). llm_api_key is masked on read.
   llm_provider?: 'local' | 'openai' | 'anthropic'
@@ -158,6 +251,38 @@ export interface RouteSegment {
   drivingText: string
   distanceText: string
   durationText?: string
+  /** Extra text a plugin route attached to this leg (e.g. "25 min charge"). */
+  noteText?: string
+  /** The travel mode this leg was routed with (#1281) — drives the connector icon. */
+  mode?: string
+}
+
+/** An intermediate stop a plugin route places on the drawn line (charging stop, rest area). */
+export interface RouteVia {
+  hoverCard?: boolean
+  nightPause?: { day: number; atPlace: boolean; position?: number; manual?: boolean; minPosition?: number; maxPosition?: number }
+  lat: number
+  lng: number
+  label?: string
+  tone: 'default' | 'success' | 'warn' | 'danger'
+  dwellSeconds?: number
+}
+
+/**
+ * Where the router put a waypoint we asked about, and how far that is from where we asked.
+ *
+ * Every routing engine snaps a coordinate to the nearest road before it starts, and OSRM
+ * does it with no distance limit at all. A place set back from the road — a viewpoint, a
+ * farmhouse, a marina — is therefore driven to from somewhere else entirely, and the drawn
+ * line starts at that somewhere else without saying so.
+ */
+export interface SnappedWaypoint {
+  /** The coordinate that was asked for, unchanged. */
+  asked: [number, number]
+  /** The point on the road network the router actually used. */
+  at: [number, number]
+  /** Straight-line metres between the two. */
+  meters: number
 }
 
 export interface RouteWithLegs {
@@ -165,7 +290,23 @@ export interface RouteWithLegs {
   distance: number
   duration: number
   legs: RouteSegment[]
+  /** Present on plugin-provided routes only. */
+  vias?: RouteVia[]
+  /** One entry per REQUESTED waypoint, in request order. Absent on plugin routes. */
+  snapped?: SnappedWaypoint[]
+  /**
+   * What was asked to be left out, and what the road actually left out.
+   *
+   * The two differ, and that is the point. Valhalla weights a class away rather than
+   * banning it, so a drive with no untolled connection comes back on a toll road and
+   * says so. Present only on a route that was asked to avoid something, so `undefined`
+   * means the question was never put rather than "avoided nothing".
+   */
+  avoidance?: { asked: RouteAvoidClass[]; achieved: RouteAvoidClass[] }
 }
+
+/** A road class a route can be asked to leave out. */
+export type RouteAvoidClass = 'motorway' | 'toll' | 'ferry'
 
 export interface RouteResult {
   coordinates: [number, number][]
@@ -221,11 +362,17 @@ export interface GeoJsonFeatureCollection {
 export interface AppConfig {
   has_users: boolean
   allow_registration: boolean
+  /** True when the operator of this install owns its configuration, not the admin */
+  managed?: boolean
   demo_mode: boolean
   oidc_configured: boolean
   oidc_display_name?: string
   oidc_only_mode?: boolean
   has_maps_key?: boolean
+  /** Amap (高德地图) key present for this caller — the alternative places provider. */
+  has_amap_key?: boolean
+  /** The admin's places provider choice: 'auto' | 'google' | 'amap' | 'openstreetmap'. */
+  places_provider?: string
   allowed_file_types?: string
   timezone?: string
   /** When true, users without MFA cannot use the app until they enable it */
@@ -241,9 +388,14 @@ export interface AppConfig {
 // Translation function type
 export type TranslationFn = (key: string, params?: Record<string, string | number | null>) => string
 
-// WebSocket event type
+// WebSocket event type — `type` is derived from the shared WS event registry
+// (TREK_WS_EVENTS): a registered name, the reserved plugin namespace, or (via
+// the `string & {}` widening) a transport control frame the registry
+// deliberately excludes (welcome/joined/left/error). Payload fields stay
+// index-typed at this boundary; per-event payload contracts live in
+// TrekWsPayload<E> from @trek/shared.
 export interface WebSocketEvent {
-  type: string
+  type: TrekWsEventName | TrekWsPluginEventName | (string & {})
   [key: string]: unknown
 }
 
@@ -251,6 +403,7 @@ export interface WebSocketEvent {
 export interface VacayHolidayCalendar {
   id: number
   plan_id: number
+  type?: 'public_holiday' | 'school_holiday'
   region: string
   label: string | null
   color: string
@@ -260,6 +413,7 @@ export interface VacayHolidayCalendar {
 export interface VacayPlan {
   id: number
   holidays_enabled: boolean
+  school_holidays_enabled?: boolean
   holidays_region: string | null
   holiday_calendars: VacayHolidayCalendar[]
   block_weekends: boolean
@@ -287,6 +441,12 @@ export interface VacayEntry {
   plan_id?: number
   person_color?: string
   person_name?: string
+  // Portion of a vacation day this entry counts as: 1 = full day, 0.5 = half
+  // day (#552). Absent on legacy entries, which are treated as full days.
+  fraction?: number
+  // Leave type (#1074): 'comp' = flex/comp day (does not touch the entitlement),
+  // 'vacation' (or absent, for legacy entries) = a regular vacation day.
+  kind?: 'vacation' | 'comp'
 }
 
 // Vacay per-user stats row as returned by getStats
@@ -301,6 +461,27 @@ export interface VacayStat {
   total_available: number
   used: number
   remaining: number
+  // Comp/flex days used this year (#1074) — informational, not deducted from the
+  // entitlement. Absent on older server builds.
+  comp_used?: number
+  // The leave-year window this row was computed over (#737), as YYYY-MM-DD.
+  // `window_end` is exclusive. Absent on older server builds.
+  window_start?: string
+  window_end?: string
+}
+
+export type VacayYearType = 'calendar' | 'fiscal' | 'anniversary'
+
+/**
+ * Per-user leave-year configuration (#737). 'calendar' is the unchanged Jan–Dec
+ * default, 'fiscal' starts on a fixed month/day, 'anniversary' on the month/day
+ * of the hire date.
+ */
+export interface VacayYearSettings {
+  year_type: VacayYearType
+  year_start_month: number
+  year_start_day: number
+  hire_date: string | null
 }
 
 export interface HolidayInfo {
@@ -308,10 +489,36 @@ export interface HolidayInfo {
   localName: string
   color: string
   label: string | null
+  type?: 'public_holiday' | 'school_holiday'
 }
 
 export interface HolidaysMap {
-  [date: string]: HolidayInfo
+  [date: string]: HolidayInfo | HolidayInfo[]
+}
+
+// Read-only calendar shares (#444/#667)
+export interface VacayShareOutgoing {
+  id: number
+  user_id: number
+  username: string
+}
+
+export interface VacayShareIncoming {
+  id: number
+  owner_id: number
+  username: string
+  color: string
+  hidden: boolean
+}
+
+export interface SharedVacayCalendar {
+  share_id: number
+  owner_id: number
+  owner_name: string
+  color: string
+  hidden: boolean
+  entries: { date: string; fraction?: number; kind?: 'vacation' | 'comp' }[]
+  companyHolidays: { date: string; note?: string }[]
 }
 
 // API error shape from axios
@@ -329,7 +536,9 @@ export interface ApiError {
 export function getApiErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === 'object' && err !== null && 'response' in err) {
     const apiErr = err as ApiError
-    if (apiErr.response?.data?.error) return apiErr.response.data.error
+    // Axios' own message ("Request failed with status code 500") is untranslated
+    // boilerplate, so only the server's error text beats the localized fallback.
+    return apiErr.response?.data?.error || fallback
   }
   if (err instanceof Error) return err.message
   return fallback

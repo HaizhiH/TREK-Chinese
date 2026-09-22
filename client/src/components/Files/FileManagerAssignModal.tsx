@@ -1,4 +1,4 @@
-import ReactDOM from 'react-dom'
+import { createPortal } from 'react-dom'
 import { X, MapPin, Ticket, Check } from 'lucide-react'
 import { filesApi } from '../../api/client'
 import type { Place, Reservation, Day } from '../../types'
@@ -8,10 +8,10 @@ import { transportIcon } from './FileManager.helpers'
 
 export function AssignModal(S: FileManagerState) {
   const { files, assignFileId, setAssignFileId, t, days, assignments, places, reservations, tripId, handleAssign, refreshFiles } = S
-  return ReactDOM.createPortal(
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 5000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+  return createPortal(
+    <div role="presentation" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 5000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={() => setAssignFileId(null)}>
-      <div style={{
+      <div role="presentation" style={{
         background: 'var(--bg-card)', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
         width: 'min(600px, calc(100vw - 32px))', maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
       }} onClick={e => e.stopPropagation()}>
@@ -22,7 +22,7 @@ export function AssignModal(S: FileManagerState) {
               {files.find(f => f.id === assignFileId)?.original_name || ''}
             </div>
           </div>
-          <button onClick={() => setAssignFileId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 4, display: 'flex', flexShrink: 0 }}>
+          <button type="button" onClick={() => setAssignFileId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 4, display: 'flex', flexShrink: 0 }}>
             <X size={18} />
           </button>
         </div>
@@ -67,7 +67,7 @@ export function AssignModal(S: FileManagerState) {
             const placeBtn = (p: Place, idx: number) => {
               const isLinked = file.place_id === p.id || (file.linked_place_ids || []).includes(p.id)
               return (
-                <button key={`${p.id}-${idx}`} onClick={async () => {
+                <button type="button" key={`${p.id}-${idx}`} onClick={async () => {
                   if (isLinked) {
                     if (file.place_id === p.id) {
                       await handleAssign(file.id, { place_id: null })
@@ -123,13 +123,13 @@ export function AssignModal(S: FileManagerState) {
                         ) : null
                       })()}
                     </div>
-                    {dayPlaces.map(placeBtn)}
+                    {dayPlaces.map((p, i) => placeBtn(p, i))}
                   </div>
                 ))}
                 {unassigned.length > 0 && (
                   <div>
                     {dayGroups.length > 0 && <div style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, color: 'var(--text-muted)', padding: '8px 10px 2px' }}>{t('files.unassigned')}</div>}
-                    {unassigned.map(placeBtn)}
+                    {unassigned.map((p, i) => placeBtn(p, i))}
                   </div>
                 )}
               </div>
@@ -142,7 +142,7 @@ export function AssignModal(S: FileManagerState) {
               const isLinked = file.reservation_id === r.id || (file.linked_reservation_ids || []).includes(r.id)
               const Icon = TRANSPORT_TYPES.has(r.type) ? transportIcon(r.type) : Ticket
               return (
-                <button key={r.id} onClick={async () => {
+                <button type="button" key={r.id} onClick={async () => {
                   if (isLinked) {
                     if (file.reservation_id === r.id) {
                       await handleAssign(file.id, { reservation_id: null })

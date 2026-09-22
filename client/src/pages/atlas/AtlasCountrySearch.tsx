@@ -1,6 +1,7 @@
-import React from 'react'
-import { Search, X, ChevronRight } from 'lucide-react'
+import React, { useEffect, useRef } from 'react'
+import { Search, X, ChevronRight, MapPin, Loader2 } from 'lucide-react'
 import type { TranslationFn } from '../../types'
+import type { AtlasPlaceHit } from './atlasModel'
 
 type CountryOption = { code: string; label: string }
 
@@ -15,6 +16,12 @@ interface AtlasCountrySearchProps {
   setOpen: (v: boolean) => void
   options: CountryOption[]
   onSelect: (code: string) => void
+  /** Geocoded places for the same query (#1115) — a second, clearly separated
+   *  section below the countries, so the instant local matches stay on top. */
+  placeResults: AtlasPlaceHit[]
+  placesLoading: boolean
+  onQueryChange: (raw: string) => void
+  onSelectPlace: (hit: AtlasPlaceHit) => void
 }
 
 // The floating country search box that overlays the globe (search input + results
@@ -22,13 +29,30 @@ interface AtlasCountrySearchProps {
 // markup are byte-identical to the inline version it replaced.
 export default function AtlasCountrySearch({
   dark, t, search, setSearch, results, setResults, open, setOpen, options, onSelect,
+  placeResults, placesLoading, onQueryChange, onSelectPlace,
 }: AtlasCountrySearchProps): React.ReactElement {
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  // Close on a click outside rather than on mouseleave. Leaving the box used to
+  // close it, which was survivable while the list was only local countries and
+  // appeared complete in one go. Geocoded places arrive a moment later and make
+  // the list grow under a cursor that is already resting there, so the panel
+  // closed by itself seconds after opening.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open, setOpen])
+
   return (
     <div
       className="absolute z-20 flex justify-center"
       style={{ top: 'calc(env(safe-area-inset-top, 0px) + 14px)', left: 0, right: 0, pointerEvents: 'none' }}
     >
-      <div style={{ width: 'min(520px, calc(100vw - 28px))', pointerEvents: 'auto' }}>
+      <div ref={boxRef} style={{ width: 'min(520px, calc(100vw - 28px))', pointerEvents: 'auto' }}>
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -47,6 +71,7 @@ export default function AtlasCountrySearch({
             onChange={(e) => {
               const raw = e.target.value
               setSearch(raw)
+              onQueryChange(raw)
               const q = raw.trim().toLowerCase()
               if (!q) {
                 setResults([])
@@ -69,7 +94,9 @@ export default function AtlasCountrySearch({
               }
               if (e.key === 'Enter') {
                 const first = results[0]
-                if (first) onSelect(first.code)
+                if (first) { onSelect(first.code); return }
+                const place = placeResults[0]
+                if (place) onSelectPlace(place)
               }
             }}
             placeholder={t('atlas.searchCountry')}
@@ -86,7 +113,7 @@ export default function AtlasCountrySearch({
             }}
           />
           {search.trim() && (
-            <button
+            <button type="button"
               onClick={() => {
                 setSearch('')
                 setResults([])
@@ -101,7 +128,7 @@ export default function AtlasCountrySearch({
           )}
         </div>
 
-        {open && results.length > 0 && (
+        {open && (results.length > 0 || placeResults.length > 0 || placesLoading) && (
           <div
             style={{
               marginTop: 8,
@@ -113,10 +140,9 @@ export default function AtlasCountrySearch({
               WebkitBackdropFilter: 'blur(18px) saturate(180%)',
               boxShadow: dark ? '0 12px 30px rgba(0,0,0,0.35)' : '0 12px 30px rgba(0,0,0,0.12)',
             }}
-            onMouseLeave={() => setOpen(false)}
           >
             {results.map((r) => (
-              <button
+              <button type="button"
                 key={r.code}
                 onClick={() => onSelect(r.code)}
                 style={{
@@ -139,6 +165,66 @@ export default function AtlasCountrySearch({
                   <img src={`https://flagcdn.com/w40/${r.code.toLowerCase()}.png`} alt={r.code} style={{ width: 28, height: 20, borderRadius: 4, objectFit: 'cover' }} />
                   <span className="text-content" style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {r.label}
+                  </span>
+                </span>
+                <ChevronRight size={16} className="text-content-faint" style={{ flexShrink: 0 }} />
+              </button>
+            ))}
+
+            {(placeResults.length > 0 || placesLoading) && (
+              <div
+                className="text-content-faint"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 12px',
+                  fontSize: 'calc(10px * var(--fs-scale-caption, 1))',
+                  fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                  borderTop: results.length > 0 ? '1px solid ' + (dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)') : 'none',
+                }}
+              >
+                {placesLoading && <Loader2 size={11} className="animate-spin" />}
+                {t('atlas.searchPlaces')}
+              </div>
+            )}
+            {placeResults.map((p) => (
+              <button type="button"
+                key={`${p.lat},${p.lng},${p.name}`}
+                onClick={() => onSelectPlace(p)}
+                style={{
+                  width: '100%',
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  padding: '10px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontFamily: 'inherit',
+                  textAlign: 'left',
+                  borderBottom: '1px solid ' + (dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'),
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <span
+                    style={{
+                      width: 28, height: 20, borderRadius: 4, flexShrink: 0,
+                      display: 'grid', placeItems: 'center',
+                      background: dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    <MapPin size={13} className="text-content-faint" />
+                  </span>
+                  <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <span className="text-content" style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.name}
+                    </span>
+                    {p.address && (
+                      <span className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.address}
+                      </span>
+                    )}
                   </span>
                 </span>
                 <ChevronRight size={16} className="text-content-faint" style={{ flexShrink: 0 }} />

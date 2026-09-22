@@ -35,6 +35,20 @@ export const reservationEndpointSchema = z.object({
 export type ReservationEndpoint = z.infer<typeof reservationEndpointSchema>;
 
 /**
+ * A traveler assigned to a reservation — a trip member or a named guest (both are
+ * `users` rows; a guest carries is_guest=1). Mirrors the budget member read shape
+ * without the cost-split fields; joined + avatar-resolved in reservationService.
+ */
+export const reservationTravelerSchema = z.object({
+  user_id: z.number(),
+  username: z.string(),
+  avatar_url: z.string().nullable().optional(),
+  avatar: z.string().nullable().optional(),
+  is_guest: z.number().nullable().optional(),
+});
+export type ReservationTraveler = z.infer<typeof reservationTravelerSchema>;
+
+/**
  * Endpoints as accepted on a WRITE (create/update body `endpoints` array). This
  * pins the STRUCTURE (role must be a known value, name/code are strings) so a
  * plugin can't crash the service with a stray type, but stays permissive on the
@@ -58,6 +72,60 @@ export const reservationEndpointsInputSchema = z.array(
   }),
 );
 export type ReservationEndpointsInput = z.infer<typeof reservationEndpointsInputSchema>;
+
+/**
+ * ONE SEGMENT of a multi-leg transport booking, as stored in
+ * `reservations.metadata.legs` (#1914).
+ *
+ * The model: the ordered `reservation_endpoints` rows are the geometry (which
+ * airports/stations, in which order), while the per-segment detail (each leg's
+ * own day + local time and its airline/train identity) lives in the legs. That
+ * split is why a stopover needs legs at all: its endpoint carries only the
+ * ONWARD departure time, so the arrival at the stop exists nowhere else.
+ *
+ * The shape mirrors 1:1 what the planner form (client TransportModal) and the
+ * importers (AirTrail, KItinerary) already write, including the `null`-for-unset
+ * convention on the day/time fields. One schema covers both kinds of booking:
+ * flights fill airline/flight_number, trains train_number/platform.
+ *
+ * `day_positions` is deliberately NOT part of the input: the day planner owns it
+ * per leg, so a writer preserves it rather than sets it.
+ */
+export const transportLegInputSchema = z.object({
+  /** Flights: IATA code of the departure airport. Trains: departure station label. */
+  from: z.string().min(1).nullable().optional(),
+  /** Flights: IATA code of the arrival airport. Trains: arrival station label. */
+  to: z.string().min(1).nullable().optional(),
+  airline: z.string().max(100).nullable().optional(),
+  flight_number: z.string().max(20).nullable().optional(),
+  train_number: z.string().max(20).nullable().optional(),
+  platform: z.string().max(20).nullable().optional(),
+  seat: z.string().max(20).nullable().optional(),
+  /**
+   * This segment's OWN booking reference (#1943). Airlines and railways often
+   * issue one per flight instead of one per booking, so the reservation-level
+   * `confirmation_number` cannot cover the chain. Unset means the booking's own
+   * reference is the one that counts for this segment; the column stays the
+   * reference for the booking as a whole and is never derived from a leg.
+   */
+  confirmation_number: z.string().max(100).nullable().optional(),
+  dep_day_id: z.number().int().positive().nullable().optional(),
+  /** Local departure time of this segment, 'HH:mm'. */
+  dep_time: z.string().max(10).nullable().optional(),
+  arr_day_id: z.number().int().positive().nullable().optional(),
+  /** Local arrival time of this segment, 'HH:mm'. */
+  arr_time: z.string().max(10).nullable().optional(),
+});
+export type TransportLegInput = z.infer<typeof transportLegInputSchema>;
+
+/**
+ * The legs of one booking. A leg list only makes sense with at least one
+ * stopover: a direct booking keeps the flat metadata it always had, and every
+ * reader (client flightLegs/dayMerge, calendar ICS, the AirTrail dedupe) treats
+ * `legs.length > 1` as the multi-segment marker.
+ */
+export const transportLegsInputSchema = z.array(transportLegInputSchema);
+export type TransportLegsInput = z.infer<typeof transportLegsInputSchema>;
 
 /**
  * Reservation entity as returned by the reservation list endpoint
@@ -85,6 +153,9 @@ export const reservationSchema = z.object({
   accommodation_id: z.union([z.number(), z.string()]).nullable().optional(),
   metadata: z.string().nullable().optional(),
   needs_review: z.number().optional(),
+  // 'live' for anything a person put on the trip, 'staged' while an automated
+  // ingest waits for confirmation. Only the anonymous exports filter on it.
+  ingest_state: z.string().optional(),
   day_plan_position: z.number().nullable().optional(),
   created_at: z.string().optional(),
   // AirTrail (or future provider) linkage — drives the "synced" badge (#214).
@@ -102,6 +173,8 @@ export const reservationSchema = z.object({
   accommodation_end_day_id: z.number().nullable().optional(),
   day_positions: z.record(z.string(), z.number()).nullable().optional(),
   endpoints: z.array(reservationEndpointSchema).optional(),
+  // Trip members / named guests this booking is for (#1517). Joined in listReservations.
+  travelers: z.array(reservationTravelerSchema).optional(),
 });
 export type Reservation = z.infer<typeof reservationSchema>;
 
@@ -132,15 +205,45 @@ export const accommodationSchema = z.object({
 });
 export type Accommodation = z.infer<typeof accommodationSchema>;
 
+/**
+ * A booking link, as it is rendered into an href by the reservations panel. It
+ * deliberately stays free-form — people paste bare hosts ("www.hotel.com") and
+ * provider deep links, and rows written before this check exist — so the contract
+ * only rejects the schemes that execute in this origin instead of opening a page.
+ * Same class of bug as placeWebsiteSchema, one step narrower so nobody's stored
+ * link becomes unsavable.
+ */
+export const reservationUrlSchema = z.string().refine(
+  // Browsers strip control characters and whitespace before they resolve the
+  // scheme, so a tab spliced into 'javascript:' still runs. Everything at
+  // or below U+0020 goes, which is the same set a browser drops.
+  v => !/^(javascript|data|vbscript):/i.test(Array.from(v).filter(c => c > ' ').join('')),
+  { message: 'must not be a javascript:, data: or vbscript: URL' },
+);
+
 /** Reservation create: title is required; the many optional fields stay open. */
-export const reservationCreateRequestSchema = open.and(z.object({ title: z.string().min(1) }));
+export const reservationCreateRequestSchema = open.and(z.object({
+  title: z.string().min(1),
+  url: reservationUrlSchema.nullable().optional(),
+}));
 export type ReservationCreateRequest = z.infer<typeof reservationCreateRequestSchema>;
 
-export const reservationUpdateRequestSchema = open;
+export const reservationUpdateRequestSchema = open.and(z.object({
+  url: reservationUrlSchema.nullable().optional(),
+}));
 export type ReservationUpdateRequest = z.infer<typeof reservationUpdateRequestSchema>;
 
+/** Assign trip members/guests to a reservation (mirrors budget's PUT :id/members). */
+export const reservationTravelersRequestSchema = z.object({
+  user_ids: z.array(z.number()),
+});
+export type ReservationTravelersRequest = z.infer<typeof reservationTravelersRequestSchema>;
+
 export const reservationPositionsRequestSchema = z.object({
-  positions: z.array(z.object({ id: z.number(), day_plan_position: z.number() })),
+  // day_plan_position is optional on the wire: the legacy route never
+  // validated position items, and an absent value binds NULL (clears the
+  // stored position) — pinned by the server integration suite (RESV-006).
+  positions: z.array(z.object({ id: z.number(), day_plan_position: z.number().optional() })),
   day_id: z.union([z.number(), z.string()]).nullable().optional(),
 });
 export type ReservationPositionsRequest = z.infer<typeof reservationPositionsRequestSchema>;
@@ -156,6 +259,20 @@ export const accommodationCreateRequestSchema = z.object({
   notes: z.string().nullable().optional(),
 });
 export type AccommodationCreateRequest = z.infer<typeof accommodationCreateRequestSchema>;
+
+/**
+ * REST body variant of the create contract: the three refs are required by the
+ * endpoint but optional on the wire — their absence answers with the bespoke
+ * controller 400 ('place_id, start_day_id, and end_day_id are required'),
+ * which the validation pipe must not pre-empt. The plugin RPC host keeps the
+ * strict schema above (missing refs are BAD_PARAMS there).
+ */
+export const accommodationCreateBodySchema = accommodationCreateRequestSchema.partial({
+  place_id: true,
+  start_day_id: true,
+  end_day_id: true,
+});
+export type AccommodationCreateBody = z.infer<typeof accommodationCreateBodySchema>;
 
 export const accommodationUpdateRequestSchema = open;
 export type AccommodationUpdateRequest = z.infer<typeof accommodationUpdateRequestSchema>;
@@ -195,6 +312,12 @@ const bookingImportAccommodationSchema = z.object({
 
 export const bookingImportPreviewItemSchema = z.object({
   type: z.string(),
+  /**
+   * The extractor could not read a type and filled one in, so the import UI
+   * should offer the form the user was importing into rather than trusting the
+   * placeholder (#2076).
+   */
+  type_guessed: z.boolean().optional(),
   title: z.string().min(1),
   reservation_time: z.string().nullable().optional(),
   reservation_end_time: z.string().nullable().optional(),

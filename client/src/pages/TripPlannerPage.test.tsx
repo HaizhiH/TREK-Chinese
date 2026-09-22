@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor, act, fireEvent } from '../../tests/helpers/render';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router';
 import { resetAllStores, seedStore } from '../../tests/helpers/store';
 import { buildUser, buildTrip, buildDay, buildPlace, buildAssignment } from '../../tests/helpers/factories';
 import { useAuthStore } from '../store/authStore';
@@ -93,6 +93,15 @@ vi.mock('../components/Memories/MemoriesPanel', () => ({
 
 vi.mock('../components/Collab/CollabPanel', () => ({
   default: () => React.createElement('div', { 'data-testid': 'collab-panel' }),
+}));
+
+// The trip-open splash cycles its mascot scenes on an infinite setInterval. Under
+// fake timers that interval never settles, so vi.runAllTimers() aborts with
+// "assuming an infinite loop". The animation is irrelevant to page wiring — stub it
+// to a lightweight status node (like the other heavy sub-components here).
+vi.mock('../components/shared/TripLoadingSplash', () => ({
+  default: ({ title }: { title?: string }) =>
+    React.createElement('div', { 'data-testid': 'trip-loading-splash', role: 'status' }, title || 'TREK'),
 }));
 
 const capturedFileManagerProps: { current: Record<string, any> } = { current: {} };
@@ -279,9 +288,8 @@ describe('TripPlannerPage', () => {
 
       renderPlannerPage(99);
 
-      // Loading state: shows loading gif
-      const loadingImg = document.querySelector('img[alt="Loading"]');
-      expect(loadingImg).toBeInTheDocument();
+      // Loading state: shows the trip-open loading splash
+      expect(screen.getByTestId('trip-loading-splash')).toBeInTheDocument();
     });
   });
 
@@ -407,7 +415,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const bookingsTab = await screen.findByTitle('Bookings');
+      const bookingsTab = await screen.findByRole('button', { name: 'Bookings' });
       fireEvent.click(bookingsTab);
 
       await waitFor(() => {
@@ -434,7 +442,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const listsTab = await screen.findByTitle('Lists');
+      const listsTab = await screen.findByRole('button', { name: 'Lists' });
       fireEvent.click(listsTab);
 
       await waitFor(() => {
@@ -461,7 +469,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const costsTab = await screen.findByTitle('Costs');
+      const costsTab = await screen.findByRole('button', { name: 'Costs' });
       fireEvent.click(costsTab);
 
       await waitFor(() => {
@@ -488,7 +496,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const filesTab = await screen.findByTitle('Files');
+      const filesTab = await screen.findByRole('button', { name: 'Files' });
       fireEvent.click(filesTab);
 
       await waitFor(() => {
@@ -515,7 +523,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const collabTab = await screen.findByTitle('Collab');
+      const collabTab = await screen.findByRole('button', { name: 'Collab' });
       fireEvent.click(collabTab);
 
       await waitFor(() => {
@@ -536,7 +544,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const bookingsTab = await screen.findByTitle('Bookings');
+      const bookingsTab = await screen.findByRole('button', { name: 'Bookings' });
       fireEvent.click(bookingsTab);
 
       await waitFor(() => {
@@ -620,7 +628,7 @@ describe('TripPlannerPage', () => {
       vi.useRealTimers();
 
       // Navigate to the Lists tab first
-      const listsTab = await screen.findByTitle('Lists');
+      const listsTab = await screen.findByRole('button', { name: 'Lists' });
       fireEvent.click(listsTab);
 
       // Find the Todo subtab button inside ListsContainer and click it
@@ -1033,7 +1041,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const bookingsTab = await screen.findByTitle('Bookings');
+      const bookingsTab = await screen.findByRole('button', { name: 'Bookings' });
       fireEvent.click(bookingsTab);
 
       await waitFor(() => {
@@ -1250,7 +1258,7 @@ describe('TripPlannerPage', () => {
       vi.useRealTimers();
 
       // Navigate to Bookings tab so ReservationsPanel is rendered
-      const bookingsTab = await screen.findByTitle('Bookings');
+      const bookingsTab = await screen.findByRole('button', { name: 'Bookings' });
       fireEvent.click(bookingsTab);
 
       await waitFor(() => {
@@ -1347,7 +1355,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const filesTab = await screen.findByTitle('Files');
+      const filesTab = await screen.findByRole('button', { name: 'Files' });
       fireEvent.click(filesTab);
 
       await waitFor(() => {
@@ -1382,7 +1390,7 @@ describe('TripPlannerPage', () => {
 
       vi.useRealTimers();
 
-      const bookingsTab = await screen.findByTitle('Bookings');
+      const bookingsTab = await screen.findByRole('button', { name: 'Bookings' });
       fireEvent.click(bookingsTab);
 
       await waitFor(() => {
@@ -1425,11 +1433,11 @@ describe('TripPlannerPage', () => {
 
       // the plugin tab is present, the replaced Transports tab is not (the splash
       // screen holds the page for 1.5s, so give the query room)
-      const pluginTab = await screen.findByTitle('Transit Pro', {}, { timeout: 4000 });
+      const pluginTab = await screen.findByRole('button', { name: 'Transit Pro' }, { timeout: 4000 });
       expect(pluginTab).toBeInTheDocument();
-      expect(screen.queryByTitle('Transports')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Transports' })).not.toBeInTheDocument();
       // an unreplaced core tab stays reachable
-      expect(screen.getByTitle('Bookings')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Bookings' })).toBeInTheDocument();
     });
 
     it('a saved session tab that a plugin replaced resets to plan once plugins load', async () => {
@@ -1558,9 +1566,9 @@ describe('TripPlannerPage', () => {
       });
 
       // The mobile portal buttons are rendered to document.body.
-      // The "Plan" tab button has title="Plan"; the mobile portal button does not.
+      // The "Plan" tab button carries aria-label="Plan"; the portal button does not.
       const mobilePlanBtn = Array.from(document.body.querySelectorAll('button')).find(
-        b => b.textContent === 'Plan' && !b.getAttribute('title'),
+        b => b.textContent === 'Plan' && !b.getAttribute('aria-label'),
       );
 
       if (mobilePlanBtn) {
@@ -1602,7 +1610,7 @@ describe('TripPlannerPage', () => {
 
       // "Places" tab doesn't exist; the mobile portal "Places" button has no title
       const mobilePlacesBtn = Array.from(document.body.querySelectorAll('button')).find(
-        b => b.textContent === 'Places' && !b.getAttribute('title'),
+        b => b.textContent === 'Places' && !b.getAttribute('aria-label'),
       );
 
       if (mobilePlacesBtn) {
@@ -1641,7 +1649,7 @@ describe('TripPlannerPage', () => {
 
       // Open the mobile Plan portal via the bottom-nav Plan button (selector mirrors FE-PAGE-PLANNER-049).
       const mobilePlanBtn = Array.from(document.body.querySelectorAll('button')).find(
-        b => b.textContent === 'Plan' && !b.getAttribute('title'),
+        b => b.textContent === 'Plan' && !b.getAttribute('aria-label'),
       );
       expect(mobilePlanBtn).toBeTruthy();
       await act(async () => { fireEvent.click(mobilePlanBtn!); });

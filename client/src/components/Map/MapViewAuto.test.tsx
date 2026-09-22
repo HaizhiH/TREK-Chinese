@@ -4,19 +4,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   providerConfig: vi.fn(),
   locked: false,
+  provider: 'leaflet',
+  fallbackMap: { getCenter: () => ({ lat: 48, lng: 2 }), getZoom: () => 6, setView: vi.fn() },
 }));
 
 vi.mock('../../api/client', () => ({ mapsApi: { providerConfig: mocks.providerConfig } }));
 vi.mock('../../store/settingsStore', () => ({
   useSettingsStore: (select: (state: any) => unknown) =>
     select({
-      settings: { map_provider: 'leaflet', mapbox_access_token: '', dark_mode: false },
+      settings: { map_provider: mocks.provider, mapbox_access_token: '', dark_mode: false },
     }),
 }));
 vi.mock('./amapLoader', () => ({ isAmapSessionLocked: () => mocks.locked }));
+vi.mock('./glLazy', () => ({
+  MapViewGLMaplibre: () => {
+    throw new Promise(() => {});
+  },
+  MapViewGLMapbox: () => {
+    throw new Promise(() => {});
+  },
+}));
 vi.mock('./MapView', () => ({
   MapView: (props: any) => (
     <div data-testid="base-map" data-center={JSON.stringify(props.center || null)}>
+      <button data-testid="base-ready" onClick={() => props._onProviderReady?.(mocks.fallbackMap)}>
+        ready
+      </button>
       <button
         data-testid="base-china"
         onClick={() => props.onViewportChange?.({ south: 39, west: 115, north: 41, east: 117 })}
@@ -62,10 +75,24 @@ async function flushConfig() {
 }
 
 describe('MapViewAuto', () => {
+  it('reports Leaflet while the selected GL engine is still loading', async () => {
+    mocks.provider = 'maplibre-gl';
+    const ready = vi.fn();
+    render(<MapViewAuto center={[48, 2]} onMapReady={ready} />);
+    await flushConfig();
+    fireEvent.click(screen.getByTestId('base-ready'));
+    const controller = ready.mock.calls[ready.mock.calls.length - 1]?.[0];
+    expect(controller.provider).toBe('leaflet');
+    expect(controller.compass).toBeNull();
+    await controller.setView({ center: { lat: 49, lng: 3 }, zoom: 7 });
+    expect(mocks.fallbackMap.setView).toHaveBeenCalledWith([49, 3], 7);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-24T10:00:00Z'));
     mocks.locked = false;
+    mocks.provider = 'leaflet';
     mocks.providerConfig.mockResolvedValue(config);
     Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true });
   });

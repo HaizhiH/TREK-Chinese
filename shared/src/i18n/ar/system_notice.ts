@@ -53,5 +53,36 @@ const system_notice: TranslationStrings = {
   'system_notice.thank_you_support.cta_bmc': 'Buy Me a Coffee',
   'system_notice.thank_you_support.cta_kofi': 'ادعمني على Ko-fi',
   'system_notice.pager.counter': '{current} / {total}', // en-fallback
+  'system_notice.release_notes.eyebrow': 'تم تثبيت التحديث',
+  'system_notice.release_notes.headline': 'أربعة أشياء يقوم بها TREK الآن بنفسه.',
+  'system_notice.release_notes.intro': 'واجهة أماكن خاصة به، ورحلات برية مخططة من البداية إلى النهاية، وسجل مواقعك في يديك، ومستنداتك متزامنة.',
+  'system_notice.release_notes.features_label': 'أبرز الجديد',
+  'system_notice.release_notes.features_aside': 'وهذا ليس كل شيء',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'أول مخطط رحلات مفتوح المصدر بواجهة أماكن خاصة به. 73.6 مليون مكان، بلا مفتاح، بلا حصة.',
+  'system_notice.release_notes.feature_roadtrip_title': 'إضافة الرحلة البرية',
+  'system_notice.release_notes.feature_roadtrip_body': 'يخطط القيادة بنفسه: المسار والمسافة والساعات والمحطات. متوقف حتى يفعّله المشرف.',
+  'system_notice.release_notes.feature_dawarich_title': 'تكامل Dawarich',
+  'system_notice.release_notes.feature_dawarich_body': 'البديل المستضاف ذاتيًا لـ Google Timeline، وصار بالإمكان الآن قراءته داخل TREK. يقرأ TREK، ويقرأ فقط.',
+  'system_notice.release_notes.footnote': 'إلى جانب قائمة طويلة من التغييرات الأصغر في بقية أرجاء TREK.',
+  'system_notice.release_notes.notes_label': 'ملاحظات الإصدار',
+  'system_notice.release_notes.note_eyebrow': 'كلمة من صاحب المشروع',
+  'system_notice.release_notes.note_title': 'أنتم السبب في أنني ما زلت أبني TREK.',
+  'system_notice.release_notes.note_body':
+    'بدأ TREK كأداة صغيرة لرحلاتي الخاصة، كتبتها بعد العمل لأنني أردت طريقة أفضل لتخطيطها. ومنذ ذلك الحين لم يتوقف عن النمو. كل ما تستخدمه تقريبًا بُني في ساعات متأخرة من الليل، وفي عطل نهاية الأسبوع، وفي القطارات، إلى جانب عمل بدوام كامل، وكم من أمسية تساءلت فيها بيني وبين نفسي: هل سيفتحه أحد يومًا؟',
+  'system_notice.release_notes.promise_label': 'الوعد',
+  'system_notice.release_notes.promise_lead': 'سيبقى TREK مجانيًا، إلى الأبد.',
+  'system_notice.release_notes.promise_text': 'كل ميزة، وكل تحديث، للجميع. لا باقات مدفوعة، لا اشتراكات، لا شروط خفية.',
+  'system_notice.release_notes.note_body_after':
+    'ثم فتحتموه. وخلال بضعة أشهر صرتم بالآلاف: نجوم، وبلاغات أخطاء، وترجمات إلى لغات لا أتحدثها، وطلبات دمج من أشخاص لم ألتقِ بهم قط. ما زلت أتفقد المستودع أول شيء كل صباح، وما زال الأمر لا يبدو حقيقيًا تمامًا.',
+  'system_notice.release_notes.note_closing': 'شكرًا لوجودك هنا. مع تحياتي، Maurice.',
+  'system_notice.release_notes.support_lead':
+    'صحيح أن TREK مجاني وسيبقى كذلك دائمًا، لكن الخوادم والنطاقات والكثير من الليالي المتأخرة ليست مجانية.',
+  'system_notice.release_notes.support_text':
+    'إن كان TREK قد استحق مكانًا في رحلاتك، فاشترِ لي فنجان قهوة وساعد في أن يرى الإصدار القادم النور.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'ادعمني على Ko-fi',
+  'system_notice.release_notes.feature_docsync_title': 'مزامنة المستندات',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx وPapra وNextcloud وOpenCloud وSynology Drive. تتدفق مستندات الرحلة في الاتجاهين مع المخزن الذي تشغّله بالفعل.',
 };
 export default system_notice;

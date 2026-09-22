@@ -9,8 +9,32 @@ import { buildUser, buildSettings } from '../../tests/helpers/factories';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import AtlasPage from './AtlasPage';
+import { maplibreGL } from '@maplibre/maplibre-gl-leaflet';
+
+// ── Captured style() results, for tests asserting fill/border on a specific
+// feature (e.g. the wishlist hatch pattern) without duplicating the mock's
+// internal geoJSON wiring ────────────────────────────────────────────────────
+const { capturedStyles } = vi.hoisted(() => ({ capturedStyles: [] as { feature: any; result: any }[] }));
 
 // ── Leaflet mock ──────────────────────────────────────────────────────────────
+// maplibre-gl-leaflet hangs the vector basemap into Leaflet's tile pane. The mock
+// only has to be callable and hand back a layer with the three methods the callers
+// use, since nothing here renders WebGL.
+vi.mock('@maplibre/maplibre-gl-leaflet', () => ({
+  maplibreGL: vi.fn(() => {
+    // One GL map per layer, kept stable: a fresh object per call would hand the
+    // assertions a different spy than the code just used.
+    const gl = {
+      setStyle: vi.fn(), on: vi.fn(), isStyleLoaded: () => false,
+      getStyle: () => ({ layers: [] }), setLayoutProperty: vi.fn(),
+    }
+    const layer: Record<string, unknown> = { remove: vi.fn(), getMaplibreMap: vi.fn(() => gl) }
+    layer.addTo = vi.fn(() => layer)
+    return layer
+  }),
+}));
+vi.mock('../components/Map/engines/maplibre', () => ({ default: {} }));
+
 vi.mock('leaflet', () => {
   // Mock layer returned by onEachFeature — supports event registration
   const makeMockLayer = () => {
@@ -66,14 +90,14 @@ vi.mock('leaflet', () => {
 
   const L = {
     map: vi.fn(() => mockMap),
-    tileLayer: vi.fn(() => ({ addTo: vi.fn().mockReturnThis() })),
+    tileLayer: vi.fn(() => ({ addTo: vi.fn().mockReturnThis(), setUrl: vi.fn() })),
     // Call onEachFeature and style callbacks for each feature so those paths are covered
     geoJSON: vi.fn((data: any, options: any) => {
       if (options?.onEachFeature && data?.features) {
         for (const feature of data.features) {
           const layer = makeMockLayer();
           try {
-            if (options.style) options.style(feature);
+            if (options.style) capturedStyles.push({ feature, result: options.style(feature) });
             options.onEachFeature(feature, layer);
           } catch {
             // ignore errors from callbacks in mock
@@ -89,12 +113,23 @@ vi.mock('leaflet', () => {
       };
     }),
     divIcon: vi.fn(() => ({})),
-    marker: vi.fn(() => ({
-      addTo: vi.fn().mockReturnThis(),
-      on: vi.fn(),
-      remove: vi.fn(),
-      bindTooltip: vi.fn().mockReturnThis(),
-    })),
+    marker: vi.fn(() => {
+      let tooltip: { options: Record<string, unknown>; getElement: () => null } | undefined;
+      const m = {
+        addTo: vi.fn().mockReturnThis(),
+        on: vi.fn(() => m),
+        off: vi.fn(() => m),
+        remove: vi.fn(),
+        getLatLng: vi.fn(() => ({ lat: 0, lng: 0 })),
+        bindTooltip: vi.fn(() => {
+          tooltip = { options: { direction: 'top', offset: [0, -14] }, getElement: () => null };
+          return m;
+        }),
+        getTooltip: vi.fn(() => tooltip),
+        closeTooltip: vi.fn(),
+      };
+      return m;
+    }),
     latLngBounds: vi.fn(() => ({ extend: vi.fn(), isValid: vi.fn(() => true) })),
     layerGroup: vi.fn(() => ({ addTo: vi.fn().mockReturnThis(), clearLayers: vi.fn() })),
     canvas: vi.fn(() => ({})),
@@ -187,6 +222,7 @@ function useDefaultAtlasHandlers() {
 beforeEach(() => {
   resetAllStores();
   vi.clearAllMocks();
+  capturedStyles.length = 0;
   seedStore(useAuthStore, { isAuthenticated: true, user: buildUser() });
   seedStore(useSettingsStore, { settings: buildSettings({ dark_mode: false }) });
 
@@ -238,13 +274,12 @@ describe('AtlasPage', () => {
     });
   });
 
-  describe('FE-PAGE-ATLAS-004: last trip shows in highlights', () => {
-    it('displays the lastTrip title returned by the API', async () => {
+  describe('FE-PAGE-ATLAS-004: the highlights row no longer carries a last-trip tile', () => {
+    it('keeps the trip out of the stats bar even when the API still returns one', async () => {
       render(<AtlasPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('Paris Trip')).toBeInTheDocument();
-      });
+      // The row is stats only now; the trip lives in the country detail below.
+      await waitFor(() => expect(screen.getAllByText(/countries/i).length).toBeGreaterThan(0));
+      expect(screen.queryByText('Paris Trip')).not.toBeInTheDocument();
     });
   });
 
@@ -369,8 +404,10 @@ describe('AtlasPage', () => {
       render(<AtlasPage />);
 
       await waitFor(() => {
+        // The empty state now renders the shared mascot EmptyState with a single title
+        // (atlas.noData = "No travel data yet"). The old "create a trip and add places"
+        // hint subtitle was dropped in the mobile rewrite, so only the title renders.
         expect(screen.getByText(/no travel data yet/i)).toBeInTheDocument();
-        expect(screen.getByText(/create a trip and add places/i)).toBeInTheDocument();
       });
     });
   });
@@ -752,24 +789,6 @@ describe('AtlasPage', () => {
     });
   });
 
-  describe('FE-PAGE-ATLAS-026: lastTrip button click navigates to trip', () => {
-    it('clicking the lastTrip button triggers navigation to the trip', async () => {
-      const user = userEvent.setup();
-      render(<AtlasPage />);
-
-      await waitFor(() => expect(screen.getByText('Paris Trip')).toBeInTheDocument());
-
-      // Click the Paris Trip button
-      const parisTripEl = screen.getByText('Paris Trip');
-      const tripButton = parisTripEl.closest('button') as HTMLButtonElement | null;
-      if (tripButton) {
-        await user.click(tripButton);
-        // Navigation would happen; verify no error thrown
-        expect(screen.queryByText('Paris Trip')).toBeDefined();
-      }
-    });
-  });
-
   describe('FE-PAGE-ATLAS-027: search clear via backspace triggers empty onChange branch', () => {
     it('clearing the search input by backspace covers the empty-query onChange branch', async () => {
       const user = userEvent.setup();
@@ -933,6 +952,41 @@ describe('AtlasPage', () => {
     });
   });
 
+  describe('FE-PAGE-ATLAS-051: bucket search results escape the panel that clips them', () => {
+    it('renders the result list outside the overflow-hidden desktop panel (#1899)', async () => {
+      server.use(
+        http.post('/api/maps/search', () => HttpResponse.json({
+          places: [
+            { name: 'Amsterdam', address: 'Amsterdam, North Holland, Netherlands', lat: 52.37, lng: 4.89 },
+            { name: 'New Amsterdam Island', address: 'French Southern and Antarctic Lands, France', lat: -37.8, lng: 77.5 },
+            { name: 'City of Amsterdam', address: 'North Holland, Netherlands', lat: 52.35, lng: 4.9 },
+          ],
+        })),
+      );
+
+      const user = userEvent.setup();
+      render(<AtlasPage />);
+
+      await waitFor(() => expect(screen.getAllByText('Bucket List').length).toBeGreaterThan(0));
+      await user.click(screen.getAllByText('Bucket List')[0]);
+      await waitFor(() => expect(screen.getAllByRole('button', { name: /add place/i }).length).toBeGreaterThan(0));
+      await user.click(screen.getAllByRole('button', { name: /add place/i })[0]);
+
+      const nameInput = await screen.findByPlaceholderText(/name \(country, city, place\.\.\.\)/i);
+      await user.type(nameInput, 'Amsterdam{Enter}');
+
+      // The first hit must be present — it is the one the panel used to swallow.
+      const firstHit = await screen.findByText('Amsterdam, North Holland, Netherlands');
+      const list = firstHit.closest('button')!.parentElement as HTMLElement;
+
+      // Portalled straight onto the body, so no ancestor's overflow can clip it.
+      expect(list.style.position).toBe('fixed');
+      expect(list.parentElement).toBe(document.body);
+      expect(list.closest('.overflow-hidden')).toBeNull();
+      expect(screen.getByText('City of Amsterdam')).toBeInTheDocument();
+    });
+  });
+
   describe('FE-PAGE-ATLAS-033: GeoJSON with unvisited country covers onEachFeature else branch', () => {
     it('loads map with visited FR and unvisited DE, covering both onEachFeature branches', async () => {
       const geoJsonFRandDE = {
@@ -956,6 +1010,45 @@ describe('AtlasPage', () => {
 
       // Both branches covered via Leaflet mock calling onEachFeature for each feature
       expect(screen.getAllByText(/countries/i).length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('FE-PAGE-ATLAS-049: bucket-list country renders hatched wishlist fill', () => {
+    it('styles an unvisited bucket-list country with the wishlist hatch, not the flat unvisited gray', async () => {
+      const geoJsonFRandJP = {
+        type: 'FeatureCollection',
+        features: [
+          { type: 'Feature', properties: { ISO_A2: 'FR', ADM0_A3: 'FRA', ISO_A3: 'FRA', NAME: 'France', ADMIN: 'France' }, geometry: null },
+          { type: 'Feature', properties: { ISO_A2: 'JP', ADM0_A3: 'JPN', ISO_A3: 'JPN', NAME: 'Japan', ADMIN: 'Japan' }, geometry: null },
+        ],
+      };
+      server.use(
+        http.get('/api/addons/atlas/countries/geo', () => HttpResponse.json(geoJsonFRandJP)),
+        http.get('/api/addons/atlas/bucket-list', () =>
+          HttpResponse.json({
+            items: [{ id: 1, name: 'Kyoto', country_code: 'JP', lat: null, lng: null, notes: null, target_date: null }],
+          }),
+        ),
+      );
+
+      render(<AtlasPage />);
+
+      await waitFor(() => {
+        expect(capturedStyles.some((s) => s.feature.properties.ADM0_A3 === 'JPN')).toBe(true);
+      });
+
+      // FR is visited → keeps the normal solid fill, in its own hash-derived color
+      // from the palette (stable regardless of visit order or list contents).
+      const frStyle = capturedStyles.find((s) => s.feature.properties.ADM0_A3 === 'FRA')!.result;
+      expect(frStyle.fillColor).toBe('#dc2626');
+      expect(frStyle.dashArray).toBeUndefined();
+
+      // JP is on the bucket list and not visited → hatch, in JP's own hash-derived
+      // color — distinct from FR's, and unaffected by FR being visited.
+      const jpStyle = capturedStyles.find((s) => s.feature.properties.ADM0_A3 === 'JPN')!.result;
+      expect(jpStyle.fillColor).toBe('#0ea5e9');
+      expect(jpStyle.dashArray).toBe('3 2');
+      expect(jpStyle.fillColor).not.toBe(frStyle.fillColor);
     });
   });
 
@@ -1086,6 +1179,65 @@ describe('AtlasPage', () => {
     });
   });
 
+  describe('FE-PAGE-ATLAS-050: choose popup offers Remove from wishlist for a bucket-list country', () => {
+    it('shows Remove from wishlist when the searched country is already on the bucket list, and removing it clears the item', async () => {
+      server.use(
+        http.get('/api/addons/atlas/stats', () => HttpResponse.json(emptyAtlasResponse)),
+        http.get('/api/addons/atlas/countries/geo', () => HttpResponse.json(geoJsonWithFR)),
+        http.get('/api/addons/atlas/bucket-list', () =>
+          HttpResponse.json({
+            items: [{ id: 42, name: 'Paris', country_code: 'FR', lat: null, lng: null, notes: null, target_date: null }],
+          }),
+        ),
+        http.delete('/api/addons/atlas/bucket-list/:id', () => HttpResponse.json({ success: true })),
+      );
+
+      const user = userEvent.setup();
+      render(<AtlasPage />);
+
+      await waitFor(() => screen.getByPlaceholderText(/search a country/i));
+      const searchInput = screen.getByPlaceholderText(/search a country/i);
+      await user.type(searchInput, 'fr');
+      fireEvent.keyDown(searchInput, { key: 'Enter' });
+
+      await waitFor(() => {
+        expect(screen.getByText(/remove from wishlist/i)).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText(/remove from wishlist/i));
+
+      await waitFor(() => {
+        expect(screen.queryByText(/remove from wishlist/i)).not.toBeInTheDocument();
+      });
+
+      // Bucket List tab no longer shows the removed item
+      await user.click(screen.getAllByText('Bucket List')[0]);
+      await waitFor(() => {
+        expect(screen.queryByText('Paris')).not.toBeInTheDocument();
+      });
+    });
+
+    it('does not show Remove from wishlist for a country with no bucket-list entry', async () => {
+      server.use(
+        http.get('/api/addons/atlas/stats', () => HttpResponse.json(emptyAtlasResponse)),
+        http.get('/api/addons/atlas/countries/geo', () => HttpResponse.json(geoJsonWithFR)),
+      );
+
+      const user = userEvent.setup();
+      render(<AtlasPage />);
+
+      await waitFor(() => screen.getByPlaceholderText(/search a country/i));
+      const searchInput = screen.getByPlaceholderText(/search a country/i);
+      await user.type(searchInput, 'fr');
+      fireEvent.keyDown(searchInput, { key: 'Enter' });
+
+      await waitFor(() => {
+        expect(screen.getByText(/mark as visited/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/remove from wishlist/i)).not.toBeInTheDocument();
+    });
+  });
+
   describe('FE-PAGE-ATLAS-036: bucket popup submit action', () => {
     it('submits a bucket list item from the confirm popup', async () => {
       server.use(
@@ -1204,7 +1356,7 @@ describe('AtlasPage', () => {
         () => {
           const els = screen.queryAllByText('Tokyo');
           // Filter to those that are inside the search results dropdown (not the input itself)
-          const resultEl = els.find((el) => el.tagName !== 'INPUT' && el.closest('div[style*="position: absolute"]'));
+          const resultEl = els.find((el) => el.tagName !== 'INPUT' && el.closest('div[style*="position: fixed"]'));
           if (!resultEl) throw new Error('Tokyo result not found in dropdown');
           return resultEl;
         },
@@ -1484,12 +1636,12 @@ describe('AtlasPage', () => {
       await user.type(nameInput, 'Paris');
       fireEvent.keyDown(nameInput, { key: 'Enter' });
 
-      // Wait for Paris result in the dropdown (absolute-positioned list)
+      // Wait for Paris result in the dropdown (portalled, fixed-position list)
       const parisBtn = await waitFor(
         () => {
           const btns = Array.from(document.querySelectorAll('button'));
           const btn = btns.find(
-            (b) => b.textContent?.includes('Paris') && b.closest('[style*="position: absolute"]'),
+            (b) => b.textContent?.includes('Paris') && b.closest('[style*="position: fixed"]'),
           );
           if (!btn) throw new Error('Paris dropdown result not found');
           return btn;

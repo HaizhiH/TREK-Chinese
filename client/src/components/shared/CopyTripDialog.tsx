@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback } from 'react'
-import ReactDOM from 'react-dom'
+import { createPortal } from 'react-dom'
 import { Check, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
@@ -40,13 +40,21 @@ export default function CopyTripDialog({ isOpen, tripTitle, onClose, onConfirm }
 
   if (!isOpen) return null
 
-  return ReactDOM.createPortal(
+  return createPortal(
     <div
       className="fixed inset-0 z-[10000] flex items-center justify-center px-4 trek-backdrop-enter bg-[rgba(15,23,42,0.5)]"
       style={{ paddingBottom: 'var(--bottom-nav-h)' }}
+      role="button"
+      tabIndex={0}
+      aria-label={t('common.close')}
       onClick={onClose}
+      onKeyDown={e => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() }
+      }}
     >
       <div
+        role="presentation"
         className="trek-modal-enter rounded-2xl shadow-2xl w-full max-w-md p-6 bg-surface-card"
         onClick={e => e.stopPropagation()}
       >
@@ -88,13 +96,13 @@ export default function CopyTripDialog({ isOpen, tripTitle, onClose, onConfirm }
         </div>
 
         <div className="flex justify-end gap-3 mt-5">
-          <button
+          <button type="button"
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium rounded-lg transition-colors text-content-secondary border border-edge-secondary"
           >
             {t('common.cancel')}
           </button>
-          <button
+          <button type="button"
             onClick={() => { onConfirm(); onClose() }}
             className="px-4 py-2 text-sm font-medium rounded-lg transition-opacity hover:opacity-90 bg-content text-surface-card"
           >

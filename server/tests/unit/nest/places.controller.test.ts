@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { RuntimeEnvService } from '../../../src/nest/app-config/runtime-env.service';
 import { HttpException } from '@nestjs/common';
 import { PlacesController } from '../../../src/nest/places/places.controller';
 import type { PlacesService } from '../../../src/nest/places/places.service';
+import type { StorageService } from '../../../src/nest/storage/storage.service';
 import type { User } from '../../../src/types';
+
+const storageStub = { put: vi.fn().mockResolvedValue(undefined) } as unknown as StorageService;
 
 const user = { id: 1, role: 'user', email: 'u@example.test' } as User;
 const trip = { user_id: 1 };
@@ -11,6 +15,10 @@ function svc(o: Partial<PlacesService> = {}): PlacesService {
   return {
     verifyTripAccess: vi.fn().mockReturnValue(trip), canEdit: vi.fn().mockReturnValue(true), broadcast: vi.fn(),
     onCreated: vi.fn(), onUpdated: vi.fn(), onDeleted: vi.fn(),
+    // Trip-scoping reads the delete paths run before firing the journey hook
+    // (#1745); default to "everything belongs to the trip".
+    get: vi.fn().mockReturnValue({ id: 9 }), scopedIds: vi.fn((_t: string, ids: number[]) => ids),
+    linkedExpenseIds: vi.fn().mockReturnValue([]),
     ...o,
   } as unknown as PlacesService;
 }
@@ -35,28 +43,32 @@ async function thrownAsync(fn: () => Promise<unknown>): Promise<{ status: number
 beforeEach(() => vi.spyOn(console, 'error').mockImplementation(() => {}));
 
 describe('PlacesController (parity with the legacy /api/trips/:tripId/places route)', () => {
-  it('GET / lists with filters; 404 when trip not accessible', () => {
-    expect(thrown(() => new PlacesController(svc({ verifyTripAccess: vi.fn().mockReturnValue(undefined) })).list(user, '5'))).toEqual({ status: 404, body: { error: 'Trip not found' } });
+  // The trip 404 for this handler is TripAccessGuard's now (see
+  // trip-access.guard.test.ts and the places e2e), so it is no longer reachable
+  // by calling the method directly.
+  it('GET / lists with filters', () => {
     const list = vi.fn().mockReturnValue([{ id: 1 }]);
-    expect(new PlacesController(svc({ list } as Partial<PlacesService>)).list(user, '5', 'beach', 'cat', 'tag')).toEqual({ places: [{ id: 1 }] });
+    expect(new PlacesController(svc({ list } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).list(user, '5', 'beach', 'cat', 'tag')).toEqual({ places: [{ id: 1 }] });
     expect(list).toHaveBeenCalledWith('5', { search: 'beach', category: 'cat', tag: 'tag' });
   });
 
   describe('POST / (create)', () => {
     it('400 on an over-long name (length guard before permission)', () => {
       const canEdit = vi.fn().mockReturnValue(false); // would 403 if reached
-      expect(thrown(() => new PlacesController(svc({ canEdit })).create(user, '5', { name: 'x'.repeat(201) }))).toEqual({
+      expect(thrown(() => new PlacesController(svc({ canEdit }), new RuntimeEnvService(), storageStub).create(user, '5', { name: 'x'.repeat(201) }))).toEqual({
         status: 400, body: { error: 'name must be 200 characters or less' },
       });
       expect(canEdit).not.toHaveBeenCalled();
     });
 
-    it('403 without place_edit, 400 without name, then creates + hooks', () => {
-      expect(thrown(() => new PlacesController(svc({ canEdit: vi.fn().mockReturnValue(false) })).create(user, '5', { name: 'Spot' }))).toEqual({ status: 403, body: { error: 'No permission' } });
-      expect(thrown(() => new PlacesController(svc()).create(user, '5', {}))).toEqual({ status: 400, body: { error: 'Place name is required' } });
+    // The legacy 'Place name is required' 400 is gone: placeCreateRequestSchema
+    // pins `name`, so the ZodValidationPipe rejects a nameless body before the
+    // handler runs (see the e2e suite for the envelope it produces).
+    it('403 without place_edit, then creates + hooks', () => {
+      expect(thrown(() => new PlacesController(svc({ canEdit: vi.fn().mockReturnValue(false) }), new RuntimeEnvService(), storageStub).create(user, '5', { name: 'Spot' }))).toEqual({ status: 403, body: { error: 'No permission' } });
       const create = vi.fn().mockReturnValue({ id: 9 }); const broadcast = vi.fn(); const onCreated = vi.fn();
       const s = svc({ create, broadcast, onCreated } as Partial<PlacesService>);
-      expect(new PlacesController(s).create(user, '5', { name: 'Spot' }, 'sock')).toEqual({ place: { id: 9 } });
+      expect(new PlacesController(s, new RuntimeEnvService(), storageStub).create(user, '5', { name: 'Spot' }, 'sock')).toEqual({ place: { id: 9 } });
       expect(broadcast).toHaveBeenCalledWith('5', 'place:created', { place: { id: 9 } }, 'sock');
       expect(onCreated).toHaveBeenCalledWith('5', 9);
     });
@@ -65,22 +77,22 @@ describe('PlacesController (parity with the legacy /api/trips/:tripId/places rou
   describe('POST /import/gpx', () => {
     const file = { buffer: Buffer.from('gpx'), originalname: 'r.gpx' } as Express.Multer.File;
     it('400 without a file', () => {
-      expect(thrown(() => new PlacesController(svc()).importGpx(user, '5', undefined, {}))).toEqual({ status: 400, body: { error: 'No file uploaded' } });
+      expect(thrown(() => new PlacesController(svc(), new RuntimeEnvService(), storageStub).importGpx(user, '5', undefined, {}))).toEqual({ status: 400, body: { error: 'No file uploaded' } });
     });
     it('400 when all import types are disabled', () => {
-      expect(thrown(() => new PlacesController(svc()).importGpx(user, '5', file, { importWaypoints: 'false', importRoutes: 'false', importTracks: 'false' }))).toEqual({
+      expect(thrown(() => new PlacesController(svc(), new RuntimeEnvService(), storageStub).importGpx(user, '5', file, { importWaypoints: 'false', importRoutes: 'false', importTracks: 'false' }))).toEqual({
         status: 400, body: { error: 'No import types selected' },
       });
     });
     it('400 when the GPX yields nothing', () => {
-      expect(thrown(() => new PlacesController(svc({ importGpx: vi.fn().mockReturnValue(null) } as Partial<PlacesService>)).importGpx(user, '5', file, {}))).toEqual({
+      expect(thrown(() => new PlacesController(svc({ importGpx: vi.fn().mockReturnValue(null) } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).importGpx(user, '5', file, {}))).toEqual({
         status: 400, body: { error: 'No matching places found in GPX file' },
       });
     });
     it('imports and broadcasts per place', () => {
       const broadcast = vi.fn();
       const s = svc({ importGpx: vi.fn().mockReturnValue({ places: [{ id: 1 }, { id: 2 }], count: 2, skipped: 0 }), broadcast } as Partial<PlacesService>);
-      expect(new PlacesController(s).importGpx(user, '5', file, {}, 'sock')).toEqual({ places: [{ id: 1 }, { id: 2 }], count: 2, skipped: 0 });
+      expect(new PlacesController(s, new RuntimeEnvService(), storageStub).importGpx(user, '5', file, {}, 'sock')).toEqual({ places: [{ id: 1 }, { id: 2 }], count: 2, skipped: 0 });
       expect(broadcast).toHaveBeenCalledTimes(2);
     });
   });
@@ -88,23 +100,23 @@ describe('PlacesController (parity with the legacy /api/trips/:tripId/places rou
   describe('POST /import/map', () => {
     const file = { buffer: Buffer.from('<kml/>'), originalname: 'm.kml' } as Express.Multer.File;
     it('400 without a file', async () => {
-      expect(await thrownAsync(() => new PlacesController(svc()).importMap(user, '5', undefined, {}))).toEqual({ status: 400, body: { error: 'No file uploaded' } });
+      expect(await thrownAsync(() => new PlacesController(svc(), new RuntimeEnvService(), storageStub).importMap(user, '5', undefined, {}))).toEqual({ status: 400, body: { error: 'No file uploaded' } });
     });
     it('403 without place_edit (permission runs before the file check)', async () => {
       const importMapFile = vi.fn();
       const s = svc({ canEdit: vi.fn().mockReturnValue(false), importMapFile } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importMap(user, '5', file, {}))).toEqual({ status: 403, body: { error: 'No permission' } });
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importMap(user, '5', file, {}))).toEqual({ status: 403, body: { error: 'No permission' } });
       expect(importMapFile).not.toHaveBeenCalled();
     });
     it('400 when both import types are disabled', async () => {
-      expect(await thrownAsync(() => new PlacesController(svc()).importMap(user, '5', file, { importPoints: 'false', importPaths: 'false' }))).toEqual({
+      expect(await thrownAsync(() => new PlacesController(svc(), new RuntimeEnvService(), storageStub).importMap(user, '5', file, { importPoints: 'false', importPaths: 'false' }))).toEqual({
         status: 400, body: { error: 'No import types selected' },
       });
     });
     it('400 when the map file has no Placemarks (and carries the summary through)', async () => {
       const summary = { totalPlacemarks: 0 };
       const s = svc({ importMapFile: vi.fn().mockResolvedValue({ places: [], summary }) } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importMap(user, '5', file, {}))).toEqual({
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importMap(user, '5', file, {}))).toEqual({
         status: 400, body: { error: 'No valid Placemarks found in map file', summary },
       });
     });
@@ -112,135 +124,311 @@ describe('PlacesController (parity with the legacy /api/trips/:tripId/places rou
       const broadcast = vi.fn();
       const result = { places: [{ id: 1 }, { id: 2 }], summary: { totalPlacemarks: 2 }, count: 2 };
       const s = svc({ importMapFile: vi.fn().mockResolvedValue(result), broadcast } as Partial<PlacesService>);
-      expect(await new PlacesController(s).importMap(user, '5', file, {}, 'sock')).toEqual(result);
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).importMap(user, '5', file, {}, 'sock')).toEqual(result);
       expect(broadcast).toHaveBeenCalledTimes(2);
       expect(broadcast).toHaveBeenCalledWith('5', 'place:created', { place: { id: 1 } }, 'sock');
     });
     it('passes a missing summary through (no zero-placemark guard) and still imports', async () => {
       const result = { places: [{ id: 7 }] };
       const s = svc({ importMapFile: vi.fn().mockResolvedValue(result), broadcast: vi.fn() } as Partial<PlacesService>);
-      expect(await new PlacesController(s).importMap(user, '5', file, {})).toEqual(result);
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).importMap(user, '5', file, {})).toEqual(result);
     });
     it('wraps a thrown Error from the service in a 400 with its message', async () => {
       const s = svc({ importMapFile: vi.fn().mockRejectedValue(new Error('bad kml')) } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importMap(user, '5', file, {}))).toEqual({ status: 400, body: { error: 'bad kml' } });
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importMap(user, '5', file, {}))).toEqual({ status: 400, body: { error: 'bad kml' } });
     });
     it('falls back to a generic 400 message for a non-Error rejection', async () => {
       const s = svc({ importMapFile: vi.fn().mockRejectedValue('boom') } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importMap(user, '5', file, {}))).toEqual({ status: 400, body: { error: 'Failed to import map file' } });
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importMap(user, '5', file, {}))).toEqual({ status: 400, body: { error: 'Failed to import map file' } });
     });
     it('re-throws an HttpException raised inside the try untouched', async () => {
       const s = svc({ importMapFile: vi.fn().mockRejectedValue(new HttpException({ error: 'teapot' }, 418)) } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importMap(user, '5', file, {}))).toEqual({ status: 418, body: { error: 'teapot' } });
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importMap(user, '5', file, {}))).toEqual({ status: 418, body: { error: 'teapot' } });
+    });
+  });
+
+  describe('GET /export.gpx (#2165)', () => {
+    const makeRes = () => ({ setHeader: vi.fn(), send: vi.fn() });
+    const exportQuery = {} as never;
+
+    it('an ASCII filename keeps the exact legacy header', () => {
+      const res = makeRes();
+      const s = svc({ exportGpx: vi.fn().mockReturnValue({ gpx: '<gpx/>', filename: 'Alpine-week.gpx' }) } as Partial<PlacesService>);
+      new PlacesController(s, new RuntimeEnvService(), storageStub).exportGpx(user, '5', exportQuery, res as never);
+      expect(res.setHeader).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="Alpine-week.gpx"');
+      expect(res.send).toHaveBeenCalledWith('<gpx/>');
+    });
+
+    it('a non-ASCII filename no longer reaches setHeader raw: ASCII fallback + filename*', () => {
+      const res = makeRes();
+      const s = svc({ exportGpx: vi.fn().mockReturnValue({ gpx: '<gpx/>', filename: '沖縄-4泊5日.gpx' }) } as Partial<PlacesService>);
+      new PlacesController(s, new RuntimeEnvService(), storageStub).exportGpx(user, '5', exportQuery, res as never);
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Content-Disposition',
+        'attachment; filename="__-4_5_.gpx"; filename*=UTF-8\'\'%E6%B2%96%E7%B8%84-4%E6%B3%8A5%E6%97%A5.gpx',
+      );
     });
   });
 
   describe('POST /import/google-list + naver-list', () => {
-    it('400 without a url', async () => {
-      expect(await thrownAsync(() => new PlacesController(svc()).importGoogle(user, '5', undefined))).toEqual({ status: 400, body: { error: 'URL is required' } });
-    });
-    it('400 when url is the wrong type (not a string)', async () => {
-      expect(await thrownAsync(() => new PlacesController(svc()).importNaver(user, '5', 123))).toEqual({ status: 400, body: { error: 'URL is required' } });
-    });
+    // The legacy 'URL is required' 400 is gone: placeImportListRequestSchema
+    // pins `url`, so the ZodValidationPipe rejects a urlless body before the
+    // handler runs.
     it('maps a service { error, status } to the same response', async () => {
       const s = svc({ importGoogleList: vi.fn().mockResolvedValue({ error: 'List is empty', status: 400 }) } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importGoogle(user, '5', 'http://x'))).toEqual({ status: 400, body: { error: 'List is empty' } });
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importGoogle(user, '5', { url: 'http://x' }))).toEqual({ status: 400, body: { error: 'List is empty' } });
     });
     it('imports a naver list and returns the count + listName', async () => {
       const s = svc({ importNaverList: vi.fn().mockResolvedValue({ places: [{ id: 1 }], listName: 'Trip', skipped: 2 }), broadcast: vi.fn() } as Partial<PlacesService>);
-      expect(await new PlacesController(s).importNaver(user, '5', 'http://x')).toEqual({ places: [{ id: 1 }], count: 1, listName: 'Trip', skipped: 2 });
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).importNaver(user, '5', { url: 'http://x' })).toEqual({ places: [{ id: 1 }], count: 1, listName: 'Trip', skipped: 2 });
     });
     it('forwards the enrich flag + userId and broadcasts each imported place', async () => {
       const importGoogleList = vi.fn().mockResolvedValue({ places: [{ id: 1 }, { id: 2 }], listName: 'L', skipped: 0 });
       const broadcast = vi.fn();
       const s = svc({ importGoogleList, broadcast } as Partial<PlacesService>);
-      expect(await new PlacesController(s).importGoogle(user, '5', 'http://x', 'true', 'sock')).toEqual({ places: [{ id: 1 }, { id: 2 }], count: 2, listName: 'L', skipped: 0 });
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).importGoogle(user, '5', { url: 'http://x', enrich: true }, 'sock')).toEqual({ places: [{ id: 1 }, { id: 2 }], count: 2, listName: 'L', skipped: 0 });
       expect(importGoogleList).toHaveBeenCalledWith('5', 'http://x', { enrich: true, userId: 1 });
       expect(broadcast).toHaveBeenCalledTimes(2);
     });
+    it('sends a directions link to the directions importer, not to the list one', async () => {
+      // Same box, same gesture: somebody pressed Share in Google Maps, and which screen
+      // they were on is the URL's business rather than the traveller's.
+      const importGoogleDirections = vi.fn().mockResolvedValue({ places: [{ id: 9 }], listName: 'Berlin → Prague', skipped: 1 });
+      const importGoogleList = vi.fn();
+      const s = svc({ importGoogleDirections, importGoogleList, broadcast: vi.fn() } as Partial<PlacesService>);
+      const url = 'https://www.google.com/maps/dir/Berlin/Dresden/Prague';
+
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).importGoogle(user, '5', { url })).toEqual({
+        places: [{ id: 9 }], count: 1, listName: 'Berlin → Prague', skipped: 1,
+      });
+      expect(importGoogleDirections).toHaveBeenCalledWith('5', url, { enrich: false, userId: 1 });
+      expect(importGoogleList).not.toHaveBeenCalled();
+    });
+    it('sends a short link to the list importer, which knows where it really goes', async () => {
+      // A short link's path is `/<code>`, so nothing about the raw URL says
+      // whether it is a route or a list. The dispatch cannot know before the
+      // redirect is followed, and the list importer already follows it — so it
+      // is the one that hands a route on. Deciding here would mean a second
+      // network hop and a second copy of the SSRF handling.
+      const importGoogleDirections = vi.fn();
+      const importGoogleList = vi.fn().mockResolvedValue({ places: [], listName: 'L', skipped: 0 });
+      const s = svc({ importGoogleDirections, importGoogleList, broadcast: vi.fn() } as Partial<PlacesService>);
+
+      await new PlacesController(s, new RuntimeEnvService(), storageStub).importGoogle(user, '5', { url: 'https://maps.app.goo.gl/abc' });
+      expect(importGoogleList).toHaveBeenCalled();
+      expect(importGoogleDirections).not.toHaveBeenCalled();
+    });
     it('wraps a thrown Error in the provider-specific 400 (Google)', async () => {
       const s = svc({ importGoogleList: vi.fn().mockRejectedValue(new Error('network down')) } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importGoogle(user, '5', 'http://x'))).toEqual({
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importGoogle(user, '5', { url: 'http://x' }))).toEqual({
         status: 400, body: { error: 'Failed to import Google Maps list. Make sure the list is shared publicly.' },
       });
     });
     it('wraps a non-Error rejection in the provider-specific 400 (Naver)', async () => {
       const s = svc({ importNaverList: vi.fn().mockRejectedValue('weird') } as Partial<PlacesService>);
-      expect(await thrownAsync(() => new PlacesController(s).importNaver(user, '5', 'http://x'))).toEqual({
+      expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).importNaver(user, '5', { url: 'http://x' }))).toEqual({
         status: 400, body: { error: 'Failed to import Naver Maps list. Make sure the list is shared publicly.' },
       });
     });
   });
 
   describe('POST /bulk-delete', () => {
-    it('400 when ids is not an array of numbers', () => {
-      expect(thrown(() => new PlacesController(svc()).bulkDelete(user, '5', ['a']))).toEqual({ status: 400, body: { error: 'ids must be an array of numbers' } });
-    });
-    it('returns empty for an empty list without touching the service', () => {
+    // The legacy 'ids must be an array of numbers' 400 is gone:
+    // placeBulkDeleteRequestSchema types the array, so the pipe rejects a bad
+    // element before the handler runs.
+    it('returns empty for an empty list without touching the service', async () => {
       const removeMany = vi.fn();
-      expect(new PlacesController(svc({ removeMany } as Partial<PlacesService>)).bulkDelete(user, '5', [])).toEqual({ deleted: [], count: 0 });
+      expect(await new PlacesController(svc({ removeMany } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).bulkDelete(user, '5', { ids: [] })).toEqual({ deleted: [], count: 0 });
       expect(removeMany).not.toHaveBeenCalled();
     });
-    it('deletes, fires hooks + broadcasts per deleted id', () => {
-      const removeMany = vi.fn().mockReturnValue([1, 2]); const onDeleted = vi.fn(); const broadcast = vi.fn();
-      const s = svc({ removeMany, onDeleted, broadcast } as Partial<PlacesService>);
-      expect(new PlacesController(s).bulkDelete(user, '5', [1, 2], 'sock')).toEqual({ deleted: [1, 2], count: 2 });
+    it('deletes, fires hooks + broadcasts per deleted id', async () => {
+      const removeMany = vi.fn().mockReturnValue({ deleted: [1, 2], cancelled: { reservationIds: [], budgetItemIds: [] } }); const onDeleted = vi.fn(); const broadcast = vi.fn();
+      const scopedIds = vi.fn().mockReturnValue([1, 2]);
+      const s = svc({ removeMany, onDeleted, broadcast, scopedIds } as Partial<PlacesService>);
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).bulkDelete(user, '5', { ids: [1, 2] }, 'sock')).toEqual({ deleted: [1, 2], count: 2 });
       expect(onDeleted).toHaveBeenCalledTimes(2);
       expect(broadcast).toHaveBeenCalledTimes(2);
+    });
+
+    // #1745: the hook keys on the place id alone, so an id from another trip
+    // would detach that trip's journey entries even though removeMany skips it.
+    it('fires the journey hook only for ids that belong to the trip, ahead of the delete', async () => {
+      const removeMany = vi.fn().mockReturnValue({ deleted: [1], cancelled: { reservationIds: [], budgetItemIds: [] } });
+      const scopedIds = vi.fn().mockReturnValue([1]);
+      const onDeleted = vi.fn();
+      const s = svc({ removeMany, scopedIds, onDeleted, broadcast: vi.fn() } as Partial<PlacesService>);
+      await new PlacesController(s, new RuntimeEnvService(), storageStub).bulkDelete(user, '5', { ids: [1, 99] });
+      expect(scopedIds).toHaveBeenCalledWith('5', [1, 99]);
+      expect(onDeleted).toHaveBeenCalledTimes(1);
+      expect(onDeleted).toHaveBeenCalledWith(1);
+      expect(onDeleted.mock.invocationCallOrder[0]).toBeLessThan(removeMany.mock.invocationCallOrder[0]);
+    });
+
+    // #1298: the link is gone once the place is, so the ids have to be read first.
+    it('announces the expenses the deleted places took with them', async () => {
+      const removeMany = vi.fn().mockReturnValue({ deleted: [1, 2], cancelled: { reservationIds: [], budgetItemIds: [] } });
+      const linkedExpenseIds = vi.fn().mockReturnValue([77]);
+      const broadcast = vi.fn();
+      const s = svc({ removeMany, linkedExpenseIds, broadcast } as Partial<PlacesService>);
+      await new PlacesController(s, new RuntimeEnvService(), storageStub).bulkDelete(user, '5', { ids: [1, 2] }, 'sock');
+
+      expect(linkedExpenseIds).toHaveBeenCalledWith('5', [1, 2]);
+      expect(linkedExpenseIds.mock.invocationCallOrder[0]).toBeLessThan(removeMany.mock.invocationCallOrder[0]);
+      // Without the socket id: the deleting tab removed the places itself, not
+      // the expense, so it has to hear about that one like everybody else.
+      expect(broadcast).toHaveBeenCalledWith('5', 'budget:deleted', { itemId: 77 }, undefined);
+    });
+
+    it('tells the deleting tab about the booking and the expense a cancelled night took down', async () => {
+      const removeMany = vi.fn().mockReturnValue({ deleted: [1], cancelled: { reservationIds: [12], budgetItemIds: [77] } });
+      const broadcast = vi.fn();
+      const s = svc({ removeMany, broadcast, scopedIds: vi.fn().mockReturnValue([1]) } as Partial<PlacesService>);
+      await new PlacesController(s, new RuntimeEnvService(), storageStub).bulkDelete(user, '5', { ids: [1] }, 'sock');
+
+      // The place is the one change the tab made itself, so that echo stays
+      // filtered. The booking and its expense went on the server alone.
+      expect(broadcast).toHaveBeenCalledWith('5', 'place:deleted', { placeId: 1 }, 'sock');
+      expect(broadcast).toHaveBeenCalledWith('5', 'reservation:deleted', { reservationId: 12 }, undefined);
+      expect(broadcast).toHaveBeenCalledWith('5', 'budget:deleted', { itemId: 77 }, undefined);
     });
   });
 
   describe('POST /bulk-update', () => {
-    it('404 when trip not accessible, 403 without place_edit (before any write)', () => {
-      expect(thrown(() => new PlacesController(svc({ verifyTripAccess: vi.fn().mockReturnValue(undefined) })).bulkUpdate(user, '5', { ids: [1], category_id: 3 }))).toEqual({ status: 404, body: { error: 'Trip not found' } });
-      expect(thrown(() => new PlacesController(svc({ canEdit: vi.fn().mockReturnValue(false) })).bulkUpdate(user, '5', { ids: [1], category_id: 3 }))).toEqual({ status: 403, body: { error: 'No permission' } });
+    it('404 when trip not accessible, 403 without place_edit (before any write)', async () => {
+      expect(await thrownAsync(() => new PlacesController(svc({ verifyTripAccess: vi.fn().mockReturnValue(undefined) }), new RuntimeEnvService(), storageStub).bulkUpdate(user, '5', { ids: [1], category_id: 3 }))).toEqual({ status: 404, body: { error: 'Trip not found' } });
+      expect(await thrownAsync(() => new PlacesController(svc({ canEdit: vi.fn().mockReturnValue(false) }), new RuntimeEnvService(), storageStub).bulkUpdate(user, '5', { ids: [1], category_id: 3 }))).toEqual({ status: 403, body: { error: 'No permission' } });
     });
-    it('400 when ids is not an array of numbers', () => {
-      expect(thrown(() => new PlacesController(svc()).bulkUpdate(user, '5', { ids: ['a'] }))).toEqual({ status: 400, body: { error: 'ids must be an array of numbers' } });
+    // Same as bulk-delete: placeBulkUpdateRequestSchema types `ids`, so the
+    // pipe owns that 400 now. `.min(1)` was deliberately left off the schema so
+    // the empty-list short-circuit below stays reachable.
+    it('400 when no patch field is present', async () => {
+      expect(await thrownAsync(() => new PlacesController(svc(), new RuntimeEnvService(), storageStub).bulkUpdate(user, '5', { ids: [1] }))).toEqual({ status: 400, body: { error: 'Provide at least one field to update' } });
     });
-    it('400 when no patch field is present', () => {
-      expect(thrown(() => new PlacesController(svc()).bulkUpdate(user, '5', { ids: [1] }))).toEqual({ status: 400, body: { error: 'Provide at least one field to update' } });
-    });
-    it('returns empty for an empty list without touching the service', () => {
+    it('returns empty for an empty list without touching the service', async () => {
       const updateMany = vi.fn();
-      expect(new PlacesController(svc({ updateMany } as Partial<PlacesService>)).bulkUpdate(user, '5', { ids: [] })).toEqual({ updated: [], count: 0 });
+      expect(await new PlacesController(svc({ updateMany } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).bulkUpdate(user, '5', { ids: [] })).toEqual({ updated: [], count: 0 });
       expect(updateMany).not.toHaveBeenCalled();
     });
-    it('updates, fires hooks + broadcasts per updated place', () => {
+    it('updates, fires hooks + broadcasts per updated place', async () => {
       const updateMany = vi.fn().mockReturnValue([{ id: 1 }, { id: 2 }]); const onUpdated = vi.fn(); const broadcast = vi.fn();
       const s = svc({ updateMany, onUpdated, broadcast } as Partial<PlacesService>);
-      expect(new PlacesController(s).bulkUpdate(user, '5', { ids: [1, 2], category_id: 3 }, 'sock')).toEqual({ updated: [1, 2], count: 2 });
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).bulkUpdate(user, '5', { ids: [1, 2], category_id: 3 }, 'sock')).toEqual({ updated: [1, 2], count: 2 });
       expect(updateMany).toHaveBeenCalledWith('5', [1, 2], { category_id: 3 });
       expect(onUpdated).toHaveBeenCalledTimes(2);
       expect(broadcast).toHaveBeenCalledWith('5', 'place:updated', { place: { id: 1 } }, 'sock');
     });
-    it('passes category_id: null through to clear the category', () => {
+    it('passes category_id: null through to clear the category', async () => {
       const updateMany = vi.fn().mockReturnValue([{ id: 1 }]);
       const s = svc({ updateMany } as Partial<PlacesService>);
-      expect(new PlacesController(s).bulkUpdate(user, '5', { ids: [1], category_id: null })).toEqual({ updated: [1], count: 1 });
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).bulkUpdate(user, '5', { ids: [1], category_id: null })).toEqual({ updated: [1], count: 1 });
       expect(updateMany).toHaveBeenCalledWith('5', [1], { category_id: null });
     });
   });
 
   it('GET /:id returns the place when found, 404 when missing', () => {
-    expect(thrown(() => new PlacesController(svc({ get: vi.fn().mockReturnValue(undefined) } as Partial<PlacesService>)).get(user, '5', '9'))).toEqual({ status: 404, body: { error: 'Place not found' } });
+    expect(thrown(() => new PlacesController(svc({ get: vi.fn().mockReturnValue(undefined) } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).get(user, '5', '9'))).toEqual({ status: 404, body: { error: 'Place not found' } });
     const s = svc({ get: vi.fn().mockReturnValue({ id: 9 }) } as Partial<PlacesService>);
-    expect(new PlacesController(s).get(user, '5', '9')).toEqual({ place: { id: 9 } });
+    expect(new PlacesController(s, new RuntimeEnvService(), storageStub).get(user, '5', '9')).toEqual({ place: { id: 9 } });
   });
 
-  it('PUT /:id 404 when missing, else updates + hooks', () => {
-    expect(thrown(() => new PlacesController(svc({ update: vi.fn().mockReturnValue(null) } as Partial<PlacesService>)).update(user, '5', '9', { name: 'X' }))).toEqual({ status: 404, body: { error: 'Place not found' } });
+  it('PUT /:id 404 when missing, else updates + hooks', async () => {
+    expect(await thrownAsync(() => new PlacesController(svc({ update: vi.fn().mockReturnValue(null) } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).update(user, '5', '9', { name: 'X' }))).toEqual({ status: 404, body: { error: 'Place not found' } });
     const update = vi.fn().mockReturnValue({ id: 9 }); const onUpdated = vi.fn(); const broadcast = vi.fn();
     const s = svc({ update, onUpdated, broadcast } as Partial<PlacesService>);
-    expect(new PlacesController(s).update(user, '5', '9', { name: 'X' }, 'sock')).toEqual({ place: { id: 9 } });
+    expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).update(user, '5', '9', { name: 'X' }, 'sock')).toEqual({ place: { id: 9 } });
     expect(onUpdated).toHaveBeenCalledWith(9);
   });
 
-  it('PUT /:id forwards the base-version token and 409s on a conflict (#1135)', () => {
+  describe('route_color (#776)', () => {
+    it('400s on anything that is not a hex colour, before the permission check', async () => {
+      const canEdit = vi.fn().mockReturnValue(false); // would 403 if it got that far
+      const err = { status: 400, body: { error: 'route_color must be a hex colour like #4f46e5' } };
+      expect(await thrownAsync(() => new PlacesController(svc({ canEdit }), new RuntimeEnvService(), storageStub).update(user, '5', '9', { route_color: 'red' }))).toEqual(err);
+      expect(await thrownAsync(() => new PlacesController(svc({ canEdit }), new RuntimeEnvService(), storageStub).update(user, '5', '9', { route_color: '#12345' }))).toEqual(err);
+      expect(await thrownAsync(() => new PlacesController(svc({ canEdit }), new RuntimeEnvService(), storageStub).update(user, '5', '9', { route_color: 123 }))).toEqual(err);
+      expect(thrown(() => new PlacesController(svc({ canEdit }), new RuntimeEnvService(), storageStub).create(user, '5', { name: 'T', route_color: 'red' }))).toEqual(err);
+      expect(canEdit).not.toHaveBeenCalled();
+    });
+
+    it('passes a valid hex through, and null through as the reset to auto', async () => {
+      const update = vi.fn().mockReturnValue({ id: 9, route_color: '#e11d48' });
+      const broadcast = vi.fn();
+      const s = svc({ update, broadcast } as Partial<PlacesService>);
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).update(user, '5', '9', { route_color: '#e11d48' }, 'sock'))
+        .toEqual({ place: { id: 9, route_color: '#e11d48' } });
+      expect(update).toHaveBeenCalledWith('5', '9', expect.objectContaining({ route_color: '#e11d48' }), undefined);
+      // The colour has to reach the other members too, not just the DB.
+      expect(broadcast).toHaveBeenCalledWith('5', 'place:updated', { place: { id: 9, route_color: '#e11d48' } }, 'sock');
+
+      await new PlacesController(svc({ update } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).update(user, '5', '9', { route_color: null });
+      expect(update).toHaveBeenLastCalledWith('5', '9', expect.objectContaining({ route_color: null }), undefined);
+    });
+
+    it('accepts the short #abc form', async () => {
+      const update = vi.fn().mockReturnValue({ id: 9 });
+      expect(await new PlacesController(svc({ update } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).update(user, '5', '9', { route_color: '#abc' })).toEqual({ place: { id: 9 } });
+    });
+  });
+
+  // image_url and website leave the database for something that treats them as a
+  // URL — the thumbnail into hand-built marker HTML, the homepage into
+  // window.open. The write body is an open record, so the Zod pipe never sees
+  // either one; they are checked here for the same reason route_color is.
+  // (update() is async since the storage slices; create() is not.)
+  describe('image_url and website', () => {
+    const imageErr = { status: 400, body: { error: 'image_url must be an uploaded path, a photo-proxy path, an inline image or an https URL' } };
+    const siteErr = { status: 400, body: { error: 'website must be an http or https URL' } };
+    const ctl = (over: Partial<PlacesService> = {}) => new PlacesController(svc(over), new RuntimeEnvService(), storageStub);
+
+    it('400s an image_url the marker builders were never meant to receive, before the permission check', async () => {
+      const canEdit = vi.fn().mockReturnValue(false); // would 403 if it got that far
+      for (const image_url of [
+        'javascript:alert(1)',
+        'data:text/html,<script>alert(1)</script>',
+        'http://insecure.example/p.png',
+        '//evil.example/p.png',
+        123,
+      ]) {
+        expect(await thrownAsync(() => ctl({ canEdit }).update(user, '5', '9', { image_url }))).toEqual(imageErr);
+      }
+      expect(thrown(() => ctl({ canEdit }).create(user, '5', { name: 'T', image_url: 'javascript:alert(1)' }))).toEqual(imageErr);
+      expect(canEdit).not.toHaveBeenCalled();
+    });
+
+    it('keeps accepting every shape the app actually stores', async () => {
+      const update = vi.fn().mockReturnValue({ id: 9 });
+      for (const image_url of [
+        '/uploads/places/eiffel.jpg',
+        '/api/maps/place-photo/abc123',
+        'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+        'https://images.example/photo.jpg',
+        null,
+      ]) {
+        expect(await ctl({ update } as Partial<PlacesService>).update(user, '5', '9', { image_url })).toEqual({ place: { id: 9 } });
+      }
+    });
+
+    it('400s a website that window.open would not treat as a page', async () => {
+      const canEdit = vi.fn().mockReturnValue(false);
+      for (const website of ['javascript:fetch("/api/trips")', 'data:text/html,x', 'louvre.fr', 42]) {
+        expect(await thrownAsync(() => ctl({ canEdit }).update(user, '5', '9', { website }))).toEqual(siteErr);
+      }
+      expect(canEdit).not.toHaveBeenCalled();
+    });
+
+    it('accepts http and https, and treats the empty string as clearing the field', async () => {
+      const update = vi.fn().mockReturnValue({ id: 9 });
+      for (const website of ['https://louvre.fr', 'http://pension.at', '', null]) {
+        expect(await ctl({ update } as Partial<PlacesService>).update(user, '5', '9', { website })).toEqual({ place: { id: 9 } });
+      }
+    });
+  });
+
+  it('PUT /:id forwards the base-version token and 409s on a conflict (#1135)', async () => {
     const update = vi.fn().mockReturnValue({ conflict: true, server: { id: 9, name: 'Theirs' } });
     const onUpdated = vi.fn(); const broadcast = vi.fn();
     const s = svc({ update, onUpdated, broadcast } as Partial<PlacesService>);
-    expect(thrown(() => new PlacesController(s).update(user, '5', '9', { name: 'Mine' }, 'sock', '2026-01-01 00:00:00'))).toEqual({
+    expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).update(user, '5', '9', { name: 'Mine' }, 'sock', '2026-01-01 00:00:00'))).toEqual({
       status: 409, body: { error: 'conflict', server: { id: 9, name: 'Theirs' } },
     });
     expect(update).toHaveBeenCalledWith('5', '9', expect.objectContaining({ name: 'Mine' }), '2026-01-01 00:00:00');
@@ -248,25 +436,97 @@ describe('PlacesController (parity with the legacy /api/trips/:tripId/places rou
     expect(onUpdated).not.toHaveBeenCalled();
   });
 
-  it('DELETE /:id fires the hook then 404 / success', () => {
+  it('DELETE /:id fires the hook then 404 / success', async () => {
     const onDeleted = vi.fn();
-    expect(thrown(() => new PlacesController(svc({ remove: vi.fn().mockReturnValue(false), onDeleted } as Partial<PlacesService>)).remove(user, '5', '9'))).toEqual({ status: 404, body: { error: 'Place not found' } });
+    const remove = vi.fn().mockReturnValue({ deleted: false, cancelled: { reservationIds: [], budgetItemIds: [] } });
+    expect(await thrownAsync(() => new PlacesController(svc({ remove, onDeleted } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).remove(user, '5', '9'))).toEqual({ status: 404, body: { error: 'Place not found' } });
     expect(onDeleted).toHaveBeenCalledWith(9);
-    const s = svc({ remove: vi.fn().mockReturnValue(true), broadcast: vi.fn() } as Partial<PlacesService>);
-    expect(new PlacesController(s).remove(user, '5', '9')).toEqual({ success: true });
+    expect(onDeleted.mock.invocationCallOrder[0]).toBeLessThan(remove.mock.invocationCallOrder[0]);
+    const s = svc({ remove: vi.fn().mockReturnValue({ deleted: true, cancelled: { reservationIds: [], budgetItemIds: [] } }), broadcast: vi.fn() } as Partial<PlacesService>);
+    expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).remove(user, '5', '9')).toEqual({ success: true });
+  });
+
+  it('DELETE /:id announces the booking and the expense a cancelled night took down', async () => {
+    // place:deleted says nothing about either, and an expense linked by
+    // reservation_id is not one linkedExpenseIds finds.
+    const broadcast = vi.fn();
+    const remove = vi.fn().mockReturnValue({ deleted: true, cancelled: { reservationIds: [12], budgetItemIds: [77] } });
+    const s = svc({ remove, broadcast, linkedExpenseIds: vi.fn().mockReturnValue([]) } as Partial<PlacesService>);
+
+    await new PlacesController(s, new RuntimeEnvService(), storageStub).remove(user, '5', '9', 'sock');
+
+    // The place echo stays filtered by the socket id; the booking and the
+    // expense are sent to the deleting tab as well, because that tab only
+    // removed the place itself and would otherwise keep showing both until a
+    // reload.
+    expect(broadcast).toHaveBeenCalledWith('5', 'place:deleted', { placeId: 9 }, 'sock');
+    expect(broadcast).toHaveBeenCalledWith('5', 'reservation:deleted', { reservationId: 12 }, undefined);
+    expect(broadcast).toHaveBeenCalledWith('5', 'budget:deleted', { itemId: 77 }, undefined);
+  });
+
+  // #1745: a place on another trip must 404 without the hook ever running —
+  // onPlaceDeleted keys on the place id alone, so it would detach that trip's
+  // journey entries.
+  it('DELETE /:id 404s a foreign place before the journey hook runs', async () => {
+    const onDeleted = vi.fn(); const remove = vi.fn();
+    const s = svc({ get: vi.fn().mockReturnValue(null), onDeleted, remove } as Partial<PlacesService>);
+    expect(await thrownAsync(() => new PlacesController(s, new RuntimeEnvService(), storageStub).remove(user, '5', '99'))).toEqual({ status: 404, body: { error: 'Place not found' } });
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it('GET /:id/image maps service error + returns photos', async () => {
     const s = svc({ searchImage: vi.fn().mockResolvedValue({ photos: [{ url: 'x' }] }) } as Partial<PlacesService>);
-    expect(await new PlacesController(s).image(user, '5', '9')).toEqual({ photos: [{ url: 'x' }] });
+    expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).image(user, '5', '9')).toEqual({ photos: [{ url: 'x' }] });
     const e = svc({ searchImage: vi.fn().mockResolvedValue({ error: 'No key', status: 400 }) } as Partial<PlacesService>);
-    expect(await thrownAsync(() => new PlacesController(e).image(user, '5', '9'))).toEqual({ status: 400, body: { error: 'No key' } });
+    expect(await thrownAsync(() => new PlacesController(e, new RuntimeEnvService(), storageStub).image(user, '5', '9'))).toEqual({ status: 400, body: { error: 'No key' } });
   });
 
   it('GET /:id/image turns an unexpected throw into a 500, but re-throws an HttpException as-is', async () => {
     const boom = svc({ searchImage: vi.fn().mockRejectedValue(new Error('Unsplash down')) } as Partial<PlacesService>);
-    expect(await thrownAsync(() => new PlacesController(boom).image(user, '5', '9'))).toEqual({ status: 500, body: { error: 'Error searching for image' } });
+    expect(await thrownAsync(() => new PlacesController(boom, new RuntimeEnvService(), storageStub).image(user, '5', '9'))).toEqual({ status: 500, body: { error: 'Error searching for image' } });
     const http = svc({ searchImage: vi.fn().mockRejectedValue(new HttpException({ error: 'rate limited' }, 429)) } as Partial<PlacesService>);
-    expect(await thrownAsync(() => new PlacesController(http).image(user, '5', '9'))).toEqual({ status: 429, body: { error: 'rate limited' } });
+    expect(await thrownAsync(() => new PlacesController(http, new RuntimeEnvService(), storageStub).image(user, '5', '9'))).toEqual({ status: 429, body: { error: 'rate limited' } });
+  });
+
+  describe('POST /:id/image (custom place image #1136)', () => {
+    const file = { filename: 'abc.jpg' } as Express.Multer.File;
+
+    it('404 when the trip is not accessible, 403 without place_edit', async () => {
+      expect(await thrownAsync(() => new PlacesController(svc({ verifyTripAccess: vi.fn().mockReturnValue(undefined) }), new RuntimeEnvService(), storageStub).uploadImage(user, '5', '9', file))).toEqual({ status: 404, body: { error: 'Trip not found' } });
+      expect(await thrownAsync(() => new PlacesController(svc({ canEdit: vi.fn().mockReturnValue(false) }), new RuntimeEnvService(), storageStub).uploadImage(user, '5', '9', file))).toEqual({ status: 403, body: { error: 'No permission' } });
+    });
+
+    it('400 when no file was uploaded', async () => {
+      expect(await thrownAsync(() => new PlacesController(svc(), new RuntimeEnvService(), storageStub).uploadImage(user, '5', '9', undefined))).toEqual({ status: 400, body: { error: 'No image uploaded' } });
+    });
+
+    it('404 when the place is missing (service returns null)', async () => {
+      expect(await thrownAsync(() => new PlacesController(svc({ update: vi.fn().mockReturnValue(null) } as Partial<PlacesService>), new RuntimeEnvService(), storageStub).uploadImage(user, '5', '9', file))).toEqual({ status: 404, body: { error: 'Place not found' } });
+    });
+
+    it('stores the uploaded file as image_url, broadcasts + fires the update hook', async () => {
+      const update = vi.fn().mockReturnValue({ id: 9 }); const onUpdated = vi.fn(); const broadcast = vi.fn();
+      const s = svc({ update, onUpdated, broadcast } as Partial<PlacesService>);
+      expect(await new PlacesController(s, new RuntimeEnvService(), storageStub).uploadImage(user, '5', '9', file, 'sock')).toEqual({ place: { id: 9 } });
+      expect(storageStub.put).toHaveBeenCalledWith('places', 'abc.jpg', { tmpPath: undefined });
+      expect(update).toHaveBeenCalledWith('5', '9', { image_url: '/uploads/places/abc.jpg' });
+      expect(broadcast).toHaveBeenCalledWith('5', 'place:updated', { place: { id: 9 } }, 'sock');
+      expect(onUpdated).toHaveBeenCalledWith(9);
+    });
+
+    it('403 in demo mode for a demo account', async () => {
+      const prev = process.env.DEMO_MODE;
+      process.env.DEMO_MODE = 'true';
+      const demo = { ...user, email: 'demo@trek.app' } as User;
+      try {
+        expect(await thrownAsync(() => new PlacesController(svc(), new RuntimeEnvService(), storageStub).uploadImage(demo, '5', '9', file))).toEqual({
+          status: 403, body: { error: 'Uploads are disabled in demo mode. Self-host TREK for full functionality.' },
+        });
+      } finally {
+        if (prev === undefined) delete process.env.DEMO_MODE;
+        else process.env.DEMO_MODE = prev;
+      }
+    });
   });
 });

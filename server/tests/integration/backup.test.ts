@@ -48,8 +48,8 @@ vi.mock('../../src/config', () => ({
 vi.mock('../../src/websocket', () => ({ broadcast: vi.fn(), broadcastToUser: vi.fn() }));
 
 // Mock filesystem-dependent service functions to avoid real disk I/O in tests
-vi.mock('../../src/services/backupService', async () => {
-  const actual = await vi.importActual<typeof import('../../src/services/backupService')>('../../src/services/backupService');
+vi.mock('../../src/nest/backup/backup.impl', async () => {
+  const actual = await vi.importActual<typeof import('../../src/nest/backup/backup.impl')>('../../src/nest/backup/backup.impl');
   return {
     ...actual,
     createBackup: vi.fn().mockResolvedValue({
@@ -58,20 +58,23 @@ vi.mock('../../src/services/backupService', async () => {
       sizeText: '1.0 KB',
       created_at: new Date().toISOString(),
     }),
-    updateAutoSettings: vi.fn().mockReturnValue({
-      enabled: false,
-      interval: 'daily',
-      keep_days: 7,
-      hour: 2,
-      day_of_week: 0,
-      day_of_month: 1,
-    }),
     restoreFromZip: vi.fn().mockResolvedValue({ success: true }),
+    restoreBackup: vi.fn().mockResolvedValue({ success: true }),
     deleteBackup: vi.fn().mockReturnValue(undefined),
     backupFileExists: vi.fn().mockReturnValue(false),
-    backupFilePath: vi.fn().mockReturnValue('/tmp/test-backup.zip'),
     // Keep checkRateLimit from actual so rate-limit tests work correctly
     checkRateLimit: vi.fn().mockReturnValue(true),
+  };
+});
+
+// The auto-settings routes live on AutoBackupJob now; keep its settings-file
+// I/O off the real data/ dir (the scheduling itself is off under the test gate).
+vi.mock('../../src/nest/backup/auto-backup.settings', async () => {
+  const actual = await vi.importActual<typeof import('../../src/nest/backup/auto-backup.settings')>('../../src/nest/backup/auto-backup.settings');
+  return {
+    ...actual,
+    loadSettings: vi.fn(() => ({ enabled: false, interval: 'daily', keep_days: 7, hour: 2, day_of_week: 0, day_of_month: 1 })),
+    saveSettings: vi.fn(),
   };
 });
 
@@ -81,7 +84,8 @@ import { runMigrations } from '../../src/db/migrations';
 import { resetTestDb, resetRateLimits } from '../helpers/test-db';
 import { createAdmin, createUser } from '../helpers/factories';
 import { authCookie } from '../helpers/auth';
-import * as backupService from '../../src/services/backupService';
+import * as backupService from '../../src/nest/backup/backup.impl';
+import { DEFAULT_BACKUPS_ROOT } from '../../src/nest/storage/storage-paths';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -197,36 +201,41 @@ describe('Backup security', () => {
 // ---------------------------------------------------------------------------
 
 describe('Backup download', () => {
-  let tmpFile: string;
+  // Serving goes through the real StorageService now (sendBackupToResponse is
+  // NOT overridden in the impl mock), so the fixture must live in the real
+  // backups root. Only this one file is cleaned up — never the whole dir.
+  const downloadFixture = 'backup-2026-04-06T12-00-00.zip';
+  const downloadFixturePath = path.join(DEFAULT_BACKUPS_ROOT, downloadFixture);
 
   beforeEach(() => {
-    // Create a real temporary file that Express can stream back
-    tmpFile = path.join(os.tmpdir(), `test-backup-${Date.now()}.zip`);
-    fs.writeFileSync(tmpFile, 'fake zip content');
-    vi.mocked(backupService.backupFileExists).mockReturnValue(true);
-    vi.mocked(backupService.backupFilePath).mockReturnValue(tmpFile);
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(true);
   });
 
   afterAll(() => {
-    try { fs.unlinkSync(tmpFile); } catch {}
+    try { fs.unlinkSync(downloadFixturePath); } catch {}
   });
 
   it('BACKUP-INT-001 — GET /backup/download/:filename returns 200 with content-disposition', async () => {
     const { user: admin } = createAdmin(testDb);
-    const filename = 'backup-2026-04-06T12-00-00.zip';
+    // (Re)write the fixture immediately before the request that serves it.
+    fs.mkdirSync(DEFAULT_BACKUPS_ROOT, { recursive: true });
+    fs.writeFileSync(downloadFixturePath, 'fake zip content');
 
     const res = await request(app)
-      .get(`/api/backup/download/${filename}`)
+      .get(`/api/backup/download/${downloadFixture}`)
       .set('Cookie', authCookie(admin.id));
 
     expect(res.status).toBe(200);
     expect(res.headers['content-disposition']).toMatch(/attachment/i);
-    expect(res.headers['content-disposition']).toContain(filename);
+    expect(res.headers['content-disposition']).toContain(downloadFixture);
+    // superagent has no parser for application/zip, so assert the byte count
+    // rather than the (unbuffered) body.
+    expect(res.headers['content-length']).toBe(String('fake zip content'.length));
   });
 
   it('BACKUP-INT-002 — GET /backup/download/:filename returns 400 for invalid filename', async () => {
     const { user: admin } = createAdmin(testDb);
-    vi.mocked(backupService.backupFileExists).mockReturnValue(false);
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(false);
 
     const res = await request(app)
       .get('/api/backup/download/not-a-valid-name.tar.gz')
@@ -238,7 +247,7 @@ describe('Backup download', () => {
 
   it('BACKUP-INT-003 — GET /backup/download/:filename returns 404 when file not found', async () => {
     const { user: admin } = createAdmin(testDb);
-    vi.mocked(backupService.backupFileExists).mockReturnValue(false);
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(false);
 
     const res = await request(app)
       .get('/api/backup/download/backup-2026-04-06T12-00-00.zip')
@@ -258,8 +267,8 @@ describe('Backup restore', () => {
     const { user: admin } = createAdmin(testDb);
     const filename = 'backup-2026-04-06T12-00-00.zip';
 
-    vi.mocked(backupService.backupFileExists).mockReturnValue(true);
-    vi.mocked(backupService.restoreFromZip).mockResolvedValue({ success: true });
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(true);
+    vi.mocked(backupService.restoreBackup).mockResolvedValue({ success: true });
 
     const res = await request(app)
       .post(`/api/backup/restore/${filename}`)
@@ -267,12 +276,13 @@ describe('Backup restore', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+    expect(vi.mocked(backupService.restoreBackup)).toHaveBeenCalledWith(expect.anything(), filename);
   });
 
   it('BACKUP-INT-005 — POST /backup/restore/:filename returns 404 when backup not found', async () => {
     const { user: admin } = createAdmin(testDb);
 
-    vi.mocked(backupService.backupFileExists).mockReturnValue(false);
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(false);
 
     const res = await request(app)
       .post('/api/backup/restore/backup-2026-04-06T12-00-00.zip')
@@ -293,12 +303,12 @@ describe('Backup restore', () => {
     expect([400, 404]).toContain(res.status);
   });
 
-  it('BACKUP-INT-007 — POST /backup/restore/:filename returns 400 when restoreFromZip reports failure', async () => {
+  it('BACKUP-INT-007 — POST /backup/restore/:filename returns 400 when the restore reports failure', async () => {
     const { user: admin } = createAdmin(testDb);
     const filename = 'backup-2026-04-06T12-00-00.zip';
 
-    vi.mocked(backupService.backupFileExists).mockReturnValue(true);
-    vi.mocked(backupService.restoreFromZip).mockResolvedValue({
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(true);
+    vi.mocked(backupService.restoreBackup).mockResolvedValue({
       success: false,
       error: 'Invalid backup: travel.db not found',
       status: 400,
@@ -322,7 +332,7 @@ describe('Backup delete', () => {
     const { user: admin } = createAdmin(testDb);
     const filename = 'backup-2026-04-06T12-00-00.zip';
 
-    vi.mocked(backupService.backupFileExists).mockReturnValue(true);
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(true);
     vi.mocked(backupService.deleteBackup).mockReturnValue(undefined);
 
     const res = await request(app)
@@ -331,13 +341,14 @@ describe('Backup delete', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(vi.mocked(backupService.deleteBackup)).toHaveBeenCalledWith(filename);
+    // First arg is the app's real StorageService (BackupService forwards it).
+    expect(vi.mocked(backupService.deleteBackup)).toHaveBeenCalledWith(expect.anything(), filename);
   });
 
   it('BACKUP-INT-009 — DELETE /backup/:filename returns 404 when not found', async () => {
     const { user: admin } = createAdmin(testDb);
 
-    vi.mocked(backupService.backupFileExists).mockReturnValue(false);
+    vi.mocked(backupService.backupFileExists).mockResolvedValue(false);
 
     const res = await request(app)
       .delete('/api/backup/backup-2026-04-06T12-00-00.zip')

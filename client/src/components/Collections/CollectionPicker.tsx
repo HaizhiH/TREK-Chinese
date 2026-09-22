@@ -5,6 +5,7 @@ import { collectionsApi } from '../../api/collections'
 import { STATUS_META, STATUS_ORDER } from '../../pages/collections/collectionsModel'
 import type { CollectionPlace, CollectionStatus } from '@trek/shared'
 import type { TranslationFn } from '../../types'
+import EmptyState from '../shared/EmptyState'
 
 interface LocationBias {
   low: { lat: number; lng: number }
@@ -31,7 +32,38 @@ function distanceTo(p: CollectionPlace, center: { lat: number; lng: number }): n
 
 interface Opt { key: string | number; label: string; icon?: React.ReactNode; count?: number }
 
-/** Compact click-away dropdown (Tailwind — this panel lives outside .trek-dash). */
+/** Detail requests fired at once while building the union — keeps a user with
+ *  many lists from opening the modal with a burst of parallel requests. */
+const DETAIL_BATCH = 4
+
+/** Union of every list's places, in list order, without duplicates. */
+async function loadSavedPlaces(ids: number[]): Promise<CollectionPlace[]> {
+  const merged: CollectionPlace[] = []
+  const seen = new Set<number>()
+  for (let i = 0; i < ids.length; i += DETAIL_BATCH) {
+    const batch = await Promise.all(ids.slice(i, i + DETAIL_BATCH).map(id => collectionsApi.get(id).catch(() => null)))
+    for (const d of batch) {
+      if (!d) continue
+      for (const p of d.places) {
+        if (seen.has(p.id)) continue
+        seen.add(p.id)
+        merged.push(p)
+      }
+    }
+  }
+  return merged
+}
+
+/**
+ * Compact click-away dropdown (Tailwind, this panel lives outside .trek-dash).
+ *
+ * The panel is positioned against the FILTER ROW rather than against this
+ * button, so it opens across the full width of the row instead of the half its
+ * own trigger occupies. The two filters sit side by side and only one can be
+ * open at a time, so the wider panel costs nothing and stops list names being
+ * truncated at roughly ten characters. The row carries the `relative` this
+ * needs; there is no other call site.
+ */
 function FilterDropdown({ current, options, onSelect, lead }: {
   current: string | number
   options: Opt[]
@@ -50,7 +82,7 @@ function FilterDropdown({ current, options, onSelect, lead }: {
   }, [open])
   const cur = options.find(o => o.key === current) ?? options[0]
   return (
-    <div className="relative min-w-0 flex-1" ref={ref}>
+    <div className="min-w-0 flex-1" ref={ref}>
       <button type="button" onClick={() => setOpen(o => !o)} aria-haspopup="listbox" aria-expanded={open}
         className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border bg-surface-input text-[12px] font-medium text-content-secondary transition-colors ${open ? 'border-accent' : 'border-edge hover:bg-surface-hover'}`}>
         <span className="shrink-0 text-content-faint">{cur.icon ?? lead}</span>
@@ -58,7 +90,7 @@ function FilterDropdown({ current, options, onSelect, lead }: {
         <ChevronDown size={13} className="shrink-0 text-content-faint" />
       </button>
       {open && (
-        <div role="listbox" className="absolute z-30 left-0 right-0 mt-1 max-h-[240px] overflow-y-auto p-1 rounded-xl border border-edge bg-surface-card shadow-lg flex flex-col gap-0.5">
+        <div role="listbox" className="absolute z-30 top-full left-0 right-0 mt-1 max-h-[240px] overflow-y-auto p-1 rounded-xl border border-edge bg-surface-card shadow-lg flex flex-col gap-0.5">
           {options.map(o => (
             <button key={o.key} type="button" role="option" aria-selected={o.key === current} onClick={() => { onSelect(o.key); setOpen(false) }}
               className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12.5px] text-left transition-colors hover:bg-surface-hover ${o.key === current ? 'text-content font-semibold' : 'text-content-secondary'}`}>
@@ -93,13 +125,8 @@ export default function CollectionPicker({ bias, onSelect, t }: CollectionPicker
     setLoading(true)
     collectionsApi.list()
       .then(async (res) => {
-        const detail = await Promise.all(res.collections.map(c => collectionsApi.get(c.id).catch(() => null)))
+        const merged = await loadSavedPlaces(res.collections.map(c => c.id))
         if (cancelled) return
-        const merged: CollectionPlace[] = []
-        for (const d of detail) {
-          if (!d) continue
-          for (const p of d.places) merged.push(p)
-        }
         setLists(res.collections.map(c => ({ id: c.id, name: c.name, color: c.color ?? null })))
         setPlaces(merged)
       })
@@ -113,6 +140,11 @@ export default function CollectionPicker({ bias, onSelect, t }: CollectionPicker
     [bias],
   )
 
+  // The list is every saved place across every collection, which grows without
+  // bound. Show a first page and let the rest be asked for.
+  const PAGE = 10
+  const [shown, setShown] = useState(PAGE)
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     const list = places.filter(p => {
@@ -125,6 +157,13 @@ export default function CollectionPicker({ bias, onSelect, t }: CollectionPicker
     else list.sort((a, b) => a.name.localeCompare(b.name))
     return list
   }, [places, search, center, listFilter, statusFilter])
+
+  // Searching or filtering starts a new list; keeping the old offset would drop
+  // the user somewhere in the middle of it.
+  useEffect(() => { setShown(PAGE) }, [search, listFilter, statusFilter])
+
+  const page = visible.slice(0, shown)
+  const remaining = visible.length - page.length
 
   const listOpts: Opt[] = [
     { key: 'all', label: t('collections.picker.allLists'), icon: <Layers size={13} />, count: places.length },
@@ -144,7 +183,10 @@ export default function CollectionPicker({ bias, onSelect, t }: CollectionPicker
   ]
 
   return (
-    <aside className="w-full sm:w-64 shrink-0 flex flex-col rounded-xl border border-edge bg-surface-secondary overflow-hidden self-stretch">
+    // Same 320px as the details column on the other side of the form: two panels
+    // of different widths flanking one form read as a mistake rather than a
+    // hierarchy, and neither of them is the more important one.
+    <aside className="w-full sm:w-80 shrink-0 flex flex-col rounded-xl border border-edge bg-surface-secondary overflow-hidden self-stretch">
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-edge shrink-0">
         <Bookmark size={15} className="text-accent" />
         <span className="text-[13px] font-semibold text-content">{t('collections.picker.title')}</span>
@@ -160,7 +202,7 @@ export default function CollectionPicker({ bias, onSelect, t }: CollectionPicker
           />
         </div>
         {lists.length > 0 && (
-          <div className="flex gap-2">
+          <div className="relative flex gap-2">
             <FilterDropdown current={listFilter} options={listOpts} onSelect={k => setListFilter(k as number | 'all')} lead={<Layers size={13} />} />
             <FilterDropdown current={statusFilter} options={statusOpts} onSelect={k => setStatusFilter(k as CollectionStatus | 'all')} lead={<Bookmark size={13} />} />
           </div>
@@ -172,10 +214,16 @@ export default function CollectionPicker({ bias, onSelect, t }: CollectionPicker
             <Loader2 size={18} className="animate-spin" />
           </div>
         ) : visible.length === 0 ? (
-          <p className="text-center text-[12px] text-content-faint py-10 px-3">{t('collections.picker.empty')}</p>
+          <EmptyState
+            scene="search"
+            title={t('collections.picker.empty')}
+            size={84}
+            fill
+            surface="var(--bg-secondary)"
+          />
         ) : (
           <div className="flex flex-col gap-1">
-            {visible.map(place => (
+            {page.map(place => (
               <button
                 key={place.id}
                 type="button"
@@ -190,6 +238,17 @@ export default function CollectionPicker({ bias, onSelect, t }: CollectionPicker
                 </span>
               </button>
             ))}
+            {remaining > 0 && (
+              <div className="pt-1 mt-1 border-t border-edge">
+                <button
+                  type="button"
+                  onClick={() => setShown(n => n + PAGE)}
+                  className="w-full px-2 py-1.5 rounded-lg text-[12px] font-medium text-content-secondary hover:bg-surface-hover transition-colors"
+                >
+                  {t('collections.picker.showMore', { count: remaining })}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

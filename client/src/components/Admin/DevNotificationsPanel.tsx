@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { adminApi, tripsApi } from '../../api/client'
+import { getApiErrorMessage } from '../../utils/apiError'
 import { useAuthStore } from '../../store/authStore'
 import { useToast } from '../shared/Toast'
 import {
@@ -46,8 +47,8 @@ export default function DevNotificationsPanel(): React.ReactElement {
     try {
       await adminApi.sendTestNotification(payload)
       toast.success(`Sent: ${label}`)
-    } catch (err: any) {
-      toast.error(err.message || 'Failed')
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed'))
     } finally {
       setSending(null)
     }
@@ -65,7 +66,7 @@ export default function DevNotificationsPanel(): React.ReactElement {
   }: {
     id: string; label: string; sub: string; icon: React.ElementType; color: string; onClick: () => void
   }) => (
-    <button
+    <button type="button"
       onClick={onClick}
       disabled={sending !== null}
       className="flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors text-left w-full border-edge bg-surface-card"

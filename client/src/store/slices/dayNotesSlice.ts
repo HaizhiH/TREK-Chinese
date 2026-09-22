@@ -21,7 +21,7 @@ export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice
     try {
       await daysApi.update(tripId, dayId, { notes })
       set(state => ({
-        days: state.days.map(d => d.id === parseInt(String(dayId)) ? { ...d, notes } : d)
+        days: state.days.map(d => d.id === Number.parseInt(String(dayId)) ? { ...d, notes } : d)
       }))
     } catch (err: unknown) {
       throw new Error(getApiErrorMessage(err, 'Error updating notes'))
@@ -32,7 +32,7 @@ export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice
     try {
       await daysApi.update(tripId, dayId, { title })
       set(state => ({
-        days: state.days.map(d => d.id === parseInt(String(dayId)) ? { ...d, title } : d)
+        days: state.days.map(d => d.id === Number.parseInt(String(dayId)) ? { ...d, title } : d)
       }))
     } catch (err: unknown) {
       throw new Error(getApiErrorMessage(err, 'Error updating day name'))
@@ -112,10 +112,23 @@ export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice
     }))
 
     try {
-      await dayNotesApi.delete(tripId, fromDayId, noteId)
+      // There is no atomic move on the server, so the destructive half goes last:
+      // if the create were second and failed, the note would already be gone for
+      // good and the rollback below would only fake it back into the store.
+      // Every field the note carries, not just the ones it had when this was
+      // written: a move is a delete plus a create, so anything omitted here is
+      // silently dropped — which is how a coloured note lost its colour on the
+      // way to another day (#1629).
       const result = await dayNotesApi.create(tripId, toDayId, {
-        text: note.text, time: note.time, icon: note.icon, sort_order,
+        text: note.text, time: note.time, icon: note.icon, color: note.color ?? null, sort_order,
       })
+      try {
+        await dayNotesApi.delete(tripId, fromDayId, noteId)
+      } catch (delErr: unknown) {
+        // The source survived, so drop the copy rather than leave a duplicate behind.
+        await dayNotesApi.delete(tripId, toDayId, result.note.id).catch(() => {})
+        throw delErr
+      }
       set(s => ({
         dayNotes: {
           ...s.dayNotes,

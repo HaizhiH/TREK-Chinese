@@ -14,6 +14,8 @@ const inspector: TranslationStrings = {
   'inspector.confirmedRes': 'Đã xác nhận đặt chỗ',
   'inspector.pendingRes': 'Đang chờ đặt chỗ',
   'inspector.google': 'Google Maps',
+  'inspector.navigation': 'Điều hướng',
+  'inspector.openWith': 'Mở bằng',
   'inspector.openStreetMap': 'OpenStreetMap',
   'inspector.saveToCollection': 'Lưu vào Bộ sưu tập',
   'inspector.savedToCollection': 'Đã lưu',
@@ -22,5 +24,8 @@ const inspector: TranslationStrings = {
   'inspector.editRes': 'Chỉnh sửa đặt chỗ',
   'inspector.participants': 'Người tham gia',
   'inspector.trackStats': 'Theo dõi số liệu thống kê',
+  'inspector.trackColor': 'Màu đường đi',
+  'inspector.trackColorAuto': 'Màu tự động',
+  'inspector.trackColorCustom': 'Chọn màu tùy chỉnh',
 };
 export default inspector;

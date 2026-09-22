@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { adminApi } from '../../api/client'
 import { useToast } from '../../components/shared/Toast'
 import { ADMIN_EVENT_LABEL_KEYS, ADMIN_CHANNEL_LABEL_KEYS } from './AdminPage.constants'
@@ -8,9 +8,20 @@ import { ADMIN_EVENT_LABEL_KEYS, ADMIN_CHANNEL_LABEL_KEYS } from './AdminPage.co
 export default function AdminNotificationsPanel({ t, toast }: { t: (k: string) => string; toast: ReturnType<typeof useToast> }) {
   const [matrix, setMatrix] = useState<any>(null)
   const [saving, setSaving] = useState(false)
+  // Toggles fire faster than React re-renders, so the live preferences are mirrored in a
+  // ref. Reading state out of the render closure would let a second toggle undo the first.
+  const prefsRef = useRef<any>(null)
+
+  const writePrefs = (prefs: any) => {
+    prefsRef.current = prefs
+    setMatrix((m: any) => m ? { ...m, preferences: prefs } : m)
+  }
 
   useEffect(() => {
-    adminApi.getNotificationPreferences().then((data: any) => setMatrix(data)).catch(() => {})
+    adminApi.getNotificationPreferences().then((data: any) => {
+      prefsRef.current = data.preferences
+      setMatrix(data)
+    }).catch(() => {})
   }, [])
 
   if (!matrix) return <p className="text-content-faint" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontStyle: 'italic', padding: 16 }}>Loading…</p>
@@ -24,14 +35,17 @@ export default function AdminNotificationsPanel({ t, toast }: { t: (k: string) =
   })
 
   const toggle = async (eventType: string, channel: string) => {
-    const current = matrix.preferences[eventType]?.[channel] ?? true
-    const updated = { ...matrix.preferences, [eventType]: { ...matrix.preferences[eventType], [channel]: !current } }
-    setMatrix((m: any) => m ? { ...m, preferences: updated } : m)
+    const before = prefsRef.current ?? matrix.preferences
+    const current = before[eventType]?.[channel] ?? true
+    const updated = { ...before, [eventType]: { ...before[eventType], [channel]: !current } }
+    writePrefs(updated)
     setSaving(true)
     try {
       await adminApi.updateNotificationPreferences(updated)
     } catch {
-      setMatrix((m: any) => m ? { ...m, preferences: matrix.preferences } : m)
+      // Revert this cell only — a toggle that already went through keeps its value.
+      const latest = prefsRef.current ?? updated
+      writePrefs({ ...latest, [eventType]: { ...latest[eventType], [channel]: current } })
       toast.error(t('common.error'))
     } finally {
       setSaving(false)
@@ -56,7 +70,7 @@ export default function AdminNotificationsPanel({ t, toast }: { t: (k: string) =
         <div className="p-6">
           {saving && <p className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', marginBottom: 8 }}>Saving…</p>}
           {/* Header row */}
-          <div className="border-b border-edge" style={{ display: 'grid', gridTemplateColumns: `1fr ${visibleChannels.map(() => '80px').join(' ')}`, gap: 4, paddingBottom: 6, marginBottom: 4 }}>
+          <div className="border-b border-edge" style={{ display: 'grid', gridTemplateColumns: `minmax(0, 1fr) ${visibleChannels.map(() => '80px').join(' ')}`, gap: 4, paddingBottom: 6, marginBottom: 4 }}>
             <span />
             {visibleChannels.map(ch => (
               <span key={ch} className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -68,7 +82,7 @@ export default function AdminNotificationsPanel({ t, toast }: { t: (k: string) =
           {matrix.event_types.map((eventType: string) => {
             const implementedForEvent = matrix.implemented_combos[eventType] ?? []
             return (
-              <div key={eventType} className="border-b border-edge" style={{ display: 'grid', gridTemplateColumns: `1fr ${visibleChannels.map(() => '80px').join(' ')}`, gap: 4, alignItems: 'center', padding: '8px 0' }}>
+              <div key={eventType} className="border-b border-edge" style={{ display: 'grid', gridTemplateColumns: `minmax(0, 1fr) ${visibleChannels.map(() => '80px').join(' ')}`, gap: 4, alignItems: 'center', padding: '8px 0' }}>
                 <span className="text-content" style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))' }}>
                   {t(ADMIN_EVENT_LABEL_KEYS[eventType]) || eventType}
                 </span>
@@ -79,7 +93,7 @@ export default function AdminNotificationsPanel({ t, toast }: { t: (k: string) =
                   const isOn = matrix.preferences[eventType]?.[ch] ?? true
                   return (
                     <div key={ch} style={{ display: 'flex', justifyContent: 'center' }}>
-                      <button
+                      <button type="button"
                         onClick={() => toggle(eventType, ch)}
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${isOn ? 'bg-content' : 'bg-edge'}`}
                       >

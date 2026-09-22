@@ -1,4 +1,4 @@
-import ReactDOM from 'react-dom'
+import { createPortal } from 'react-dom'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Pencil, Users, Check } from 'lucide-react'
 import type { BudgetItemMember } from '../../types'
@@ -22,7 +22,7 @@ interface ChipWithTooltipProps {
 export function ChipWithTooltip({ label, avatarUrl, size = 20, paid, onClick }: ChipWithTooltipProps) {
   const [hover, setHover] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
-  const ref = useRef<HTMLDivElement>(null)
+  const ref = useRef<HTMLElement | null>(null)
 
   const onEnter = () => {
     if (ref.current) {
@@ -35,23 +35,35 @@ export function ChipWithTooltip({ label, avatarUrl, size = 20, paid, onClick }: 
   const borderColor = paid ? '#22c55e' : 'var(--border-primary)'
   const bg = paid ? 'rgba(34,197,94,0.15)' : 'var(--bg-tertiary)'
 
+  // Identical for both shells — a clickable chip is a real button so it can be
+  // tabbed to and pressed, a decorative one stays a plain div.
+  const chipStyle = {
+    width: size, height: size, borderRadius: '50%', border: `2px solid ${borderColor}`,
+    background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: size * 0.4, fontWeight: 700, color: paid ? '#16a34a' : 'var(--text-muted)',
+    overflow: 'hidden', flexShrink: 0, cursor: onClick ? 'pointer' : 'default',
+    transition: 'border-color 0.15s, background 0.15s',
+    padding: 0, fontFamily: 'inherit',
+  }
+  const inner = avatarUrl
+    ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+    : label?.[0]?.toUpperCase()
+
   return (
     <>
-      <div ref={ref} onMouseEnter={onEnter} onMouseLeave={() => setHover(false)}
-        onClick={onClick}
-        style={{
-          width: size, height: size, borderRadius: '50%', border: `2px solid ${borderColor}`,
-          background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: size * 0.4, fontWeight: 700, color: paid ? '#16a34a' : 'var(--text-muted)',
-          overflow: 'hidden', flexShrink: 0, cursor: onClick ? 'pointer' : 'default',
-          transition: 'border-color 0.15s, background 0.15s',
-        }}>
-        {avatarUrl
-          ? <img src={avatarUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : label?.[0]?.toUpperCase()
-        }
-      </div>
-      {hover && ReactDOM.createPortal(
+      {onClick ? (
+        <button type="button" ref={el => { ref.current = el }} aria-label={label}
+          onMouseEnter={onEnter} onMouseLeave={() => setHover(false)}
+          onClick={onClick} style={chipStyle}>
+          {inner}
+        </button>
+      ) : (
+        <div ref={el => { ref.current = el }} onMouseEnter={onEnter} onMouseLeave={() => setHover(false)}
+          style={chipStyle}>
+          {inner}
+        </div>
+      )}
+      {hover && createPortal(
         <div style={{
           position: 'fixed', top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)',
           pointerEvents: 'none', zIndex: 10000, whiteSpace: 'nowrap',
@@ -131,7 +143,7 @@ export default function BudgetMemberChips({ members = [], tripMembers = [], onSe
         />
       ))}
       {!readOnly && (
-        <button ref={btnRef} onClick={openDropdown}
+        <button type="button" ref={btnRef} onClick={openDropdown}
           style={{
             width: btnSize, height: btnSize, borderRadius: '50%', border: '1.5px dashed var(--border-primary)',
             background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -140,7 +152,7 @@ export default function BudgetMemberChips({ members = [], tripMembers = [], onSe
           {members.length > 0 ? <Pencil size={iconSize} /> : <Users size={iconSize} />}
         </button>
       )}
-      {showDropdown && ReactDOM.createPortal(
+      {showDropdown && createPortal(
         <div ref={dropRef} style={{
           position: 'fixed', top: dropPos.top, left: dropPos.left, transform: 'translateX(-50%)', zIndex: 10000,
           background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 10,
@@ -149,7 +161,7 @@ export default function BudgetMemberChips({ members = [], tripMembers = [], onSe
           {tripMembers.map(tm => {
             const isActive = memberIds.includes(tm.id)
             return (
-              <button key={tm.id} onClick={() => toggleMember(tm.id)} style={{
+              <button type="button" key={tm.id} onClick={() => toggleMember(tm.id)} style={{
                 display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '5px 8px',
                 borderRadius: 6, border: 'none', background: isActive ? 'var(--bg-hover)' : 'none', cursor: 'pointer',
                 fontFamily: 'inherit', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-primary)', textAlign: 'left',
@@ -163,7 +175,7 @@ export default function BudgetMemberChips({ members = [], tripMembers = [], onSe
                   color: 'var(--text-muted)', overflow: 'hidden', flexShrink: 0,
                 }}>
                   {tm.avatar_url
-                    ? <img src={tm.avatar_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ? <img src={tm.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     : tm.username?.[0]?.toUpperCase()
                   }
                 </div>

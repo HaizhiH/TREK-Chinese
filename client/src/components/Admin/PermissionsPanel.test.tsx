@@ -269,6 +269,6 @@ describe('PermissionsPanel', () => {
       ),
     );
     renderPanel();
-    await screen.findByText('Error');
+    expect(await screen.findByText('Error')).toBeInTheDocument();
   });
 });

@@ -16,6 +16,7 @@ const settings: TranslationStrings = {
   'settings.plugins.subtitle': 'Személyes beállításaid az általad használt bővítményekhez (API-kulcsok, beállítások).',
   'settings.plugins.empty': 'Nincsenek aktív bővítmények.',
   'settings.plugins.saved': 'Beállítások mentve',
+  'settings.plugins.requiredMissing': '"{field}" kötelező',
   'settings.tabs.account': 'Fiók',
   'settings.tabs.offline': 'Offline',
   'settings.tabs.about': 'Névjegy',
@@ -23,7 +24,11 @@ const settings: TranslationStrings = {
   'settings.mapTemplate': 'Térkép sablon',
   'settings.mapTemplatePlaceholder.select': 'Sablon kiválasztása...',
   'settings.mapDefaultHint': 'Hagyd üresen az OpenStreetMap használatához (alapértelmezett)',
-  'settings.mapTemplatePlaceholder': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  'settings.routingBase': 'Saját útvonaltervező',
+  'settings.routingBaseHint': 'Saját OSRM-példány. Üresen hagyva a nyilvános kiszolgálókat használja, amelyek másodpercenként körülbelül egy kérést engednek — egy napra elég, egy autós útra kevés. A kiszolgáló újraindítása után lép életbe.',
+  'settings.valhallaBase': 'Saját Valhalla-példány',
+  'settings.valhallaBaseHint':
+    'A TREK alapértelmezés szerint a FOSSGIS nyilvános Valhalláját használja a fizetős utak, autópályák és kompok elkerüléséhez. Itt megadhatja saját Valhallája URL-jét, hogy azt használja helyette. Ha csak saját útvonaltervező van beállítva, a nyilvános Valhalla nem használatos. Saját URL megadása után indítsa újra a szervert, és töltse újra az oldalt.',
   'settings.mapHint': 'URL sablon a térképcsempékhez',
   'settings.mapProvider': 'Térkép szolgáltató',
   'settings.mapProviderHint': 'A Trip Planner és Journey térképekre érvényes. Az Atlas mindig Leafletet használ.',
@@ -34,6 +39,12 @@ const settings: TranslationStrings = {
   'settings.mapMapboxToken': 'Mapbox hozzáférési token',
   'settings.mapMapboxTokenHint': 'Publikus token (pk.*) innen:',
   'settings.mapMapboxTokenLink': 'mapbox.com → Hozzáférési tokenek',
+  'settings.mapCartoKey': 'CARTO API-kulcs',
+  'settings.mapCartoKeyHint':
+    'A CARTO alaptérképek kulcs nélkül vízjelet jelenítenek meg. Ingyenes, fiók nélkül, innen:',
+  'settings.mapCartoKeyLink': 'carto.com alaptérkép API-kulcs',
+  'settings.mapCartoKeyMissing':
+    'Ez a sablon CARTO alaptérkép. Kulcs nélkül a CARTO minden csempére ráírja: "API KEY REQUIRED". Amíg nincs kulcs megadva, a TREK az alapértelmezett alaptérképet mutatja.',
   'settings.mapStyle': 'Térkép stílus',
   'settings.mapStylePlaceholder': 'Válassz Mapbox stílust',
   'settings.mapStyleHint': 'Preset vagy saját mapbox://styles/USER/ID URL',
@@ -79,6 +90,10 @@ const settings: TranslationStrings = {
   'settings.notifyTripReminder': 'Utazási emlékeztetők',
   'settings.notifyTodoDue': 'Teendő esedékes',
   'settings.notifyVacayInvite': 'Vacay összevonási meghívók',
+  'settings.notifyVacayShare': 'Vacay naptármegosztások',
+  'settings.notifyCollectionInvite': 'Gyűjteménymeghívók',
+  'settings.notifySynologySessionCleared': 'Synology munkamenet törölve',
+  'settings.notifyPluginNotification': 'Bővítményértesítések',
   'settings.notifyPhotosShared': 'Megosztott fotók (Immich)',
   'settings.notifyCollabMessage': 'Csevegés üzenetek (Collab)',
   'settings.notifyPackingTagged': 'Csomagolási lista: hozzárendelések',
@@ -152,7 +167,7 @@ const settings: TranslationStrings = {
   'settings.oauth.modal.redirectUris': 'Átirányítási URI-k',
   'settings.oauth.modal.redirectUrisPlaceholder': 'https://your-app.com/callback\nhttps://your-app.com/auth',
   'settings.oauth.modal.redirectUrisHint':
-    'Soronként egy URI. HTTPS szükséges (localhost kivételével). Pontos egyezés szükséges.',
+    'Soronként egy URI. HTTPS, loopback HTTP vagy saját alkalmazásséma (myapp://). Pontos egyezés, kivéve a loopback URI portját.',
   'settings.oauth.modal.scopes': 'Engedélyezett jogosultságok',
   'settings.oauth.modal.scopesHint':
     'A list_trips és get_trip_summary mindig elérhető — jogosultság nélkül. Segítenek az AI-nak megtalálni az utazás azonosítókat.',
@@ -182,6 +197,10 @@ const settings: TranslationStrings = {
   'settings.about.featureRequest': 'Funkció javaslat',
   'settings.about.featureRequestHint': 'Javasolj egy új funkciót',
   'settings.about.wikiHint': 'Dokumentáció és útmutatók',
+  'settings.about.descriptionManaged':
+    'TREK helps you organize your trips from the first idea to the last memory. Day planning, budget, packing lists, photos and much more — all in one place.',
+  'settings.about.sourceTitle': 'Source code',
+  'settings.about.sourceHint': 'TREK is open source, licensed AGPL-3.0',
   'settings.about.supporters.badge': 'Havi támogatók',
   'settings.about.supporters.title': 'Útitársak a TREK mellett',
   'settings.about.supporters.subtitle':
@@ -232,6 +251,7 @@ const settings: TranslationStrings = {
   'settings.avatarUploaded': 'Profilkép frissítve',
   'settings.avatarRemoved': 'Profilkép eltávolítva',
   'settings.avatarError': 'Feltöltés sikertelen',
+  'settings.avatarRemoveError': 'Eltávolítás sikertelen',
   'settings.mfa.title': 'Kétfaktoros hitelesítés (2FA)',
   'settings.mfa.description':
     'Egy második lépést ad a bejelentkezéshez e-mail és jelszó használatakor. Használj hitelesítő alkalmazást (Google Authenticator, Authy stb.).',
@@ -265,6 +285,7 @@ const settings: TranslationStrings = {
   'settings.bookingLabelsHint':
     'Állomás- / repülőtér-nevek megjelenítése a térképen. Ha ki van kapcsolva, csak az ikon látszik.',
   'settings.notifyVersionAvailable': 'Új verzió elérhető',
+  'settings.notifyReplicaFailure': 'Tárhely-replika hiba',
   'settings.notificationPreferences.noChannels':
     'Nincsenek értesítési csatornák beállítva. Kérd meg a rendszergazdát, hogy állítson be e-mail vagy webhook értesítéseket.',
   'settings.webhookUrl.label': 'Webhook URL',
@@ -300,8 +321,9 @@ const settings: TranslationStrings = {
   'settings.notificationPreferences.webhook': 'Webhook',
   'settings.notificationPreferences.email': 'Email',
   'settings.notificationPreferences.ntfy': 'Ntfy',
-  'settings.currency': 'Currency',
-  'settings.currencyHint': 'All amounts in Costs are converted to and shown in this currency.',
+  'settings.currency': 'Megjelenítési pénznem',
+  'settings.currencyHint':
+    'A Költségek részben az összegek csak a megjelenítéshez lesznek erre a pénznemre átszámítva – az eredeti összegek nem változnak.',
   'settings.currencyTrip': 'Az utazás pénzneme',
   'settings.passkey.title': 'Passkey-k',
   'settings.passkey.description':
@@ -349,11 +371,13 @@ const settings: TranslationStrings = {
   'settings.airtrail.test.failed': 'A kapcsolat sikertelen',
   'settings.aiParsing.title': 'AI-feldolgozás',
   'settings.aiParsing.hint':
-    'Használd a saját AI-modelledet a foglalások kinyeréséhez a feltöltött fájlokból. Ez csak akkor érvényes, ha a rendszergazda nem állított be modellt az egész példányhoz.',
+    'Válaszd ki azt az AI-modellt, amely a foglalásokat kinyeri a feltöltött fájlokból. Ez csak akkor érvényes, ha a rendszergazda nem állított be modellt az egész példányhoz.',
   'settings.aiParsing.provider': 'Szolgáltató',
   'settings.aiParsing.providerLocal': 'Helyi (Ollama)',
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
+  'settings.aiParsing.localAdminOnly':
+    'A helyi végpontot (Ollama) egyszer, az egész példányra vonatkozóan az adminisztrátori beállításokban kell megadni. A saját OpenAI- vagy Anthropic-kulcsodat itt továbbra is használhatod.',
   'settings.aiParsing.model': 'Modell',
   'settings.aiParsing.baseUrl': 'Alap-URL',
   'settings.aiParsing.baseUrlHint': 'Ahol a modell fut — helyi Ollama-kiszolgáló vagy OpenAI-kompatibilis végpont.',
@@ -428,8 +452,31 @@ const settings: TranslationStrings = {
   'settings.appearance.example.normal': 'Place names, descriptions',
   'settings.appearance.example.small': 'Addresses, labels',
   'settings.appearance.experimental': 'Experimental',
+  'settings.appearance.mobileNav': 'Alsó navigációs sáv',
+  'settings.appearance.mobileNav.hint':
+    'Válaszd ki, mely elemek jelenjenek meg a sávban, és melyek kerüljenek a „Továbbiak” alá. Az Irányítópult mindig elöl marad.',
+  'settings.appearance.mobileNav.inBar': 'A sávban',
+  'settings.appearance.mobileNav.underMore': 'A „Továbbiak” alatt',
+  'settings.appearance.mobileNav.moreEmpty': 'Itt még nincs semmi — minden elfér a sávban.',
+  'settings.appearance.mobileNav.pinned': 'Rögzítve',
+  'settings.appearance.mobileNav.toMore': 'Áthelyezés a „Továbbiak” alá',
+  'settings.appearance.mobileNav.toBar': 'Áthelyezés a sávba',
+  'settings.appearance.dashOrder': 'Irányítópult sorrendje',
+  'settings.appearance.dashOrder.hint':
+    'Rendezd át, hogyan legyenek egymás alatt az utazáslista és a widgetek a telefon irányítópultján. A kiemelt utazás mindig felül marad.',
+  'settings.appearance.dashOrder.trips': 'Utazások',
+  'settings.appearance.dashOrder.hidden': 'Rejtett',
   'settings.general.languageRegion': 'Language & region',
   'settings.general.travelMap': 'Travel & map',
+  'settings.general.startup': 'Indítás',
+  'settings.startPage': 'Kezdőoldal',
+  'settings.startPageDashboard': 'Irányítópult',
+  'settings.startPageActiveTrip': 'Aktív utazás',
+  'settings.startPageHint':
+    'A TREK egyből a most zajló utazást nyitja meg, vagy a következőt, amelyik indul. Ugyanaz az utazás, amelyet az irányítópult is kiemel.',
+  'settings.startTripTab': 'Kezdő fül',
+  'settings.startTripTabHint':
+    'Az a fül, amellyel az utazás megnyílik. Ha kikapcsolt bővítményhez tartozik, helyette a terv nézet nyílik meg.',
 
   // ── Offline (#1135)
   'settings.offline.cache.title': 'Offline gyorsítótár',
@@ -457,6 +504,14 @@ const settings: TranslationStrings = {
   'settings.offline.storage.tripsTitle': 'Utazások',
   'settings.offline.storage.tripOn': 'Offline tárolva',
   'settings.offline.storage.tripOff': 'Nincs tárolva',
+  'settings.offline.storage.tripFinished': 'Befejezve. Csak akkor mentjük, ha bekapcsolod.',
+  'settings.offline.notice.stored': '{count} utazás mentve ezen az eszközön',
+  'settings.offline.notice.nothing': 'Nincs mit menteni. Kapcsold be azokat az utazásokat, amelyeket meg szeretnél tartani.',
+  'settings.offline.notice.busy': 'Már fut egy szinkronizálás. Próbáld újra egy pillanat múlva.',
+  'settings.offline.notice.offline': 'Nincs kapcsolat. Csatlakozz, hogy offline menthesd az utazásokat.',
+  'settings.offline.notice.signedOut': 'A munkamenet lejárt. Jelentkezz be újra a szinkronizáláshoz.',
+  'settings.offline.notice.failed': 'A letöltés nem fejeződött be. Ellenőrizd a kapcsolatot, és próbáld újra.',
+  'settings.offline.notice.loadFailed': 'Nem sikerült olvasni az eszköz offline tárhelyét. Általában segít a gyorsítótár törlése.',
   'settings.offline.clear': 'Gyorsítótár törlése',
   'settings.offline.clearConfirm':
     'Törlöd az összes offline utazási adatot? Online állapotban bármikor újraszinkronizálhatsz.',
@@ -495,7 +550,53 @@ const settings: TranslationStrings = {
   'settings.pluginActivity.columns.when': 'Mikor',
   'settings.pluginActivity.columns.status': 'Eredmény',
   'settings.alwaysShowRoutes': 'Mindig jelenjenek meg a foglalási útvonalak',
-  'settings.alwaysShowRoutesHint': 'Automatikusan megjeleníti minden repülőjárat, vonat és egyéb foglalás útvonalát a térképen, nincs szükség egyenkénti bekapcsolásra.',
+  'settings.alwaysShowRoutesHint':
+    'Automatikusan megjeleníti minden repülőjárat, vonat és egyéb foglalás útvonalát a térképen, nincs szükség egyenkénti bekapcsolásra.',
+
+  // Public API keys (Settings -> Integrations)
+  // ── API keys: what a key may read ─────────────────────────────────────────
+  'settings.apiScopes.title': 'Mit olvashat ez a kulcs',
+  'settings.apiScopes.hint':
+    'Hagyj mindent bekapcsolva, ha a kulcs mindent láthat. Amit kikapcsolsz, azt a rendszer megtagadja ettől a kulcstól, nem csak kihagyja a válaszból.',
+  'settings.apiScopes.all': 'Minden',
+  'settings.apiScopes.noneSelected': 'Válassz legalább egy területet, különben a kulcs semmit sem olvashatna.',
+  'settings.apiScopes.limited': '{count} / {total}',
+  'settings.apiScopes.trips': 'Utazások',
+  'settings.apiScopes.days': 'Napok',
+  'settings.apiScopes.places': 'Helyszínek',
+  'settings.apiScopes.notes': 'Napi jegyzetek',
+  'settings.apiScopes.reservations': 'Foglalások',
+  'settings.apiScopes.accommodations': 'Szállás',
+  'settings.apiScopes.travellers': 'Kik utaznak',
+  'settings.apiScopes.bucket-list': 'Kívánságlista',
+  'settings.apiScopes.stats': 'Összesítések',
+  'settings.apiKeys.title': 'API-kulcsok',
+  'settings.apiKeys.description': 'Kulcsok a nyilvános API-hoz, hogy más szoftverek olvashassák az utazásaidat. Csak olvasható: a kulcs semmit nem módosít és nem töröl.',
+  'settings.apiKeys.create': 'Kulcs létrehozása',
+  'settings.apiKeys.empty': 'Még nincs kulcs. Hozz létre egyet más szoftver csatlakoztatásához.',
+  'settings.apiKeys.createdAt': 'létrehozva',
+  'settings.apiKeys.usedAt': 'utoljára használva',
+  'settings.apiKeys.deleteTitle': 'Kulcs törlése',
+  'settings.apiKeys.deleteMessage': 'Minden, ami ezt a kulcsot használja, azonnal leáll. A művelet nem vonható vissza.',
+  'settings.apiKeys.deleted': 'Kulcs törölve',
+  'settings.apiKeys.deleteFailed': 'A kulcsot nem sikerült törölni',
+  'settings.apiKeys.createFailed': 'A kulcsot nem sikerült létrehozni',
+  'settings.apiKeys.copy': 'Másolás',
+  'settings.apiKeys.docsHint': 'Küldd a kulcsot "Authorization: Bearer ..." vagy "X-API-Key: ..." fejlécként a /api/v1 címre.',
+  'settings.apiKeys.endpoint': 'Végpont',
+  'settings.apiKeys.neverUsed': 'még nem használt',
+  'settings.apiKeys.loadFailed': 'Nem sikerült betölteni a kulcsaidat. Töltsd újra az oldalt, és próbáld újra.',
+  'settings.apiKeys.limitReached': '{max} kulcsod van, ennél több egy fiókhoz nem tartozhat. Törölj egy már nem használt kulcsot, hogy újat hozhass létre.',
+  'settings.apiKeys.copyFailed': 'A másolás nem sikerült. Jelöld ki a szöveget, és másold ki kézzel.',
+  'settings.apiKeys.modal.createTitle': 'API-kulcs létrehozása',
+  'settings.apiKeys.modal.name': 'Név',
+  'settings.apiKeys.modal.namePlaceholder': 'pl. Dawarich',
+  'settings.apiKeys.modal.nameHint': 'Csak neked, hogy később felismerd a kulcsot.',
+  'settings.apiKeys.modal.creating': 'Létrehozás folyamatban...',
+  'settings.apiKeys.modal.create': 'Létrehozás',
+  'settings.apiKeys.modal.createdTitle': 'API-kulcs létrehozva',
+  'settings.apiKeys.modal.createdWarning': 'Másold ki a kulcsot most. Csak egyszer jelenik meg, később nem kérhető le.',
+  'settings.apiKeys.modal.done': 'Kész',
 };
 
 export default settings;

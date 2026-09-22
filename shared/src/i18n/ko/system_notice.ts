@@ -54,5 +54,37 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': '{n}번 공지로 이동',
   'system_notice.pager.position': '공지 {current}/{total}',
+  'system_notice.release_notes.eyebrow': '업데이트 완료',
+  'system_notice.release_notes.headline': 'TREK가 이제 스스로 해내는 네 가지.',
+  'system_notice.release_notes.intro': '자체 장소 API, 처음부터 끝까지 계획되는 로드트립, 내 손에 있는 위치 기록, 그리고 동기화되는 문서.',
+  'system_notice.release_notes.features_label': '이번 릴리스의 주역',
+  'system_notice.release_notes.features_aside': '이게 전부는 아닙니다',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': '자체 장소 API를 갖춘 최초의 오픈소스 여행 플래너. 7,360만 개 장소, 키 없음, 할당량 없음.',
+  'system_notice.release_notes.feature_roadtrip_title': '로드트립 애드온',
+  'system_notice.release_notes.feature_roadtrip_body': '주행을 스스로 계획합니다: 경로, 거리, 시간, 정차지. 관리자가 켤 때까지 꺼져 있습니다.',
+  'system_notice.release_notes.feature_dawarich_title': 'Dawarich 연동',
+  'system_notice.release_notes.feature_dawarich_body': 'Google Timeline의 자체 호스팅 대안인 Dawarich를 이제 TREK 안에서 읽을 수 있습니다. TREK은 읽기만, 오직 읽기만 합니다.',
+  'system_notice.release_notes.footnote': '그 밖에도 TREK 곳곳에 작은 변경이 많이 담겨 있습니다.',
+  'system_notice.release_notes.notes_label': '릴리스 노트',
+  'system_notice.release_notes.note_eyebrow': '개발자의 한마디',
+  'system_notice.release_notes.note_title': '여러분이 있어서 TREK을 계속 만듭니다.',
+  'system_notice.release_notes.note_body':
+    'TREK은 제 여행을 위한 작은 도구로 시작했습니다. 여행을 더 잘 계획하고 싶어서 퇴근 후에 짬을 내 만들었습니다. 그 뒤로 사실상 한 번도 자라기를 멈춘 적이 없습니다. 여러분이 쓰는 거의 모든 기능은 풀타임 직장을 다니면서 늦은 밤에, 주말에, 기차 안에서 만들었고, 과연 누가 이걸 열어보기나 할까 조용히 생각하던 저녁도 많았습니다.',
+  'system_notice.release_notes.promise_label': '약속',
+  'system_notice.release_notes.promise_lead': 'TREK은 영원히 무료입니다.',
+  'system_notice.release_notes.promise_text':
+    '모든 기능, 모든 업데이트를 모두에게. 유료 등급도, 구독도, 숨겨진 조건도 없습니다.',
+  'system_notice.release_notes.note_body_after':
+    '그런데 여러분이 열어주셨습니다. 몇 달 만에 수천 명이 찾아와 주셨습니다. 별, 버그 보고, 제가 할 줄 모르는 언어로 된 번역, 한 번도 만난 적 없는 분들의 풀 리퀘스트까지. 지금도 매일 아침 가장 먼저 저장소를 확인하는데, 아직도 잘 실감이 나지 않습니다.',
+  'system_notice.release_notes.note_closing': '함께해 주셔서 감사합니다. Maurice 드림',
+  'system_notice.release_notes.support_lead':
+    'TREK은 무료이고 앞으로도 그렇겠지만, 서버와 도메인, 수많은 늦은 밤은 무료가 아닙니다.',
+  'system_notice.release_notes.support_text':
+    'TREK이 여러분의 여행에 자리를 잡았다면, 커피 한 잔으로 다음 릴리스가 계속 나올 수 있게 도와주세요.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'Ko-fi에서 후원하기',
+  'system_notice.release_notes.feature_docsync_title': '문서 동기화',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud, Synology Drive. 여행의 문서가 이미 운영 중인 저장소와 양방향으로 흐릅니다.',
 };
 export default system_notice;

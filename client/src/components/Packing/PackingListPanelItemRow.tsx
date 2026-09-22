@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
@@ -94,6 +94,17 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
   const canDrag = canEdit && !isPlaceholder && !!drag
   const selectedBag = bags.find(b => b.id === item.bag_id)
 
+  // Shared by both shells of the name: a renameable name is a real button so
+  // the rename can be reached with the keyboard, everything else is plain text.
+  const nameStyle: CSSProperties = {
+    flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    fontSize: 'calc(13.5px * var(--fs-scale-body, 1))',
+    cursor: !canEdit || item.checked ? 'default' : 'text',
+    color: isPlaceholder ? 'var(--text-faint)' : (item.checked ? 'var(--text-faint)' : 'var(--text-primary)'),
+    transition: 'color 200ms cubic-bezier(0.23,1,0.32,1)',
+    textDecoration: item.checked ? 'line-through' : 'none',
+  }
+
   return (
     <div
       className="group packing-item-row"
@@ -122,7 +133,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
           <GripVertical size={13} />
         </div>
       )}
-      <button onClick={handleToggle} style={{
+      <button type="button" onClick={handleToggle} style={{
         flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 0, position: 'relative',
         width: 18, height: 18,
         color: item.checked ? '#10b981' : 'var(--text-faint)',
@@ -151,18 +162,16 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
           onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') { setEditing(false); setEditName(isPlaceholder ? '' : item.name) } }}
           style={{ flex: 1, minWidth: 0, fontSize: 'calc(13.5px * var(--fs-scale-body, 1))', padding: '2px 8px', borderRadius: 6, border: '1px solid var(--border-primary)', outline: 'none', fontFamily: 'inherit' }}
         />
-      ) : (
-        <span
-          onClick={() => canEdit && !item.checked && setEditing(true)}
-          style={{
-            flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            fontSize: 'calc(13.5px * var(--fs-scale-body, 1))',
-            cursor: !canEdit || item.checked ? 'default' : 'text',
-            color: isPlaceholder ? 'var(--text-faint)' : (item.checked ? 'var(--text-faint)' : 'var(--text-primary)'),
-            transition: 'color 200ms cubic-bezier(0.23,1,0.32,1)',
-            textDecoration: item.checked ? 'line-through' : 'none',
-          }}
+      ) : canEdit && !item.checked ? (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          style={{ ...nameStyle, border: 'none', background: 'none', padding: 0, textAlign: 'left', fontFamily: 'inherit' }}
         >
+          {item.name}
+        </button>
+      ) : (
+        <span style={nameStyle}>
           {item.name}
         </span>
       )}
@@ -200,7 +209,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
               readOnly={!canEdit}
               onValueChange={async raw => {
                 if (!canEdit) return
-                const v = raw === '' ? null : parseInt(raw)
+                const v = raw === '' ? null : Number.parseInt(raw)
                 try { await updatePackingItem(tripId, item.id, { weight_grams: v }) } catch { toast.error(t('packing.toast.saveError')) }
               }}
               placeholder="—"
@@ -209,7 +218,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
             <span style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', userSelect: 'none' }}>g</span>
           </div>
           <div style={{ position: 'relative' }}>
-            <button
+            <button type="button"
               onClick={() => canEdit && setShowBagPicker(p => !p)}
               style={{
                 width: 22, height: 22, borderRadius: '50%', cursor: canEdit ? 'pointer' : 'default', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -226,14 +235,14 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
                 boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 4, minWidth: 160,
               }}>
                 {item.bag_id && (
-                  <button onClick={async () => { setShowBagPicker(false); try { await updatePackingItem(tripId, item.id, { bag_id: null }) } catch { toast.error(t('packing.toast.saveError')) } }}
+                  <button type="button" onClick={async () => { setShowBagPicker(false); try { await updatePackingItem(tripId, item.id, { bag_id: null }) } catch { toast.error(t('packing.toast.saveError')) } }}
                     style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', padding: '6px 10px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontFamily: 'inherit', color: 'var(--text-faint)', borderRadius: 7 }}>
                     <span style={{ width: 10, height: 10, borderRadius: '50%', border: '2px dashed var(--border-primary)' }} />
                     {t('packing.noBag')}
                   </button>
                 )}
                 {bags.map(b => (
-                  <button key={b.id} onClick={async () => { setShowBagPicker(false); try { await updatePackingItem(tripId, item.id, { bag_id: b.id }) } catch { toast.error(t('packing.toast.saveError')) } }}
+                  <button type="button" key={b.id} onClick={async () => { setShowBagPicker(false); try { await updatePackingItem(tripId, item.id, { bag_id: b.id }) } catch { toast.error(t('packing.toast.saveError')) } }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 7, width: '100%', padding: '6px 10px',
                       background: item.bag_id === b.id ? 'var(--bg-tertiary)' : 'none',
@@ -260,7 +269,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
                         }}
                         placeholder={t('packing.bagName')}
                         style={{ flex: 1, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-primary)', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontFamily: 'inherit', outline: 'none' }} />
-                      <button onClick={async () => {
+                      <button type="button" onClick={async () => {
                         if (bagInlineName.trim()) {
                           const newBag = await onCreateBag(bagInlineName.trim())
                           if (newBag) { try { await updatePackingItem(tripId, item.id, { bag_id: newBag.id }) } catch { toast.error(t('packing.toast.saveError')) } }
@@ -272,7 +281,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
                       </button>
                     </div>
                   ) : (
-                    <button onClick={() => setBagInlineCreate(true)}
+                    <button type="button" onClick={() => setBagInlineCreate(true)}
                       style={{ display: 'flex', alignItems: 'center', gap: 5, width: '100%', padding: '5px 6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontFamily: 'inherit', color: 'var(--text-faint)', borderRadius: 7 }}
                       onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
                       onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
@@ -290,7 +299,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
       {canEdit && (
       <div className="packing-row-inline-actions" style={{ display: 'flex', gap: 2, alignItems: 'center', flexShrink: 0 }}>
         <div style={{ position: 'relative' }}>
-          <button
+          <button type="button"
             onClick={() => setShowCatPicker(p => !p)}
             title={t('packing.changeCategory')}
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px', borderRadius: 6, display: 'flex', alignItems: 'center', color: 'var(--text-faint)', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', gap: 2 }}
@@ -304,7 +313,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
               padding: 4, minWidth: 140,
             }}>
               {categories.map(cat => (
-                <button key={cat} onClick={() => handleCatChange(cat)} style={{
+                <button type="button" key={cat} onClick={() => handleCatChange(cat)} style={{
                   display: 'flex', alignItems: 'center', gap: 7, width: '100%',
                   padding: '6px 10px', background: cat === (item.category || t('packing.defaultCategory')) ? 'var(--bg-tertiary)' : 'none',
                   border: 'none', cursor: 'pointer', fontSize: 'calc(12.5px * var(--fs-scale-body, 1))', fontFamily: 'inherit',
@@ -330,12 +339,12 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
           />
         )}
 
-        <button onClick={() => setEditing(true)} title={t('common.rename')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '3px 4px', borderRadius: 6, display: 'flex', color: 'var(--text-faint)' }}
+        <button type="button" onClick={() => setEditing(true)} title={t('common.rename')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '3px 4px', borderRadius: 6, display: 'flex', color: 'var(--text-faint)' }}
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
           <Pencil size={13} />
         </button>
 
-        <button onClick={handleDelete} title={t('common.delete')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '3px 4px', borderRadius: 6, display: 'flex', color: 'var(--text-faint)' }}
+        <button type="button" onClick={handleDelete} title={t('common.delete')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '3px 4px', borderRadius: 6, display: 'flex', color: 'var(--text-faint)' }}
           onMouseEnter={e => e.currentTarget.style.color = '#ef4444'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
           <Trash2 size={13} />
         </button>
@@ -344,7 +353,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
 
       {canEdit && (
         <div className="packing-row-overflow" style={{ display: 'none', flexShrink: 0, position: 'relative' }}>
-          <button
+          <button type="button"
             ref={itemMenuBtnRef}
             onClick={() => setShowItemMenu(m => !m)}
             title={t('common.showMore')}
@@ -356,7 +365,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
             const rect = itemMenuBtnRef.current?.getBoundingClientRect()
             return (
               <>
-                <div style={{ position: 'fixed', inset: 0, zIndex: 1098 }} onClick={() => { setShowItemMenu(false); setShowMenuCategories(false) }} />
+                <div role="presentation" style={{ position: 'fixed', inset: 0, zIndex: 1098 }} onClick={() => { setShowItemMenu(false); setShowMenuCategories(false) }} />
                 <div className="trek-menu-enter" style={{
                   position: 'fixed',
                   right: rect ? Math.max(8, window.innerWidth - rect.right) : 8,
@@ -386,7 +395,7 @@ export function ArtikelZeile({ item, tripId, categories, onCategoryChange: _onCa
                             value={item.weight_grams ?? ''}
                             readOnly={!canEdit}
                             onValueChange={async raw => {
-                              const v = raw === '' ? null : parseInt(raw)
+                              const v = raw === '' ? null : Number.parseInt(raw)
                               try { await updatePackingItem(tripId, item.id, { weight_grams: v }) } catch { toast.error(t('packing.toast.saveError')) }
                             }}
                             placeholder="—"
@@ -459,7 +468,7 @@ interface OverflowMenuItemProps {
 
 function OverflowMenuItem({ icon, label, onClick, active = false, danger = false }: OverflowMenuItemProps) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',

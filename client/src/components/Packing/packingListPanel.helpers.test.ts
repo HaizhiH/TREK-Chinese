@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { katColor, itemWeight, parseCsvLine, parseImportLines } from './packingListPanel.helpers'
+import { katColor, itemWeight, bagFillPct, bagTotalWeight, countsTowardsMyLoad, parseCsvLine, parseImportLines, unassignedTotalWeight } from './packingListPanel.helpers'
 import { KAT_COLORS } from './packingListPanel.constants'
 
 describe('packingListPanel.helpers', () => {
@@ -46,6 +46,52 @@ describe('packingListPanel.helpers', () => {
     })
   })
 
+  describe('countsTowardsMyLoad', () => {
+    it('counts the common pool for everyone', () => {
+      // owner_id is stamped on every item, common ones included — filtering by it alone
+      // would shrink the group total to "only what I entered myself".
+      expect(countsTowardsMyLoad({ is_private: 0, owner_id: 2 }, 1)).toBe(true)
+    })
+
+    it('counts my own private items', () => {
+      expect(countsTowardsMyLoad({ is_private: 1, owner_id: 1 }, 1)).toBe(true)
+    })
+
+    it('leaves out an item somebody else shared with me', () => {
+      expect(countsTowardsMyLoad({ is_private: 1, owner_id: 2 }, 1)).toBe(false)
+    })
+
+    it('counts unowned legacy rows', () => {
+      expect(countsTowardsMyLoad({ is_private: 1, owner_id: null }, 1)).toBe(true)
+    })
+
+    it('filters nothing when the viewer is unknown', () => {
+      expect(countsTowardsMyLoad({ is_private: 1, owner_id: 2 }, null)).toBe(true)
+      expect(countsTowardsMyLoad({ is_private: 1, owner_id: 2 }, undefined)).toBe(true)
+    })
+  })
+
+  describe('bagFillPct', () => {
+    it('measures against the bag limit when there is one', () => {
+      expect(bagFillPct(5000, 20000, 99999)).toBe(25)
+      expect(bagFillPct(20000, 20000, 1)).toBe(100)
+    })
+
+    it('never reports more than full', () => {
+      expect(bagFillPct(30000, 20000, 1)).toBe(100)
+    })
+
+    it('falls back to the heaviest bag when no limit is set', () => {
+      expect(bagFillPct(2500, null, 5000)).toBe(50)
+      expect(bagFillPct(2500, undefined, 5000)).toBe(50)
+      expect(bagFillPct(0, 0, 5000)).toBe(0)
+    })
+
+    it('does not divide by zero on an empty trip', () => {
+      expect(bagFillPct(0, null, 0)).toBe(0)
+    })
+  })
+
   describe('parseCsvLine', () => {
     it('splits on comma, semicolon and tab and trims fields', () => {
       expect(parseCsvLine('a, b ;c\td')).toEqual(['a', 'b', 'c', 'd'])
@@ -80,6 +126,31 @@ describe('packingListPanel.helpers', () => {
       const rows = parseImportLines('Documents, Passport\n\n   \n,')
       expect(rows).toHaveLength(1)
       expect(rows[0].name).toBe('Passport')
+    })
+  })
+
+  describe('bagTotalWeight / unassignedTotalWeight (#2191)', () => {
+    it('prefers the server total over anything summable locally', () => {
+      // The whole point: the local list is privacy-filtered, so it can only ever
+      // be the part of the bag this viewer is allowed to see.
+      expect(bagTotalWeight({ total_weight_grams: 1000 }, [{ weight_grams: 800, quantity: 1 }])).toBe(1000)
+    })
+
+    it('keeps a server-reported zero instead of falling back to the local sum', () => {
+      // An empty bag really weighs 0; only an ABSENT field means "not told".
+      expect(bagTotalWeight({ total_weight_grams: 0 }, [{ weight_grams: 800, quantity: 1 }])).toBe(0)
+    })
+
+    it('falls back to the local sum for a bag cached before the field existed', () => {
+      expect(bagTotalWeight({}, [{ weight_grams: 250, quantity: 3 }, { weight_grams: 50 }])).toBe(800)
+      expect(bagTotalWeight({ total_weight_grams: null }, [{ weight_grams: 120 }])).toBe(120)
+    })
+
+    it('applies the same rule to the unassigned pile', () => {
+      expect(unassignedTotalWeight(150, [{ weight_grams: 900 }])).toBe(150)
+      expect(unassignedTotalWeight(0, [{ weight_grams: 900 }])).toBe(0)
+      expect(unassignedTotalWeight(null, [{ weight_grams: 900 }])).toBe(900)
+      expect(unassignedTotalWeight(undefined, [])).toBe(0)
     })
   })
 })

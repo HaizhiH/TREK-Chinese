@@ -1,13 +1,25 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router'
 import { useJourneyStore } from '../../store/journeyStore'
 import { useTranslation } from '../../i18n'
 import { addListener, removeListener } from '../../api/websocket'
+import { journeyApi } from '../../api/client'
+import type { JourneyTrack } from '@trek/shared'
 import { DAY_COLORS } from '../../components/Journey/dayColors'
 import type { JourneyMapAutoHandle as JourneyMapHandle } from '../../components/Journey/JourneyMapAuto'
 import { useToast } from '../../components/shared/Toast'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { lockBodyScroll } from '../../utils/bodyScrollLock'
 import type { JourneyEntry } from '../../store/journeyStore'
+import { createDraftJourneyEntry } from './JourneyDetailPage.helpers'
+import { useDawarichSuggestions } from '../../hooks/useDawarichSuggestions'
+import { openStaysByDate } from '../../components/Dawarich/dawarichSuggestionModel'
+import type { DawarichSuggestion, DawarichSuggestionTarget } from '@trek/shared'
+
+import { useDawarichJournalTrail } from '../../hooks/useDawarichJournalTrail'
+
+/** Stable identity for "this journey draws no trip tracks" (#2194). */
+const NO_TRACKS: JourneyTrack[] = []
 
 /**
  * Journey detail page logic — owns the journey load + WebSocket live sync, the
@@ -25,6 +37,13 @@ export function useJourneyDetail() {
   const { current, loading, notFound, loadJourney, updateEntry, deleteEntry, reorderEntries, uploadPhotos, deletePhoto } = useJourneyStore()
   const mapRef = useRef<JourneyMapHandle>(null)
   const fullMapRef = useRef<JourneyMapHandle>(null)
+  /** The gallery hands its file picker up here, so the hero button can open it. */
+  const galleryUploadRef = useRef<(() => void) | null>(null)
+  /** Same deal for photo providers: the gallery probes which ones are
+      connected and reports them up, so the header can render an Immich/
+      Synology button next to Upload. */
+  const [galleryProviders, setGalleryProviders] = useState<{ id: string; name: string }[]>([])
+  const galleryBrowseRef = useRef<((provider: string) => void) | null>(null)
   const [activeLocationId, setActiveLocationId] = useState<string | null>(null)
 
   const isMobile = useIsMobile()
@@ -48,18 +67,49 @@ export function useJourneyDetail() {
   // The bottom-nav "+" starts a new entry via ?create=entry.
   useEffect(() => {
     if (searchParams.get('create') === 'entry' && current && canEditEntries) {
-      const today = new Date().toISOString().slice(0, 10)
-      setEditingEntry({ id: 0, journey_id: current.id, author_id: 0, type: 'entry', entry_date: today, visibility: 'private', sort_order: 0, photos: [], created_at: 0, updated_at: 0 } as JourneyEntry)
+      setEditingEntry(createDraftJourneyEntry(current.id))
       setSearchParams(p => { p.delete('create'); return p }, { replace: true })
     }
   }, [searchParams, current, canEditEntries])
   const [unlinkTrip, setUnlinkTrip] = useState<{ trip_id: number; title: string } | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [hideSkeletons, setHideSkeletons] = useState(false)
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     if (id) loadJourney(Number(id)).catch(() => {})
   }, [id])
+
+  // GPX tracks of the trips behind this journey (#1260), drawn only when the
+  // journey asks for them (#2194). Loaded separately from the journey itself: a
+  // journey without tracks is the common case, and a failed lookup should cost
+  // the map its lines, not the whole page.
+  //
+  // The switch gates the REQUEST, not just the rendering: the endpoint ships
+  // full unthinned geometry, which for a trip carrying a season of recorded
+  // drives is megabytes fetched on every journey open for a map nobody asked
+  // for. It stays untouched on the server so TREK Studio, which freezes the
+  // same endpoint's output into a saved book, keeps the set it laid out with.
+  const [tracks, setTracks] = useState<JourneyTrack[]>(NO_TRACKS)
+  // Gate on the journey the route actually names: loadJourney leaves the previous
+  // `current` in place while the next one loads, so reading the flag unguarded
+  // would fetch the tracks of journey A under the id of journey B — the exact
+  // megabyte-sized request the switch exists to avoid.
+  const journeyLoaded = current?.id === Number(id)
+  const showTripTracks = journeyLoaded && !!current?.show_trip_tracks
+  useEffect(() => {
+    if (!id || !showTripTracks) {
+      // A stable empty array: a fresh literal here would be a new reference on
+      // every toggle and re-render the map for nothing.
+      setTracks(NO_TRACKS)
+      return
+    }
+    let cancelled = false
+    journeyApi.listTracks(Number(id))
+      .then(res => { if (!cancelled) setTracks(res.tracks ?? NO_TRACKS) })
+      .catch(() => { if (!cancelled) setTracks(NO_TRACKS) })
+    return () => { cancelled = true }
+  }, [id, showTripTracks])
 
   useEffect(() => {
     if (current?.hide_skeletons !== undefined) setHideSkeletons(current.hide_skeletons)
@@ -171,6 +221,114 @@ export function useJourneyDetail() {
     return () => scrollCleanupRef.current?.()
   }, [current?.entries, setupScrollSync])
 
+  // ── Jump to top / to the last entry (#1088) ───────────────────────────────
+  // A long journal is a long scroll: everything that adds to it — the entry
+  // button, the gallery upload — sits at the top, and where you were reading
+  // sits at the bottom. Two buttons beat two trips of the scroll wheel.
+  const [feedEdge, setFeedEdge] = useState<{ atTop: boolean; atBottom: boolean }>({ atTop: true, atBottom: true })
+
+  useEffect(() => {
+    const feed = feedRef.current
+    if (!feed) return
+    // 400px of travel before either button is worth offering; below that the
+    // scroll is short enough that a button is just clutter.
+    const THRESHOLD = 400
+    let frame: number | null = null
+    let pending = false
+    const measure = () => {
+      pending = false
+      const el = feedRef.current
+      if (!el) return
+      const scrolled = el.scrollTop
+      const remaining = el.scrollHeight - el.clientHeight - scrolled
+      setFeedEdge(prev => {
+        const next = { atTop: scrolled <= THRESHOLD, atBottom: remaining <= THRESHOLD }
+        return prev.atTop === next.atTop && prev.atBottom === next.atBottom ? prev : next
+      })
+    }
+    // The "already scheduled" flag is its own variable rather than the frame id:
+    // the id is only assigned once requestAnimationFrame returns, which is after
+    // the callback has already run whenever rAF fires synchronously.
+    const onScroll = () => {
+      if (pending) return
+      pending = true
+      frame = window.requestAnimationFrame(measure)
+    }
+    feed.addEventListener('scroll', onScroll, { passive: true })
+    measure()
+    // Entries load in batches, so the scrollable height grows after mount.
+    const ro = new ResizeObserver(measure)
+    ro.observe(feed)
+    if (feed.firstElementChild) ro.observe(feed.firstElementChild)
+    return () => {
+      feed.removeEventListener('scroll', onScroll)
+      ro.disconnect()
+      if (frame != null) window.cancelAnimationFrame(frame)
+    }
+  }, [current?.id, view])
+
+  const scrollFeedTo = useCallback((edge: 'top' | 'bottom') => {
+    const el = feedRef.current
+    if (!el) return
+    el.scrollTo({ top: edge === 'top' ? 0 : el.scrollHeight, behavior: 'smooth' })
+  }, [])
+
+  /**
+   * Wave one trip-derived suggestion away.
+   *
+   * Optimistic in effect rather than in code: the server drops the row from every
+   * read, and the store's own update already removes an entry the response no
+   * longer describes — so a reload is all the confirmation the list needs.
+   */
+  const dismissSuggestion = useCallback(async (entry: JourneyEntry) => {
+    try {
+      await updateEntry(entry.id, { dismissed: true })
+      if (current) await loadJourney(current.id)
+      toast.success(t('journey.suggestions.dismissed'))
+    } catch {
+      toast.error(t('common.errorTitle'))
+    }
+  }, [updateEntry, loadJourney, current, toast, t])
+
+  const restoreSuggestions = useCallback(async () => {
+    if (!current) return
+    try {
+      const { restored } = await journeyApi.restoreSuggestions(current.id)
+      await loadJourney(current.id)
+      toast.success(t('journey.suggestions.restored', { count: String(restored) }))
+    } catch {
+      toast.error(t('common.errorTitle'))
+    }
+  }, [current, loadJourney, toast, t])
+
+  /**
+   * The stays Dawarich recorded over this journal's dates, by the day they happened on.
+   *
+   * Read here rather than inside a panel so the timeline can fold each day's stays into
+   * that day (discussion with Roel, 16.09.): stacked above the entries, a fortnight of
+   * driving put forty rows between the reader and their own first entry.
+   *
+   * Only what is still open — an accepted stay is an entry on the timeline already, and a
+   * dismissed one was waved away on purpose. Within a day the order is the order they were
+   * lived in, which is what makes a run of them read as an afternoon.
+   */
+  const dawarich = useDawarichSuggestions()
+  const dawarichByDate = useMemo(() => openStaysByDate(dawarich.suggestions), [dawarich.suggestions])
+
+  /**
+   * Accepting writes the stay into THIS journal and reloads it, which is how the new entry
+   * reaches the timeline the stay was standing in.
+   */
+  const acceptDawarich = useCallback(async (suggestion: DawarichSuggestion, target: DawarichSuggestionTarget) => {
+    if (!current) return
+    const ok = await dawarich.accept(suggestion.id, { target, journalId: current.id })
+    if (ok) await loadJourney(current.id)
+  }, [dawarich, current, loadJourney])
+
+  const dismissDawarich = useCallback((suggestion: DawarichSuggestion) => {
+    void dawarich.dismiss(suggestion.id)
+  }, [dawarich])
+
   const handleMarkerClick = useCallback((entryId: string) => {
     const el = document.querySelector(`[data-entry-id="${entryId}"]`)
     if (!el) return
@@ -206,12 +364,11 @@ export function useJourneyDetail() {
   }, [view])
 
   // On desktop we run a two-pane layout where only the feed column scrolls;
-  // the body must not scroll underneath it. Restore on unmount.
+  // the body must not scroll underneath it. Goes through the shared counter so a
+  // modal opening on top of it cannot hand the page back early (#1809).
   useEffect(() => {
     if (isMobile) return
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    return lockBodyScroll()
   }, [isMobile])
 
   // Map only shows real journal entries — skeletons are trip-derived
@@ -231,7 +388,7 @@ export function useJourneyDetail() {
       (current?.entries || [])
         .filter(e => e.title !== 'Gallery' && e.title !== '[Trip Photos]')
         .map(e => e.entry_date)
-        .sort()
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     )]
     const sorted = [...mapEntries].sort((a, b) => a.entry_date.localeCompare(b.entry_date))
     const dayCounters = new Map<string, number>()
@@ -250,9 +407,59 @@ export function useJourneyDetail() {
         entry_date: e.entry_date,
         dayColor: DAY_COLORS[dayIdx % DAY_COLORS.length],
         dayLabel,
+        // A glimpse of the entry's own pictures on its marker card. Three is what
+        // the card has room for; the rest are one tap away in the entry itself.
+        photoUrls: (e.photos ?? []).slice(0, 3).map(p => `/api/photos/${p.photo_id}/thumbnail`),
       }
     })
   }, [mapEntries, current?.entries])
+
+  /**
+   * Where a journey should open: on today, when today is part of it.
+   *
+   * Every load used to start at the first entry, so keeping a journal on a trip
+   * meant scrolling past everything already written before you could add to it
+   * (discussion #2299). "Today" means the last day at or before now — a rest day
+   * with nothing written still lands you at yesterday rather than at the start.
+   *
+   * Only while the journey is running, though. A journey that ended last spring
+   * is something you read, and reading starts at the beginning; opening it at the
+   * last page would be the worse of the two mistakes.
+   */
+  const openAtEntryId = useMemo(() => {
+    const entries = current?.entries ?? []
+    if (entries.length === 0) return null
+    const dated = [...entries].sort((a, b) => a.entry_date.localeCompare(b.entry_date))
+    const today = new Date()
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    const first = dated[0]!.entry_date
+    const last = dated[dated.length - 1]!.entry_date
+    if (todayKey < first || todayKey > last) return null
+    const reached = dated.filter(e => e.entry_date <= todayKey)
+    const target = reached[reached.length - 1] ?? dated[0]!
+    // The first entry OF that day, not the last one before now: a day is read
+    // from its beginning.
+    const dayStart = dated.find(e => e.entry_date === target.entry_date) ?? target
+    return String(dayStart.id)
+  }, [current?.entries])
+
+  // Desktop only: scroll it into the feed once per journey, after the list is up.
+  // The scroll-sync primes at 300ms and would otherwise pick a winner from the top
+  // of the feed and pin the map there.
+  const openedAtRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (isMobile || !current || view !== 'timeline') return
+    if (openedAtRef.current === current.id) return
+    if (!openAtEntryId) { openedAtRef.current = current.id; return }
+    const timer = window.setTimeout(() => {
+      const el = document.querySelector(`[data-entry-id="${openAtEntryId}"]`)
+      if (!el) return
+      openedAtRef.current = current.id
+      el.scrollIntoView({ block: 'center' })
+      setActiveEntryId(openAtEntryId)
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [current, openAtEntryId, isMobile, view])
 
   const locatedEntryIdsRef = useRef(new Set<string>())
   useEffect(() => {
@@ -262,19 +469,62 @@ export function useJourneyDetail() {
   const tripDates = useMemo(() => {
     const dates = new Set<string>()
     if (!current?.trips) return dates
+    // The days are walked in local time, so the key has to be built from the local parts —
+    // toISOString() would shift the whole range by a day in every timezone east of UTC.
+    const dateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     for (const trip of current.trips) {
       if (!trip.start_date || !trip.end_date) continue
       const start = new Date(trip.start_date + 'T00:00:00')
       const end = new Date(trip.end_date + 'T00:00:00')
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        dates.add(d.toISOString().split('T')[0])
+        dates.add(dateKey(d))
       }
     }
     return dates
   }, [current?.trips])
 
+  // The route actually recorded over the journal's own dates (#2279), drawn on
+  // the same layer as the GPX tracks because it is the same kind of thing: a
+  // recording, not a line connecting entries. Gated on `show_trip_tracks` for
+  // the same reason that switch exists — it gates the REQUEST, and a map nobody
+  // asked for should not reach across the network for it.
+  const dawarichTrail = useDawarichJournalTrail(tripDates, showTripTracks)
+  const mapTracks = useMemo(
+    () => (dawarichTrail.tracks.length > 0 ? [...tracks, ...dawarichTrail.tracks] : tracks),
+    [tracks, dawarichTrail.tracks],
+  )
+
+  /** Studio's margin to the window on all four sides — see `.st-root` in studio.css. */
+  const STUDIO_INSET = 16
+
+  /**
+   * Open TREK Studio.
+   *
+   * The button's own rect travels along in the navigation state so the panel can
+   * grow out of the button instead of appearing from nowhere. The origin is
+   * expressed inside the panel's box, which starts 16px in from the left and
+   * `--nav-h + 16px` down from the top (see studio.css).
+   */
+  const openStudio = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    navigate(`/journey/${id}/studio`, {
+      state: {
+        studioOrigin: {
+          x: Math.round(r.left + r.width / 2 - STUDIO_INSET),
+          y: Math.round(r.top + r.height / 2 - STUDIO_INSET),
+        },
+      },
+    })
+  }, [navigate, id])
+
+  /** Warm the Studio chunk on hover so the click is not spent downloading it. */
+  const prefetchStudio = useCallback(() => {
+    void import('../JourneyStudioPage')
+  }, [])
+
   return {
     id, navigate, toast, t, locale,
+    openStudio, prefetchStudio,
     current, loading,
     canEditEntries, canEditJourney, myRole,
     view, setView, activeEntryId, setActiveEntryId, feedRef,
@@ -283,8 +533,13 @@ export function useJourneyDetail() {
     showInvite, setShowInvite, showAddTrip, setShowAddTrip,
     unlinkTrip, setUnlinkTrip, showSettings, setShowSettings,
     hideSkeletons, setHideSkeletons,
-    mapRef, fullMapRef, activeLocationId, handleMarkerClick, handleLocationClick,
-    mapEntries, sidebarMapItems, tripDates, isMobile,
+    query, setQuery, dismissSuggestion, restoreSuggestions,
+    dawarichByDate, dawarichBusyId: dawarich.busyId, acceptDawarich, dismissDawarich,
+    openAtEntryId,
+    mapRef, fullMapRef, galleryUploadRef, galleryProviders, setGalleryProviders, galleryBrowseRef,
+    activeLocationId, handleMarkerClick, handleLocationClick,
+    mapEntries, sidebarMapItems, tripDates, isMobile, tracks: mapTracks, dawarichTrail,
+    feedEdge, scrollFeedTo,
     loadJourney, updateEntry, deleteEntry, reorderEntries, uploadPhotos, deletePhoto,
   }
 }

@@ -10,17 +10,39 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { isDemoWriteBlocked, DEMO_WRITE_ERROR } from '../common/demo-write';
+import { contentDisposition } from '../common/content-disposition';
+import { RuntimeEnvService } from '../app-config/runtime-env.service';
 import { memoryStorage } from 'multer';
+import { hexColorSchema, placeImageUrlSchema, placeWebsiteSchema } from '@trek/shared';
 import type { User } from '../../types';
 import { PlacesService } from './places.service';
-import { isUpdateConflict } from '../../services/conflictResult';
+import { isDirectionsUrl } from './maps-dir.helpers';
+import { isUpdateConflict } from '../common/conflictResult';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { RequirePermission, TripAccessGuard } from '../permissions/trip-access.guard';
+import { PLACE_IMAGE_FILE_FILTER } from '../common/place-image-upload';
+import { StorageService } from '../storage/storage.service';
+import { placeImageUrl } from './place-image';
+import {
+  PlaceBulkDeleteDto,
+  PlaceBulkUpdateDto,
+  PlaceCreateDto,
+  PlaceExportGpxDto,
+  PlaceImportGpxDto,
+  PlaceImportListDto,
+  PlaceImportMapDto,
+  PlaceRatingDto,
+  PlaceUpdateDto,
+} from './places.dto';
 
 const STRING_LIMITS: Record<string, number> = { name: 200, description: 2000, address: 500, notes: 2000 };
 const UPLOAD = { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } };
@@ -30,6 +52,35 @@ function validateLengths(body: Record<string, unknown>): void {
     const value = body[field];
     if (value && typeof value === 'string' && value.length > max) {
       throw new HttpException({ error: `${field} must be ${max} characters or less` }, 400);
+    }
+  }
+}
+
+// A bad hex makes MapLibre fail hard when it parses the paint property, and the
+// update body is an open record that Zod does not police — so check it here.
+function validateRouteColor(body: Record<string, unknown>): void {
+  const value = body.route_color;
+  if (value === undefined || value === null) return;
+  if (typeof value !== 'string' || !hexColorSchema.safeParse(value).success) {
+    throw new HttpException({ error: 'route_color must be a hex colour like #4f46e5' }, 400);
+  }
+}
+
+// Same reason as route_color: these two leave the database for a renderer that
+// treats them as a URL — the thumbnail into marker HTML, the homepage into
+// window.open — and the open record means the pipe never sees them.
+function validateUrlFields(body: Record<string, unknown>): void {
+  const image = body.image_url;
+  if (image !== undefined && image !== null) {
+    if (typeof image !== 'string' || !placeImageUrlSchema.safeParse(image).success) {
+      throw new HttpException({ error: 'image_url must be an uploaded path, a photo-proxy path, an inline image or an https URL' }, 400);
+    }
+  }
+  const website = body.website;
+  // '' is how the UI clears the field; treat it like an absent value.
+  if (website !== undefined && website !== null && website !== '') {
+    if (typeof website !== 'string' || !placeWebsiteSchema.safeParse(website).success) {
+      throw new HttpException({ error: 'website must be an http or https URL' }, 400);
     }
   }
 }
@@ -47,11 +98,25 @@ function parseBool(v: unknown, defaultVal: boolean): boolean {
  * bodies; the journey create/update/delete hooks; and WebSocket broadcasts with
  * the forwarded X-Socket-Id. The /import/* and /bulk-delete routes are declared
  * before /:id so the static segments win over the param.
+ *
+ * Bodies validate against the @trek/shared place schemas via the DTO classes in
+ * places.dto.ts + the global ZodValidationPipe (400 with the standard
+ * `{ error }` envelope on mismatch). That replaced three bespoke checks —
+ * 'Place name is required', 'ids must be an array of numbers' and
+ * 'URL is required' — and, because a pipe runs before the handler, a malformed
+ * body now 400s ahead of the trip-access 404 / permission 403 it used to follow.
+ * Same trade the todo and trips migrations took. The length and route_color
+ * guards below stay in the handler: the place body is a deliberately open
+ * record, so the pipe passes their inputs through untouched.
  */
 @Controller('api/trips/:tripId/places')
 @UseGuards(JwtAuthGuard)
 export class PlacesController {
-  constructor(private readonly places: PlacesService) {}
+  constructor(
+    private readonly places: PlacesService,
+    private readonly env: RuntimeEnvService,
+    private readonly storage: StorageService,
+  ) {}
 
   private requireTrip(tripId: string, user: User) {
     const trip = this.places.verifyTripAccess(tripId, user.id);
@@ -68,6 +133,7 @@ export class PlacesController {
   }
 
   @Get()
+  @UseGuards(TripAccessGuard)
   list(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
@@ -75,7 +141,6 @@ export class PlacesController {
     @Query('category') category?: string,
     @Query('tag') tag?: string,
   ) {
-    this.requireTrip(tripId, user);
     return { places: this.places.list(tripId, { search, category, tag }) };
   }
 
@@ -83,15 +148,14 @@ export class PlacesController {
   create(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
-    @Body() body: Record<string, unknown> & { name?: string },
+    @Body() body: PlaceCreateDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     const trip = this.requireTrip(tripId, user);
     validateLengths(body);
+    validateRouteColor(body);
+    validateUrlFields(body);
     this.requireEdit(trip, user);
-    if (!body.name) {
-      throw new HttpException({ error: 'Place name is required' }, 400);
-    }
     const place = this.places.create(tripId, body as never);
     this.places.broadcast(tripId, 'place:created', { place }, socketId);
     this.places.onCreated(tripId, place.id);
@@ -104,7 +168,7 @@ export class PlacesController {
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() body: Record<string, unknown>,
+    @Body() body: PlaceImportGpxDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     const trip = this.requireTrip(tripId, user);
@@ -128,13 +192,41 @@ export class PlacesController {
     return { places: result.places, count: result.count, skipped: result.skipped };
   }
 
+  /**
+   * The trip as GPX, for Organic Maps, a handheld or anything else that reads it.
+   * A read, so viewing the trip is enough; no edit permission required. Declared
+   * before the `:id` routes so the literal path wins.
+   */
+  @Get('export.gpx')
+  exportGpx(
+    @CurrentUser() user: User,
+    @Param('tripId') tripId: string,
+    @Query() query: PlaceExportGpxDto,
+    @Res() res: Response,
+  ) {
+    this.requireTrip(tripId, user);
+    const waypoints = parseBool(query.waypoints, true);
+    const tracks = parseBool(query.tracks, true);
+    const dayRoutes = parseBool(query.dayRoutes, true);
+    if (!waypoints && !tracks && !dayRoutes) {
+      throw new HttpException({ error: 'No export types selected' }, 400);
+    }
+    const result = this.places.exportGpx(tripId, { waypoints, tracks, dayRoutes });
+    if (!result) {
+      throw new HttpException({ error: 'Nothing to export' }, 404);
+    }
+    res.setHeader('Content-Type', 'application/gpx+xml; charset=utf-8');
+    res.setHeader('Content-Disposition', contentDisposition(result.filename, 'attachment'));
+    res.send(result.gpx);
+  }
+
   @Post('import/map')
   @UseInterceptors(FileInterceptor('file', UPLOAD))
   async importMap(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() body: Record<string, unknown>,
+    @Body() body: PlaceImportMapDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     const trip = this.requireTrip(tripId, user);
@@ -164,30 +256,34 @@ export class PlacesController {
   }
 
   @Post('import/google-list')
-  async importGoogle(@CurrentUser() user: User, @Param('tripId') tripId: string, @Body('url') url: unknown, @Body('enrich') enrich: unknown, @Headers('x-socket-id') socketId?: string) {
-    return this.importList('google', user, tripId, url, enrich, socketId);
+  async importGoogle(@CurrentUser() user: User, @Param('tripId') tripId: string, @Body() body: PlaceImportListDto, @Headers('x-socket-id') socketId?: string) {
+    return this.importList('google', user, tripId, body, socketId);
   }
 
   @Post('import/naver-list')
-  async importNaver(@CurrentUser() user: User, @Param('tripId') tripId: string, @Body('url') url: unknown, @Body('enrich') enrich: unknown, @Headers('x-socket-id') socketId?: string) {
-    return this.importList('naver', user, tripId, url, enrich, socketId);
+  async importNaver(@CurrentUser() user: User, @Param('tripId') tripId: string, @Body() body: PlaceImportListDto, @Headers('x-socket-id') socketId?: string) {
+    return this.importList('naver', user, tripId, body, socketId);
   }
 
   /** Shared google/naver list import — identical flow, different provider + error string. */
-  private async importList(provider: 'google' | 'naver', user: User, tripId: string, url: unknown, enrich: unknown, socketId?: string) {
+  private async importList(provider: 'google' | 'naver', user: User, tripId: string, body: PlaceImportListDto, socketId?: string) {
     const trip = this.requireTrip(tripId, user);
     this.requireEdit(trip, user);
-    if (!url || typeof url !== 'string') {
-      throw new HttpException({ error: 'URL is required' }, 400);
-    }
+    const { url, enrich } = body;
     // Opt-in: re-resolve each imported place via the Places API to fill in
     // photo / address / website / phone and persist a google_place_id (#886).
     const opts = { enrich: parseBool(enrich, false), userId: user.id };
     const label = provider === 'google' ? 'Google' : 'Naver';
     try {
-      const result = provider === 'google'
-        ? await this.places.importGoogleList(tripId, url, opts)
-        : await this.places.importNaverList(tripId, url, opts);
+      // A directions link and a list link arrive through the same box because they are
+      // the same gesture: somebody pressed Share in Google Maps. Which screen they were
+      // on is the URL's business, not the traveller's, and answering a pasted route with
+      // "could not extract list ID" was the whole of the complaint.
+      const result = provider !== 'google'
+        ? await this.places.importNaverList(tripId, url, opts)
+        : isDirectionsUrl(url)
+          ? await this.places.importGoogleDirections(tripId, url, opts)
+          : await this.places.importGoogleList(tripId, url, opts);
       if ('error' in result) {
         throw new HttpException({ error: result.error }, result.status);
       }
@@ -204,42 +300,59 @@ export class PlacesController {
 
   @Post('bulk-delete')
   @HttpCode(200) // Express answers bulk-delete with res.json (200), unlike the 201 imports.
-  bulkDelete(
+  async bulkDelete(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
-    @Body('ids') ids: unknown,
+    @Body() body: PlaceBulkDeleteDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     const trip = this.requireTrip(tripId, user);
     this.requireEdit(trip, user);
-    if (!Array.isArray(ids) || ids.some((v) => typeof v !== 'number')) {
-      throw new HttpException({ error: 'ids must be an array of numbers' }, 400);
-    }
+    const { ids } = body;
     if (ids.length === 0) {
       return { deleted: [], count: 0 };
     }
-    for (const id of ids) this.places.onDeleted(id);
-    const deleted = this.places.removeMany(tripId, ids);
+    // Scope the ids to the trip before the hook: onPlaceDeleted keys on the
+    // place id alone, so an id from another trip would detach that trip's
+    // journey entries even though removeMany below refuses it. Still ahead of
+    // the DELETE — journey_entries.source_place_id is ON DELETE SET NULL, so
+    // afterwards there is nothing left to detach.
+    const scoped = this.places.scopedIds(tripId, ids);
+    for (const id of scoped) this.places.onDeleted(id);
+    // Read the linked expenses before the delete — afterwards the link is gone (#1298).
+    const expenseIds = this.places.linkedExpenseIds(tripId, scoped);
+    const { deleted, cancelled } = await this.places.removeMany(tripId, ids);
     for (const id of deleted) {
       this.places.broadcast(tripId, 'place:deleted', { placeId: id }, socketId);
+    }
+    // A night booked at this place went with it, and took its partner booking and
+    // that booking's expense along. Neither is covered by place:deleted, and an
+    // expense linked by reservation_id is not one linkedExpenseIds finds.
+    //
+    // Sent to the deleting tab as well, on purpose. The socket id keeps a tab
+    // from hearing back what it just did itself, and that tab only removed the
+    // places: the booking and the expense went on the server alone, and a tab
+    // that never hears about them keeps showing both until a reload.
+    for (const reservationId of cancelled.reservationIds) {
+      this.places.broadcast(tripId, 'reservation:deleted', { reservationId }, undefined);
+    }
+    for (const itemId of [...expenseIds, ...cancelled.budgetItemIds]) {
+      this.places.broadcast(tripId, 'budget:deleted', { itemId }, undefined);
     }
     return { deleted, count: deleted.length };
   }
 
   @Post('bulk-update')
   @HttpCode(200)
-  bulkUpdate(
+  async bulkUpdate(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
-    @Body() body: { ids?: unknown; category_id?: unknown },
+    @Body() body: PlaceBulkUpdateDto,
     @Headers('x-socket-id') socketId?: string,
   ) {
     const trip = this.requireTrip(tripId, user);
     this.requireEdit(trip, user);
     const { ids } = body;
-    if (!Array.isArray(ids) || ids.some((v) => typeof v !== 'number')) {
-      throw new HttpException({ error: 'ids must be an array of numbers' }, 400);
-    }
     if (ids.length === 0) {
       return { updated: [], count: 0 };
     }
@@ -248,7 +361,7 @@ export class PlacesController {
     if (!('category_id' in body)) {
       throw new HttpException({ error: 'Provide at least one field to update' }, 400);
     }
-    const updated = this.places.updateMany(tripId, ids, { category_id: body.category_id as number | null });
+    const updated = await this.places.updateMany(tripId, ids, { category_id: body.category_id as number | null });
     for (const place of updated) {
       this.places.broadcast(tripId, 'place:updated', { place }, socketId);
       this.places.onUpdated(place.id);
@@ -257,8 +370,8 @@ export class PlacesController {
   }
 
   @Get(':id')
+  @UseGuards(TripAccessGuard)
   get(@CurrentUser() user: User, @Param('tripId') tripId: string, @Param('id') id: string) {
-    this.requireTrip(tripId, user);
     const place = this.places.get(tripId, id);
     if (!place) {
       throw new HttpException({ error: 'Place not found' }, 404);
@@ -266,9 +379,74 @@ export class PlacesController {
     return { place };
   }
 
-  @Get(':id/image')
-  async image(@CurrentUser() user: User, @Param('tripId') tripId: string, @Param('id') id: string) {
+  @Post(':id/image')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('image', { fileFilter: PLACE_IMAGE_FILE_FILTER }))
+  async uploadImage(
+    @CurrentUser() user: User,
+    @Param('tripId') tripId: string,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    const trip = this.requireTrip(tripId, user);
+    this.requireEdit(trip, user);
+    // Inline rather than DemoWriteGuard: requireEdit above answers 404/403 for a
+    // trip the caller cannot reach, and a guard would run before it.
+    if (isDemoWriteBlocked(this.env, user.email)) {
+      throw new HttpException(DEMO_WRITE_ERROR, 403);
+    }
+    if (!file) {
+      throw new HttpException({ error: 'No image uploaded' }, 400);
+    }
+    // Commit the spooled upload to its final storage location (atomic
+    // same-volume rename) before the DB row references the final path.
+    await this.storage.put('places', file.filename, { tmpPath: file.path });
+    // Reuse the existing image_url slot (the top-precedence thumbnail source); the
+    // update path reclaims any previously uploaded file it replaces.
+    const result = await this.places.update(tripId, id, { image_url: placeImageUrl(file.filename) } as never);
+    if (!result || isUpdateConflict(result)) {
+      throw new HttpException({ error: 'Place not found' }, 404);
+    }
+    const place = result;
+    this.places.broadcast(tripId, 'place:updated', { place }, socketId);
+    this.places.onUpdated(place.id);
+    return { place };
+  }
+
+  @Put(':id/rating')
+  rate(
+    @CurrentUser() user: User,
+    @Param('tripId') tripId: string,
+    @Param('id') id: string,
+    @Body() body: PlaceRatingDto,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    // Deliberately no place_edit check: every trip member may cast their own
+    // vote (#1435), even when an admin restricts place editing.
     this.requireTrip(tripId, user);
+    const place = this.places.rate(tripId, id, user.id, body.rating);
+    if (!place) {
+      throw new HttpException({ error: 'Place not found' }, 404);
+    }
+    this.places.broadcast(tripId, 'place:updated', { place }, socketId);
+    return { place };
+  }
+
+  @Delete(':id/rating')
+  @UseGuards(TripAccessGuard)
+  unrate(@CurrentUser() user: User, @Param('tripId') tripId: string, @Param('id') id: string, @Headers('x-socket-id') socketId?: string) {
+    const place = this.places.rate(tripId, id, user.id, null);
+    if (!place) {
+      throw new HttpException({ error: 'Place not found' }, 404);
+    }
+    this.places.broadcast(tripId, 'place:updated', { place }, socketId);
+    return { place };
+  }
+
+  @Get(':id/image')
+  @UseGuards(TripAccessGuard)
+  async image(@CurrentUser() user: User, @Param('tripId') tripId: string, @Param('id') id: string) {
     try {
       const result = await this.places.searchImage(tripId, id, user.id);
       if ('error' in result) {
@@ -283,18 +461,20 @@ export class PlacesController {
   }
 
   @Put(':id')
-  update(
+  async update(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
     @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: PlaceUpdateDto,
     @Headers('x-socket-id') socketId?: string,
     @Headers('x-base-updated-at') ifMatch?: string,
   ) {
     const trip = this.requireTrip(tripId, user);
     validateLengths(body);
+    validateRouteColor(body);
+    validateUrlFields(body);
     this.requireEdit(trip, user);
-    const result = this.places.update(tripId, id, body as never, ifMatch);
+    const result = await this.places.update(tripId, id, body as never, ifMatch);
     if (!result) {
       throw new HttpException({ error: 'Place not found' }, 404);
     }
@@ -310,14 +490,31 @@ export class PlacesController {
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: User, @Param('tripId') tripId: string, @Param('id') id: string, @Headers('x-socket-id') socketId?: string) {
-    const trip = this.requireTrip(tripId, user);
-    this.requireEdit(trip, user);
-    this.places.onDeleted(Number(id)); // sync before actual delete
-    if (!this.places.remove(tripId, id)) {
+  @UseGuards(TripAccessGuard)
+  @RequirePermission('place_edit')
+  async remove(@CurrentUser() user: User, @Param('tripId') tripId: string, @Param('id') id: string, @Headers('x-socket-id') socketId?: string) {
+    // Scope the id to the trip before the hook (see bulkDelete), then sync the
+    // journey ahead of the actual delete.
+    if (!this.places.get(tripId, id)) {
+      throw new HttpException({ error: 'Place not found' }, 404);
+    }
+    this.places.onDeleted(Number(id));
+    const expenseIds = this.places.linkedExpenseIds(tripId, [id]);
+    const { deleted, cancelled } = await this.places.remove(tripId, id);
+    if (!deleted) {
       throw new HttpException({ error: 'Place not found' }, 404);
     }
     this.places.broadcast(tripId, 'place:deleted', { placeId: Number(id) }, socketId);
+    // A night booked at this place went with it, and took its partner booking and
+    // that booking's expense along. Neither is covered by place:deleted, and an
+    // expense linked by reservation_id is not one linkedExpenseIds finds.
+    // Without a socket id, so the deleting tab hears it too: see bulkDelete.
+    for (const reservationId of cancelled.reservationIds) {
+      this.places.broadcast(tripId, 'reservation:deleted', { reservationId }, undefined);
+    }
+    for (const itemId of [...expenseIds, ...cancelled.budgetItemIds]) {
+      this.places.broadcast(tripId, 'budget:deleted', { itemId }, undefined);
+    }
     return { success: true };
   }
 }

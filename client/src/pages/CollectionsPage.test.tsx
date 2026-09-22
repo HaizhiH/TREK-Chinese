@@ -1,6 +1,7 @@
 // Regression coverage for issue #1485 — the "Add place" button vanished once a
-// collection held its first mappable place on a wide/desktop layout, because the
-// whole toolbar (which hosts the button) was gated on `!mapOverlay`. These tests
+// collection held its first mappable place on a wide/desktop layout. The button
+// now lives inside the filter row (delegated via `canAddPlace`) for a populated
+// list, and as an empty-state CTA when the list has no places yet. These tests
 // render the page against a mocked useCollections hook (per the Page pattern) and
 // assert the Add affordance stays reachable — and that there is exactly one of it.
 import { describe, it, expect, vi } from 'vitest'
@@ -16,7 +17,14 @@ vi.mock('../components/Collections/ListsRail', () => ({ default: () => <div /> }
 vi.mock('../components/Collections/ListEditorModal', () => ({ default: () => null }))
 vi.mock('../components/Collections/CollectionHero', () => ({ default: () => <div /> }))
 vi.mock('../components/Collections/CollectionList', () => ({ default: () => <div data-testid="list" /> }))
-vi.mock('../components/Collections/CollectionFilterBar', () => ({ default: () => <div /> }))
+// The filter row hosts the Add button for a populated list; mirror that contract
+// so the page-level "reachable + exactly one" assertion still holds end to end.
+vi.mock('../components/Collections/CollectionFilterBar', () => ({
+  default: (props: { canAddPlace?: boolean; onAddPlace?: () => void }) =>
+    props.canAddPlace
+      ? <button type="button" onClick={props.onAddPlace}>collections.addPlace</button>
+      : <div />,
+}))
 vi.mock('../components/Collections/CollectionMapPanel', () => ({ default: () => <div data-testid="map" /> }))
 vi.mock('../components/Collections/CopyToTripModal', () => ({ default: () => null }))
 vi.mock('../components/Collections/MoveToListModal', () => ({ default: () => null }))
@@ -61,6 +69,7 @@ function makeHook(overrides: Record<string, unknown> = {}) {
     places: [{ id: 10 }],
     visiblePlaces: [{ id: 10 }],
     mappable: [{ id: 10 }],
+    hasMappable: true,
     members: [],
     incomingInvites: [],
     counts: { all: 1, idea: 0, want: 1, visited: 0 },
@@ -104,20 +113,37 @@ describe('CollectionsPage — Add place button reachability (#1485)', () => {
     // The exact bug: wide layout + one place with coordinates + editable list.
     mockUseCollections.mockReturnValue(makeHook())
     render(<CollectionsPage />)
-    const addButtons = screen.getAllByLabelText('collections.addPlace')
-    // Present, and exactly one — no duplicate map-overlay "+" alongside it.
+    const addButtons = screen.getAllByRole('button', { name: 'collections.addPlace' })
+    // Present, and exactly one — no duplicate affordance alongside it.
     expect(addButtons).toHaveLength(1)
   })
 
   it('does not show the Add button for a viewer who cannot edit', () => {
     mockUseCollections.mockReturnValue(makeHook({ canEdit: false, isOwner: false, myRole: 'viewer' }))
     render(<CollectionsPage />)
-    expect(screen.queryByLabelText('collections.addPlace')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'collections.addPlace' })).toBeNull()
   })
 
   it('shows the Add button on an empty collection', () => {
-    mockUseCollections.mockReturnValue(makeHook({ places: [], visiblePlaces: [], mappable: [] }))
+    mockUseCollections.mockReturnValue(makeHook({ places: [], visiblePlaces: [], mappable: [], hasMappable: false }))
     render(<CollectionsPage />)
-    expect(screen.getAllByLabelText('collections.addPlace')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'collections.addPlace' })).toHaveLength(1)
+  })
+})
+
+describe('CollectionsPage — the map survives a filter that matches nothing', () => {
+  it('keeps the map when a label filter empties the list', () => {
+    // Clicking a label with no places behind it left visiblePlaces empty, and
+    // the layout hung off exactly that: the map was torn out and the page
+    // reflowed to full width. A filter should empty the map, not remove it.
+    mockUseCollections.mockReturnValue(makeHook({ visiblePlaces: [], mappable: [], hasMappable: true }))
+    render(<CollectionsPage />)
+    expect(screen.getByTestId('map')).toBeInTheDocument()
+  })
+
+  it('still hides the map for a list with nothing mappable in it at all', () => {
+    mockUseCollections.mockReturnValue(makeHook({ mappable: [], hasMappable: false }))
+    render(<CollectionsPage />)
+    expect(screen.queryByTestId('map')).toBeNull()
   })
 })

@@ -15,5 +15,18 @@ const map: TranslationStrings = {
   'poi.cat.activities': 'Aktivity',
   'map.showAllConnections': 'Zobrazit všechny trasy rezervací',
   'map.hideAllConnections': 'Skrýt všechny trasy rezervací',
+  'map.baseLayer.default': 'Mapa',
+  'map.baseLayer.satellite': 'Satelit',
+  'map.baseLayer.switchToSatellite': 'Přepnout na satelitní zobrazení',
+  'map.baseLayer.switchToDefault': 'Přepnout na mapové zobrazení',
+  'map.location.denied': 'Přístup k poloze je zablokován. Zkontrolujte nastavení zařízení; nainstalovaná aplikace má vlastní oprávnění k poloze, nezávislé na prohlížeči.',
+  'map.location.unavailable': 'Vaši polohu se nepodařilo zjistit.',
+  'map.location.timeout': 'Zjišťování polohy trvalo příliš dlouho. Zkuste to znovu s volným výhledem na oblohu.',
+  'map.overview.show': 'Zobrazit celou cestu',
+  'map.overview.hide': 'Skrýt celou cestu',
+  'map.overview.total': 'Celková vzdálenost',
+  'map.attribution': 'Zdroje mapy',
+  'map.overview.unrouted': '{count} úsek(ů) se nepodařilo spočítat, vzdálenosti jsou neúplné.',
+  'map.overview.dayUnrouted': '{count} úsek(ů) tohoto dne se nepodařilo spočítat',
 };
 export default map;

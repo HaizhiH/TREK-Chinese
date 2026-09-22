@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { MapPin } from 'lucide-react'
 import { mapsApi } from '../../api/client'
 import { useTranslation } from '../../i18n'
+import { useLocationBias } from '../../hooks/useLocationBias'
 
 interface Props {
   value: string
@@ -16,12 +17,17 @@ interface Props {
 // is never lost, and picking a suggestion just replaces the text (#1496).
 export default function AddressInput({ value, onChange, placeholder, className }: Props) {
   const { t, locale } = useTranslation()
+  // Ohne Reisekontext ist der Hinweis leer, und die Suche laeuft wie bisher.
+  const { point: locationBias } = useLocationBias()
   const [open, setOpen] = useState(false)
   const [results, setResults] = useState<any[]>([])
   const [highlight, setHighlight] = useState(-1)
   const [loading, setLoading] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Clearing the timer does nothing to a request that is already out, and
+  // mapsApi.search takes no signal, so results are matched by ticket instead.
+  const reqIdRef = useRef(0)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -38,23 +44,28 @@ export default function AddressInput({ value, onChange, placeholder, className }
   const search = (text: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     const trimmed = text.trim()
-    if (trimmed.length < 3) { setResults([]); setLoading(false); return }
+    // Same reason as in pick(): a request for the longer text may still land.
+    if (trimmed.length < 3) { reqIdRef.current++; setResults([]); setLoading(false); return }
     debounceRef.current = setTimeout(async () => {
+      const myReq = ++reqIdRef.current
       setLoading(true)
       try {
-        const data = await mapsApi.search(trimmed, locale)
+        const data = await mapsApi.search(trimmed, locale, locationBias)
+        if (myReq !== reqIdRef.current) return
         setResults(data.places || [])
         setHighlight(-1)
       } catch {
-        setResults([])
+        if (myReq === reqIdRef.current) setResults([])
       } finally {
-        setLoading(false)
+        if (myReq === reqIdRef.current) setLoading(false)
       }
     }, 320)
   }
 
   const pick = (r: any) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    // A response still on its way must not repopulate the list behind the pick.
+    reqIdRef.current++
     onChange(r.address || r.name || '')
     setOpen(false)
     setResults([])
@@ -101,7 +112,7 @@ export default function AddressInput({ value, onChange, placeholder, className }
               <MapPin size={12} className="text-content-faint" style={{ marginTop: 2, flexShrink: 0 }} />
               <span style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name || r.address}</div>
-                {r.address && r.name !== r.address && (
+                {r.address && r.name && r.name !== r.address && (
                   <div className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.address}</div>
                 )}
               </span>

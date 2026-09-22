@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '../../tests/helpers/render';
+import { localIsoDate } from '../utils/localDate';
+import { render, screen, waitFor, within } from '../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../tests/helpers/msw/server';
@@ -535,9 +536,9 @@ describe('DashboardPage', () => {
 
   describe('FE-PAGE-DASH-023: SpotlightCard shows progress bar for ongoing trip', () => {
     it('renders progress bar and live badge when trip is currently ongoing', async () => {
-      const today = new Date().toISOString().split('T')[0];
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+      const today = localIsoDate();
+      const yesterday = localIsoDate(new Date(Date.now() - 86400000));
+      const nextWeek = localIsoDate(new Date(Date.now() + 7 * 86400000));
 
       const ongoingTrip = buildTrip({
         title: 'Current Voyage',
@@ -941,6 +942,118 @@ describe('DashboardPage', () => {
         expect(localStorage.getItem('trek_dashboard_tz')).toBeNull();
       });
       expect(useSettingsStore.getState().settings.dashboard_timezones).toBeUndefined();
+    });
+  });
+
+  describe('FE-PAGE-DASH-035: A trip the hero fell back to still appears in the grid (#1706)', () => {
+    const onlyTrips = (trips: unknown[]) =>
+      server.use(
+        http.get('/api/trips', ({ request }) => {
+          const url = new URL(request.url);
+          if (url.searchParams.get('archived')) return HttpResponse.json({ trips: [] });
+          return HttpResponse.json({ trips });
+        }),
+      );
+    // The grid, not the hero — the hero renders the same title and would mask the bug.
+    const grid = () => document.querySelector('.trips') as HTMLElement;
+
+    it('lists a finished trip under Completed when it is the only one', async () => {
+      onlyTrips([buildTrip({ title: 'Lisbon 2025', start_date: '2025-05-01', end_date: '2025-05-08' })]);
+      const user = userEvent.setup();
+      render(<DashboardPage />);
+
+      await user.click(screen.getByText('Completed'));
+
+      await waitFor(() => expect(within(grid()).getByText('Lisbon 2025')).toBeInTheDocument());
+    });
+
+    it('lists a dateless trip under Planned when it is the only one', async () => {
+      onlyTrips([buildTrip({ title: 'Someday Iceland', start_date: null, end_date: null })]);
+      render(<DashboardPage />);
+
+      await waitFor(() => expect(within(grid()).getByText('Someday Iceland')).toBeInTheDocument());
+      expect(screen.queryByText('No trips yet')).not.toBeInTheDocument();
+    });
+
+    it('does not claim "No trips yet" when the only trip is simply finished', async () => {
+      onlyTrips([buildTrip({ title: 'Lisbon 2025', start_date: '2025-05-01', end_date: '2025-05-08' })]);
+      render(<DashboardPage />);
+
+      await waitFor(() => expect(screen.getAllByText('Lisbon 2025').length).toBeGreaterThan(0));
+      expect(screen.queryByText('No trips yet')).not.toBeInTheDocument();
+    });
+
+    it('still says "No trips yet" for an account with no trips at all', async () => {
+      onlyTrips([]);
+      render(<DashboardPage />);
+
+      await waitFor(() => expect(screen.getByText('No trips yet')).toBeInTheDocument());
+    });
+
+    it('still keeps a running trip out of the grid, so the hero does not double up', async () => {
+      onlyTrips([
+        buildTrip({ title: 'Paris Adventure', start_date: '2026-07-01', end_date: '2026-07-10' }),
+        buildTrip({ title: 'Lisbon 2025', start_date: '2025-05-01', end_date: '2025-05-08' }),
+      ]);
+      render(<DashboardPage />);
+
+      await waitFor(() => expect(screen.getAllByText('Paris Adventure').length).toBeGreaterThan(0));
+      expect(within(grid()).queryByText('Paris Adventure')).not.toBeInTheDocument();
+    });
+  });
+
+  // Two people reported in a row that they could not find how to unarchive or
+  // rename a trip. The controls sat at opacity 0 until the card was hovered, and
+  // the archive button carried the same icon whether it would archive or restore.
+  describe('FE-PAGE-DASH-036: the cover controls are findable', () => {
+    const activeOnly = (trips: unknown[]) =>
+      server.use(
+        http.get('/api/trips', ({ request }) => {
+          const url = new URL(request.url);
+          if (url.searchParams.get('archived')) return HttpResponse.json({ trips: [] });
+          return HttpResponse.json({ trips });
+        }),
+      );
+
+    it('names every action on the card, so none of them is icon-only guesswork', async () => {
+      activeOnly([buildTrip({ title: 'Lisbon 2025', start_date: '2025-05-01', end_date: '2025-05-08' })]);
+      const user = userEvent.setup();
+      render(<DashboardPage />);
+
+      await waitFor(() => expect(screen.getAllByText('Lisbon 2025').length).toBeGreaterThan(0));
+      await user.click(screen.getByText('Completed'));
+      const card = (await screen.findAllByText('Lisbon 2025'))
+        .map(n => n.closest('.trip-card'))
+        .find(Boolean) as HTMLElement;
+      for (const label of ['Edit', 'Duplicate', 'Archive', 'Delete']) {
+        const button = card.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+        expect(button).toBeTruthy();
+        // A tooltip as well as the screen-reader label — the icons alone did not read.
+        expect(button.getAttribute('title')).toBe(label);
+      }
+    });
+
+    it('swaps the archive icon for a restore one once the trip is archived', async () => {
+      const archived = buildTrip({ title: 'Old Rome Trip', start_date: '2024-01-01', end_date: '2024-01-07', is_archived: 1 });
+      server.use(
+        http.get('/api/trips', ({ request }) => {
+          const url = new URL(request.url);
+          return HttpResponse.json({ trips: url.searchParams.get('archived') ? [archived] : [] });
+        }),
+      );
+      const user = userEvent.setup();
+      render(<DashboardPage />);
+
+      await user.click(screen.getByText('Archived'));
+      await waitFor(() => expect(screen.getByText('Old Rome Trip')).toBeInTheDocument());
+
+      const card = screen.getByText('Old Rome Trip').closest('.trip-card') as HTMLElement;
+      const restore = card.querySelector('[aria-label="Restore"]') as HTMLElement;
+      expect(restore).toBeTruthy();
+      // lucide stamps the icon name on the svg, which is how the archive and the
+      // restore variant tell themselves apart.
+      expect(restore.querySelector('svg')?.getAttribute('class')).toContain('archive-restore');
+      expect(card.querySelector('[aria-label="Archive"]')).toBeNull();
     });
   });
 });

@@ -1,16 +1,16 @@
-import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { Suspense, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import type { MapsProviderConfigResult } from '@trek/shared'
 import { isInChinaMainland } from '@trek/shared'
 import { mapsApi } from '../../api/client'
 import { useSettingsStore } from '../../store/settingsStore'
 import JourneyMap, { type JourneyMapHandle } from './JourneyMap'
+import ErrorBoundary from '../shared/ErrorBoundary'
 import type { JourneyMapGLHandle } from './JourneyMapGL'
 import JourneyMapAmap from './JourneyMapAmap'
 import { isAmapSessionLocked } from '../Map/amapLoader'
 
-// Lazy-load the GL renderer (and its ~230 KB gzip engine) so Leaflet-only
-// installs never download it — it ships only once a GL provider is picked.
-const JourneyMapGL = lazy(() => import('./JourneyMapGL'))
+import { JourneyMapGLMapbox, JourneyMapGLMaplibre } from '../Map/glLazy'
+import type { JourneyTrack } from '@trek/shared'
 
 // Unified handle — both providers expose the same three methods.
 export type JourneyMapAutoHandle = JourneyMapHandle
@@ -28,18 +28,23 @@ interface MapEntry {
 }
 
 interface Props {
+  ref?: Ref<JourneyMapAutoHandle>
   checkins: unknown[]
   entries: MapEntry[]
   trail?: { lat: number; lng: number }[]
+  tracks?: JourneyTrack[]
   height?: number
   dark?: boolean
   activeMarkerId?: string | null
   onMarkerClick?: (id: string, type?: string) => void
   fullScreen?: boolean
   paddingBottom?: number
+  hideMarkerTooltip?: boolean
+  /** Open an entry's photos from the marker card's thumbnail strip. GL renderer only. */
+  onMarkerPhotoClick?: (entryId: string, photoIndex: number) => void
 }
 
-const JourneyMapAuto = forwardRef<JourneyMapAutoHandle, Props>(function JourneyMapAuto(props, ref) {
+function JourneyMapAuto({ ref, ...props }: Props) {
   const provider = useSettingsStore(s => s.settings.map_provider)
   const token = useSettingsStore(s => s.settings.mapbox_access_token)
   const leafletRef = useRef<JourneyMapHandle>(null)
@@ -84,16 +89,23 @@ const JourneyMapAuto = forwardRef<JourneyMapAutoHandle, Props>(function JourneyM
     );
   }
 
+  // One chunk per engine — see MapViewAuto.
+  const JourneyMapGL = glProvider === 'maplibre-gl' ? JourneyMapGLMaplibre : JourneyMapGLMapbox
   if (useGL) {
     return (
-      <Suspense fallback={null}>
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        <JourneyMapGL ref={glRef} {...(props as any)} glProvider={glProvider} />
-      </Suspense>
+      // See MapViewAuto: the boundary has to sit outside the Suspense to catch a
+      // chunk that never arrives.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      <ErrorBoundary boundaryId="journey-map:gl" resetKeys={[glProvider]} fallback={<JourneyMap ref={leafletRef} {...(props as any)} />}>
+        <Suspense fallback={null}>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          <JourneyMapGL ref={glRef} {...(props as any)} glProvider={glProvider} />
+        </Suspense>
+      </ErrorBoundary>
     )
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return <JourneyMap ref={leafletRef} {...(props as any)} />
-})
+}
 
 export default JourneyMapAuto

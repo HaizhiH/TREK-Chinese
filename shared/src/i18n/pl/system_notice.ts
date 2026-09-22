@@ -54,5 +54,38 @@ const system_notice: TranslationStrings = {
   'system_notice.v3014_whitespace_collision.title': 'Wymagane działanie: konflikt konta użytkownika',
   'system_notice.v3014_whitespace_collision.body':
     'Aktualizacja 3.0.14 wykryła jeden lub więcej konfliktów nazwy użytkownika lub adresu e-mail spowodowanych spacjami na początku lub końcu przechowywanych wartości. Dotknięte konta zostały automatycznie przemianowane. Sprawdź logi serwera pod kątem wierszy zaczynających się od **[migration] WHITESPACE COLLISION**, aby zidentyfikować konta wymagające przeglądu.',
+  // The release modal. One stable set of keys: each big release swaps the copy in place.
+  'system_notice.release_notes.eyebrow': 'Aktualizacja zainstalowana',
+  'system_notice.release_notes.headline': 'Cztery rzeczy, które TREK robi teraz sam.',
+  'system_notice.release_notes.intro': 'Własne API miejsc, podróże samochodem zaplanowane od A do Z, historia lokalizacji w Twoich rękach, i dokumenty w synchronizacji.',
+  'system_notice.release_notes.features_label': 'Najważniejsze nowości',
+  'system_notice.release_notes.features_aside': 'To nie wszystko',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'Pierwszy open source planer podróży z własnym API miejsc. 73,6 mln miejsc, bez klucza, bez limitu.',
+  'system_notice.release_notes.feature_roadtrip_title': 'Dodatek Podróż samochodowa',
+  'system_notice.release_notes.feature_roadtrip_body': 'Sam planuje jazdę: trasę, dystans, godziny i przystanki. Wyłączone, dopóki admin tego nie włączy.',
+  'system_notice.release_notes.feature_dawarich_title': 'Integracja z Dawarich',
+  'system_notice.release_notes.feature_dawarich_body': 'Samodzielnie hostowana odpowiedź na Google Timeline, teraz dostępna w TREK. TREK tylko odczytuje, nic więcej.',
+  'system_notice.release_notes.footnote': 'Do tego długa lista mniejszych zmian w całej reszcie TREK.',
+  'system_notice.release_notes.notes_label': 'Notatki do wydania',
+  'system_notice.release_notes.note_eyebrow': 'Słowo od autora',
+  'system_notice.release_notes.note_title': 'To dzięki wam wciąż rozwijam TREK.',
+  'system_notice.release_notes.note_body':
+    'TREK zaczął się jako małe narzędzie na moje własne podróże, pisane po pracy, bo chciałem wygodniej je planować. I tak naprawdę nigdy nie przestał rosnąć. Prawie wszystko, z czego korzystacie, powstało późno w nocy, w weekendy, w pociągach, obok pracy na pełny etat, i było wiele wieczorów, kiedy po cichu zastanawiałem się, czy ktokolwiek go kiedyś otworzy.',
+  'system_notice.release_notes.promise_label': 'Obietnica',
+  'system_notice.release_notes.promise_lead': 'TREK pozostanie darmowy, na zawsze.',
+  'system_notice.release_notes.promise_text':
+    'Każda funkcja, każda aktualizacja, dla wszystkich. Bez płatnych wersji, bez subskrypcji, bez haczyków.',
+  'system_notice.release_notes.note_body_after':
+    'A potem go otworzyliście. W ciągu kilku miesięcy były was tysiące: gwiazdki, zgłoszenia błędów, tłumaczenia na języki, których nie znam, pull requesty od ludzi, których nigdy nie spotkałem. Wciąż każdego ranka najpierw zaglądam do repozytorium i wciąż nie do końca w to wierzę.',
+  'system_notice.release_notes.note_closing': 'Dziękuję, że tu jesteście. Pozdrawiam, Maurice.',
+  'system_notice.release_notes.support_lead':
+    'TREK jest darmowy i zawsze taki będzie, ale serwery, domeny i wiele zarwanych nocy już nie.',
+  'system_notice.release_notes.support_text':
+    'Jeśli TREK zasłużył na miejsce w Twoich podróżach, postaw mi kawę i pomóż, żeby powstało kolejne wydanie.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'Wesprzyj na Ko-fi',
+  'system_notice.release_notes.feature_docsync_title': 'Synchronizacja dokumentów',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud i Synology Drive. Dokumenty podróży przepływają w obie strony z magazynem, który już prowadzisz.',
 };
 export default system_notice;

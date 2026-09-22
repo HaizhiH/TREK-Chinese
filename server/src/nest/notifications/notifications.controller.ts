@@ -14,8 +14,20 @@ import {
 import type { ChannelTestResult, UnreadCountResult } from '@trek/shared';
 import type { User } from '../../types';
 import { NotificationsService } from './notifications.service';
+import { resolveNtfyToken } from './transports/ntfy.service';
+import {
+  PreferencesUpdateDto,
+  TestSmtpDto,
+  TestWebhookDto,
+  TestNtfyDto,
+  NotificationRespondDto,
+} from './notifications.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
+import { NotificationPreferencesService } from './notification-preferences.service';
+import { AdminNotificationPreferencesDto } from '../admin/admin.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { ManagedForbidden } from '../common/managed';
 
 // The masked placeholder the client sends instead of a stored secret (8× U+2022).
 const MASKED = '••••••••';
@@ -31,6 +43,10 @@ const MASKED = '••••••••';
  * codes. POSTs that answer with res.json stay 200 (Nest would default to 201).
  * The static /in-app/read-all and /in-app/all routes are declared before the
  * /in-app/:id routes so they win over the param, matching the legacy order.
+ * Bodies validate via notifications.dto.ts (@trek/shared schemas through the
+ * global ZodValidationPipe) — malformed bodies now get the pipe's standard
+ * { error: 'field: message; …' } envelope instead of the old inline checks
+ * (the sanctioned ratchet behavior); valid bodies behave byte-identically.
  */
 @Controller('api/notifications')
 @UseGuards(JwtAuthGuard)
@@ -43,33 +59,31 @@ export class NotificationsController {
   }
 
   @Put('preferences')
-  setPreferences(@CurrentUser() user: User, @Body() body: Record<string, Record<string, boolean>>) {
+  setPreferences(@CurrentUser() user: User, @Body() body: PreferencesUpdateDto) {
     this.notifications.setPreferences(user.id, body);
     return this.notifications.getPreferences(user.id, user.role);
   }
 
+  @ManagedForbidden('the relay is the operator credential; a test send would use their reputation')
   @Post('test-smtp')
   @HttpCode(200)
-  async testSmtp(@CurrentUser() user: User, @Body('email') email?: string): Promise<ChannelTestResult> {
+  async testSmtp(@CurrentUser() user: User, @Body() body: TestSmtpDto): Promise<ChannelTestResult> {
     if (user.role !== 'admin') {
       throw new HttpException({ error: 'Admin only' }, 403);
     }
-    return this.notifications.testSmtp(email || user.email);
+    return this.notifications.testSmtp(body.email || user.email);
   }
 
   @Post('test-webhook')
   @HttpCode(200)
-  async testWebhook(@CurrentUser() user: User, @Body('url') urlInput?: unknown): Promise<ChannelTestResult> {
-    let url = urlInput;
+  async testWebhook(@CurrentUser() user: User, @Body() body: TestWebhookDto): Promise<ChannelTestResult> {
+    let url: string | null | undefined = body.url;
     if (!url || url === MASKED) {
       url = this.notifications.userWebhookUrl(user.id);
       if (!url && user.role === 'admin') url = this.notifications.adminWebhookUrl();
       if (!url) {
         throw new HttpException({ error: 'No webhook URL configured' }, 400);
       }
-    }
-    if (typeof url !== 'string') {
-      throw new HttpException({ error: 'url must be a string' }, 400);
     }
     try {
       new URL(url);
@@ -81,21 +95,22 @@ export class NotificationsController {
 
   @Post('test-ntfy')
   @HttpCode(200)
-  async testNtfy(
-    @CurrentUser() user: User,
-    @Body('topic') topic?: string,
-    @Body('server') server?: string,
-    @Body('token') token?: string,
-  ): Promise<ChannelTestResult> {
+  async testNtfy(@CurrentUser() user: User, @Body() body: TestNtfyDto): Promise<ChannelTestResult> {
+    const { topic, server, token } = body;
     const userCfg = this.notifications.userNtfyConfig(user.id);
     const adminCfg = this.notifications.adminNtfyConfig();
 
     const resolvedTopic = topic || userCfg?.topic || undefined;
     const resolvedServer = server || userCfg?.server || adminCfg.server || undefined;
     // Reuse the saved token when the request sends null, empty, or the masked placeholder.
+    // Not `?? adminCfg.token`: the caller picks `server`, so that handed the
+    // operator's decrypted token to any host an authenticated user named
+    // (GHSA-7pqc-fj3c-9346). Same rule as the live send path, and target-based
+    // rather than role-based on purpose — an admin-only gate here would take a
+    // working button away from every user with their own ntfy config.
     const resolvedToken = (token && token !== MASKED)
       ? token
-      : (userCfg?.token ?? adminCfg.token ?? null);
+      : resolveNtfyToken(adminCfg, userCfg, resolvedServer ?? null);
 
     if (!resolvedTopic) {
       throw new HttpException({ error: 'No ntfy topic configured' }, 400);
@@ -123,8 +138,8 @@ export class NotificationsController {
     @Query('unread_only') unreadOnly?: string,
   ) {
     return this.notifications.listInApp(user.id, {
-      limit: Math.min(parseInt(limit as string) || 20, 50),
-      offset: parseInt(offset as string) || 0,
+      limit: Math.min(Number.parseInt(limit as string) || 20, 50),
+      offset: Number.parseInt(offset as string) || 0,
       unreadOnly: unreadOnly === 'true',
     });
   }
@@ -176,13 +191,10 @@ export class NotificationsController {
   async respond(
     @CurrentUser() user: User,
     @Param('id') idParam: string,
-    @Body('response') response?: unknown,
+    @Body() body: NotificationRespondDto,
   ): Promise<{ success: boolean; notification: unknown }> {
     const id = this.parseId(idParam);
-    if (response !== 'positive' && response !== 'negative') {
-      throw new HttpException({ error: 'response must be "positive" or "negative"' }, 400);
-    }
-    const result = await this.notifications.respond(id, user.id, response);
+    const result = await this.notifications.respond(id, user.id, body.response);
     if (!result.success) {
       throw new HttpException({ error: result.error }, 400);
     }
@@ -191,10 +203,37 @@ export class NotificationsController {
 
   /** parseInt + the legacy "Invalid id" 400 guard, shared by the /:id handlers. */
   private parseId(idParam: string): number {
-    const id = parseInt(idParam);
-    if (isNaN(id)) {
+    const id = Number.parseInt(idParam);
+    if (Number.isNaN(id)) {
       throw new HttpException({ error: 'Invalid id' }, 400);
     }
     return id;
+  }
+}
+
+/**
+ * /api/admin/notification-preferences — the admin-scope row of the preference matrix.
+ *
+ * Two routes that sat on AdminController and reached NotificationPreferencesService
+ * through a pair of pass-through methods on AdminService. The owner is here; the
+ * 'admin' scope argument they always passed is now written once, at the only place
+ * that uses it.
+ */
+@Controller('api/admin/notification-preferences')
+@UseGuards(JwtAuthGuard, AdminGuard)
+export class AdminNotificationPreferencesController {
+  constructor(private readonly prefs: NotificationPreferencesService) {}
+
+  @Get()
+  get(@CurrentUser() user: User) {
+    return this.prefs.getPreferencesMatrix(user.id, user.role, 'admin');
+  }
+
+  @Put()
+  set(@CurrentUser() user: User, @Body() body: AdminNotificationPreferencesDto) {
+    this.prefs.setAdminPreferences(user.id, body);
+    // Answer with the refreshed matrix rather than the raw write result — the admin
+    // panel renders straight from this response.
+    return this.prefs.getPreferencesMatrix(user.id, user.role, 'admin');
   }
 }

@@ -54,12 +54,28 @@ export function seedUser(db: Database.Database, overrides: Partial<SeededUser> =
   return user;
 }
 
+export interface SessionSignOptions {
+  /** Embed the remember claim (#1927). Omitted when undefined, like the real generateToken. */
+  remember?: boolean;
+  /** Backdate the token: seconds of its lifetime already consumed. Requires lifetime. */
+  consumed?: number;
+  /** Token lifetime in seconds. Default: no exp claim (the historical harness token). */
+  lifetime?: number;
+}
+
 /** Sign a `trek_session` token the real guard will accept (matching JWT_SECRET + pv). */
-export function signSession(userId: number, passwordVersion = 0): string {
-  return jwt.sign({ id: userId, pv: passwordVersion }, JWT_SECRET, { algorithm: 'HS256' });
+export function signSession(userId: number, passwordVersion = 0, opts: SessionSignOptions = {}): string {
+  const payload: Record<string, unknown> = { id: userId, pv: passwordVersion };
+  if (typeof opts.remember === 'boolean') payload.remember = opts.remember;
+  // jsonwebtoken computes exp = iat + expiresIn when iat is supplied in the payload.
+  if (typeof opts.consumed === 'number') payload.iat = Math.floor(Date.now() / 1000) - opts.consumed;
+  return jwt.sign(payload, JWT_SECRET, {
+    algorithm: 'HS256',
+    ...(typeof opts.lifetime === 'number' ? { expiresIn: opts.lifetime } : {}),
+  });
 }
 
 /** Convenience: the Cookie header value for a signed session. */
-export function sessionCookie(userId: number, passwordVersion = 0): string {
-  return `trek_session=${signSession(userId, passwordVersion)}`;
+export function sessionCookie(userId: number, passwordVersion = 0, opts: SessionSignOptions = {}): string {
+  return `trek_session=${signSession(userId, passwordVersion, opts)}`;
 }

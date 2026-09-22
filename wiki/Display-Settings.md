@@ -8,9 +8,52 @@ The General tab (Settings → General) controls your locale preferences and a fe
 
 Open the user menu in the top navigation bar, select **Settings**, and stay on the **General** tab — it is the tab the page opens on.
 
-The tab is split into two sections: **Language & region** (currency, language, temperature, distance, time format) and **Travel & map** (booking route labels, POI pills, blur booking codes).
+The tab is split into three sections: **Startup** (where opening TREK lands), **Language & region** (currency, language, temperature, distance, time format) and **Travel & map** (booking route labels, always show booking routes, explore places on the map, blur booking codes, optimize route from accommodation).
 
 > Color mode (Light / Dark / Auto) is **not** here — it lives on the **Appearance** tab. See [Appearance-Settings](Appearance-Settings).
+
+## Start page
+
+Where TREK goes when you open it — the app root (`/`), which is also what the installed PWA and any home-screen shortcut launch.
+
+| Option | Behaviour |
+|--------|-----------|
+| **Dashboard** (default) | The trip overview, exactly as before. |
+| **Active trip** | Straight into your active trip, skipping the dashboard. |
+
+Your **active trip** is the one running today; if none is, the next one starting; if you have only past trips, the most recent one. That is the same trip the dashboard features in its hero, so the two never disagree. Archived trips are never picked, and if you have no trip at all, TREK opens the dashboard as usual.
+
+The dashboard stays reachable at `/dashboard` — only the root redirects.
+
+## Start tab
+
+Shown once **Active trip** is selected: which tab of the trip planner to open on. Handy when you mostly reach for one thing on the road, for example entering expenses on the Costs tab.
+
+If the tab you picked belongs to an addon that is switched off, the trip opens on **Plan** instead. The same happens with **Road trip** on the desktop: that tab exists only on the phone, and the desktop reaches the drive through the **Days** / **Road trip** switch on **Plan**.
+
+### Linking to a tab directly
+
+Any trip URL accepts a `tab` parameter, which is what the start-tab setting uses internally. It works for bookmarks, home-screen shortcuts and wrapper apps too:
+
+```
+/trips/42?tab=finanzplan
+```
+
+The parameter takes the planner's internal tab ids, which are historic German names:
+
+| Tab | Id |
+|-----|-----|
+| Plan | `plan` |
+| Road trip | `roadtrip` (phone only; on the desktop the trip opens on Plan, where the **Days** / **Road trip** switch sits) |
+| Transports | `transports` |
+| Bookings | `buchungen` |
+| Lists | `listen` |
+| Costs | `finanzplan` |
+| Files | `dateien` |
+| Collab | `collab` |
+| A trip-page plugin | `plugin:<plugin-id>` |
+
+The parameter is consumed on arrival and disappears from the address bar; switching tabs afterwards works normally, and a reload keeps whatever tab you were last on.
 
 ## Currency
 
@@ -25,7 +68,7 @@ Your **display currency** — the currency you want to *read* amounts in on the 
 
 > This is **not** the trip's currency, which is set on the trip itself and is the base its balances are calculated in. The distinction matters — see [Currencies](Currencies).
 
-An administrator can set the instance-wide default for new users in Admin → Default User Settings. Choosing **Trip currency** yourself overrides it.
+An administrator can set an instance-wide default in Admin → Default User Settings. It is not only a starting value for new accounts: it is merged in every time your settings are loaded, so it applies to anyone whose own display currency is empty. Picking a specific currency of your own overrides it. **Trip currency** does not, because it stores an empty value that counts as "not set", so the admin default takes effect again on your next reload.
 
 ## Language
 
@@ -62,7 +105,7 @@ Shows or hides station / airport names on the endpoint markers of booking routes
 
 ## Explore places on the map
 
-Shows a category pill on the trip map for finding nearby restaurants, hotels and more from OpenStreetMap. Set to **On** or **Off**.
+Shows a row of category buttons on the trip map for finding nearby restaurants, accommodation, sights and more. TREK's own place index answers first and OpenStreetMap fills in; see [Exploring the map by category](Places-and-Search#exploring-the-map-by-category). Set to **On** or **Off**.
 
 ## Always show booking routes
 
@@ -73,6 +116,12 @@ This only sets the *default* for a trip you haven't touched before. If you've al
 ## Blur booking codes
 
 When enabled, confirmation codes and reference numbers are blurred until you hover or tap. Set to **On** or **Off**.
+
+## Optimize route from accommodation
+
+When **On** (the default), the **Optimize** button in the day's route tools anchors the route on that day's accommodation instead of only reordering the places among themselves: an ordinary day becomes a loop out from the hotel and back to it, a transfer day a run from the hotel you check out of to the one you check into that evening. Set to **On** or **Off**.
+
+A day without an accommodation, or one whose hotel has no coordinates, is optimized from its first place as before. Locked and timed places keep their slots either way. See [Route-Optimization](Route-Optimization).
 
 ## See also
 

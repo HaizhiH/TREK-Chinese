@@ -13,8 +13,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory';
-import { registerResources } from '../../src/mcp/resources';
 import { registerTools } from '../../src/mcp/tools';
+import type { McpAttachOptions } from '../../src/nest-mcp';
+import { createMcpTestRegistry } from './mcp-test-controllers';
 
 export interface McpHarness {
   client: Client;
@@ -24,7 +25,12 @@ export interface McpHarness {
 
 export interface McpHarnessOptions {
   userId: number;
-  /** Register read-only resources (default: true) */
+  /**
+   * Inert since the journey resources moved onto the nest-mcp registry
+   * (src/mcp/resources.ts is gone): every resource now rides `withTools`,
+   * like tools-vacay.test.ts has always documented. Accepted so the ~26
+   * suites passing it keep compiling; remove opportunistically.
+   */
   withResources?: boolean;
   /** Register read-write tools (default: true) */
   withTools?: boolean;
@@ -32,15 +38,29 @@ export interface McpHarnessOptions {
   scopes?: string[] | null;
   /** Whether the session is authenticated via a static API token (default: false) */
   isStaticToken?: boolean;
+  /** Fire-once deprecation-notice closure (default: registerTools' () => null) */
+  getDeprecationNotice?: () => string | null;
+  /**
+   * Host-contributed tools for this session. Passed explicitly so a suite never
+   * has to install the process-level plugin source to exercise the path; left
+   * undefined, registerTools resolves it to that source, which is unset in
+   * every suite that does not register one.
+   */
+  dynamicTools?: McpAttachOptions['dynamicTools'];
 }
 
 export async function createMcpHarness(options: McpHarnessOptions): Promise<McpHarness> {
-  const { userId, withResources = true, withTools = true, scopes = null, isStaticToken = false } = options;
+  const { userId, withTools = true, scopes = null, isStaticToken = false, getDeprecationNotice, dynamicTools } = options;
 
   const server = new McpServer({ name: 'trek-test', version: '1.0.0' });
 
-  if (withResources) registerResources(server, userId);
-  if (withTools) registerTools(server, userId, scopes ?? null, isStaticToken);
+  if (withTools) {
+    // In production the transport service passes its injected
+    // McpRegistryService to registerTools; the harness has no Nest app, so it
+    // builds the same registry by hand (see mcp-test-controllers.ts).
+    // registerTools' own ctx construction stays exercised.
+    registerTools(createMcpTestRegistry(), server, userId, scopes ?? null, isStaticToken, getDeprecationNotice, undefined, dynamicTools);
+  }
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
@@ -57,9 +77,21 @@ export async function createMcpHarness(options: McpHarnessOptions): Promise<McpH
   return { client, server, cleanup };
 }
 
+/**
+ * callTool is declared as a union of the current result shape and the legacy
+ * `toolResult` compatibility shape. Reading `content` off the union yields
+ * unknown, because the compatibility branch only has an index signature.
+ */
+type ToolCallResult = Awaited<ReturnType<Client['callTool']>>;
+type ToolCallContentResult = Extract<ToolCallResult, { content: unknown[] }>;
+type ToolTextContent = Extract<ToolCallContentResult['content'][number], { type: 'text' }>;
+
 /** Parse JSON from a callTool result (first text content item). */
-export function parseToolResult(result: Awaited<ReturnType<Client['callTool']>>): unknown {
-  const text = result.content.find((c: { type: string }) => c.type === 'text') as { type: 'text'; text: string } | undefined;
+export function parseToolResult(result: ToolCallResult): unknown {
+  // Our own McpServer always answers with the content shape, never the
+  // compatibility one, so pick that branch of the union.
+  const { content } = result as ToolCallContentResult;
+  const text = content.find((c): c is ToolTextContent => c.type === 'text');
   if (!text) throw new Error('No text content in tool result');
   return JSON.parse(text.text);
 }

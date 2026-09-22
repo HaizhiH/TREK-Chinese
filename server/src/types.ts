@@ -8,6 +8,8 @@ export interface User {
   password_hash?: string;
   maps_api_key?: string | null;
   unsplash_api_key?: string | null;
+  /** Amap (高德) web-service key — the per-user fallback for the Amap provider. */
+  amap_api_key?: string | null;
   openweather_api_key?: string | null;
   avatar?: string | null;
   oidc_sub?: string | null;
@@ -48,6 +50,7 @@ export interface Day {
   date?: string | null;
   notes?: string | null;
   title?: string | null;
+  default_transport_mode?: string | null;
 }
 
 export interface Place {
@@ -74,9 +77,16 @@ export interface Place {
   osm_id?: string | null;
   geo_provider?: 'google' | 'openstreetmap' | 'amap' | null;
   provider_place_id?: string | null;
+  amap_poi_id?: string | null;
+  route_geometry?: string | null;
+  route_color?: string | null;
   website?: string | null;
   phone?: string | null;
   transport_mode?: string;
+  /** What kind of stop this is on a drive (#1797); null for an ordinary place. */
+  stop_type?: string | null;
+  /** How full this stop fills the tank, 1-100; null follows the traveller's own setting. */
+  fill_percent?: number | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -109,6 +119,11 @@ export interface DayAssignment {
   reservation_datetime?: string | null;
   assignment_time?: string | null;
   assignment_end_time?: string | null;
+  end_day?: number;
+  leg_transport_mode?: string | null;
+  incoming_leg_transport_mode?: string | null;
+  /** The lodging booking that put this stop on the day, when one did. */
+  accommodation_id?: number | null;
   created_at?: string;
 }
 
@@ -122,6 +137,15 @@ export interface PackingItem {
   created_at?: string;
 }
 
+export interface BudgetItemReceipt {
+  id: number;
+  filename: string;
+  original_name: string;
+  file_size?: number | null;
+  mime_type?: string | null;
+  url: string;
+}
+
 export interface BudgetItem {
   id: number;
   trip_id: number;
@@ -133,13 +157,19 @@ export interface BudgetItem {
   persons?: number | null;
   days?: number | null;
   note?: string | null;
+  /** Itemized receipt for a per-item split, as JSON. Its own column since #1658. */
+  ticket_json?: string | null;
   reservation_id?: number | null;
+  /** Set when the expense was created from a place (#1298) — the other side of
+   *  the same link reservation_id is for a booking. */
+  place_id?: number | null;
   paid_by_user_id?: number | null;
   expense_date?: string | null;
   sort_order: number;
   created_at?: string;
   members?: BudgetItemMember[];
   payers?: BudgetItemPayer[];
+  receipts?: BudgetItemReceipt[];
 }
 
 export interface BudgetItemMember {
@@ -234,6 +264,8 @@ export interface DayNote {
   text: string;
   time?: string | null;
   icon: string;
+  /** One of NOTE_COLORS, or null for the neutral card (#1629). */
+  color?: string | null;
   sort_order: number;
   created_at?: string;
 }
@@ -305,15 +337,6 @@ export interface Setting {
   value?: string | null;
 }
 
-export interface AuthRequest extends Request {
-  user: User;
-  trip?: { id: number; user_id: number };
-}
-
-export interface OptionalAuthRequest extends Request {
-  user: User | null;
-}
-
 export interface AssignmentRow extends DayAssignment {
   place_name: string;
   place_description: string | null;
@@ -333,8 +356,13 @@ export interface AssignmentRow extends DayAssignment {
   google_ftid: string | null;
   geo_provider: 'google' | 'openstreetmap' | 'amap' | null;
   provider_place_id: string | null;
+  osm_id: string | null;
+  amap_poi_id: string | null;
   website: string | null;
   phone: string | null;
+  stop_type: string | null;
+  /** How full this stop fills the tank, 1-100; null follows the traveller's own setting. */
+  fill_percent: number | null;
   category_name: string | null;
   category_color: string | null;
   category_icon: string | null;
@@ -356,6 +384,8 @@ export interface Journey {
   cover_gradient?: string | null;
   cover_image?: string | null;
   status: 'draft' | 'active' | 'completed' | 'archived';
+  /** Draw the linked trips' GPX tracks on this journey's map (#2194). 0 by default. */
+  show_trip_tracks?: number;
   created_at: number;
   updated_at: number;
 }
@@ -365,6 +395,12 @@ export interface JourneyEntry {
   journey_id: number;
   source_trip_id?: number | null;
   source_place_id?: number | null;
+  /**
+   * The `day_assignments` row this entry was derived from (#2329). A place standing
+   * on two days is two entries, and only this tells them apart. May dangle: an
+   * unassigned stop keeps the id so reconciliation can see the assignment is gone.
+   */
+  source_assignment_id?: number | null;
   author_id: number;
   type: 'entry' | 'checkin' | 'skeleton';
   title?: string | null;
@@ -380,6 +416,19 @@ export interface JourneyEntry {
   pros_cons?: string | null;
   visibility: 'private' | 'shared' | 'public';
   sort_order: number;
+  /** ISO 3166-1 alpha-2, resolved from the coordinates when the entry was written. */
+  country_code?: string | null;
+  /**
+   * 0/1 as the row holds it. A suggestion the traveller waved away: the row stays,
+   * so the trip sync does not create it again, and every read leaves it out.
+   */
+  dismissed: number;
+  /**
+   * 0/1 as the row holds it. Switched on, the entry stays in the journal but
+   * is left out of the route and the figures Studio prints (discussion #2064).
+   * The wire carries a boolean; journey-entry-row.ts is where the two meet.
+   */
+  stats_excluded: number;
   created_at: number;
   updated_at: number;
 }
@@ -398,6 +447,11 @@ export interface TrekPhoto {
   media_type?: string | null;
   /** Optional video duration in milliseconds. */
   duration_ms?: number | null;
+  /** When the picture was taken, as the provider or its EXIF reported it (#1614). */
+  taken_at?: string | null;
+  /** Capture coordinates. Stored as a pair or not at all. */
+  lat?: number | null;
+  lng?: number | null;
   created_at: string;
 }
 

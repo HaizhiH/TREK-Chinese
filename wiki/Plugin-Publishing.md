@@ -29,8 +29,20 @@ The order is the point. A GitHub release is effectively immutable: the registry 
 its sha256, so overwriting the bytes breaks the checksum for everyone who already
 installed that version. So the local gates run **first** — if one fails, nothing is
 packed, tagged, pushed or released, and you can fix it and re-run against the same
-version. (Before this, the checks ran *after* the release was cut, and an author who
-failed them had burned their `v1.0.0` tag on an unwritten README.)
+version.
+
+And when a **later** step fails — a preflight or PR problem after the release is
+cut — `publish` rolls back exactly what that run created: the GitHub release, the
+pushed tag, and the local tag, so the same tag is free to re-run against once you
+have fixed the problem. Anything that existed before the run is never touched, and
+`--keep-release` opts out (the error then prints the manual cleanup commands). A
+leftover tag from an earlier failed run — one with no release that no longer points
+at `HEAD` — is recognised as debris and **moved to your current commit** rather than
+silently releasing the stale one. And for a stranded state you already have,
+`trek-plugin unrelease <vX.Y.Z> --repo you/repo` deletes the release, the remote
+tag, and the local tag in one go — after checking the published registry index and
+**refusing, with no override, to touch a version that is actually published** (its
+artifact is immutable; ship a new version instead).
 
 It prints the PR URL at the end. In a terminal it **offers to sign** the release (and
 creates the key if you have none); scripts and CI are never prompted and pass `--sign`.
@@ -82,20 +94,28 @@ Between them they now catch, **offline**, nearly everything the registry rejects
   typo is invisible locally — but CI rejects it)
 - a README missing any of the four required sections, still carrying scaffold
   placeholders, or under **400 characters** of real prose
-- a screenshot that doesn't resolve to a file on disk (not just a link in the README —
-  the file has to be there)
+- a missing `docs/screenshot.png` — the registry fetches **exactly that path** at the
+  pinned commit (it is what the store card loads), so a README link to any other image
+  name doesn't count; the file has to be there
 - a permission your manifest declares but the README never explains
 - a `name`, `description` or `author` outside the registry's length limits, or a name
   that mixes Latin with Cyrillic/Greek look-alikes (a homoglyph spoof)
 - an `egress[]` host with no matching `http:outbound:<host>` permission — TREK builds
   the network allow-list and the iframe CSP from those permissions only and never reads
   `egress[]`, so such a host is silently unreachable at runtime
+- a permission TREK doesn't know — the SDK and registry CI check against the same
+  65-entry list the host enforces, so a typo'd permission fails here instead of at
+  install on every instance (the registry's copy is a manually regenerated snapshot,
+  so a brand-new TREK permission can briefly fail registry CI even though `validate`
+  accepts it — that's the snapshot lagging, not a typo)
 
-Only **four** gates genuinely need the network, and they all need the release to exist:
-that the tag resolves to the commit the entry pins, that the released artifact downloads
-and hashes to the pinned sha256 (and verifies against your key), that your plugin id
-isn't bound to another GitHub owner, and that an update doesn't drop or rotate a signing
-key you already published under. Those run in `preflight` — step 4 of `publish`.
+Only **six** gates genuinely need the network, because none of them can be answered from
+your working tree: that the tag resolves to the commit the entry pins, that the manifest at
+that commit matches the entry, that the README at that commit still passes the quality gate,
+that the released artifact downloads and hashes to the pinned sha256 (and verifies against
+your key), that your plugin id isn't bound to another GitHub owner, and that an update
+doesn't drop or rotate a signing key you already published under. Those run in `preflight`
+— step 4 of `publish`.
 
 ### Capture the screenshot
 
@@ -196,12 +216,13 @@ release, so you catch what CI would reject without a review round-trip:
 npx trek-plugin-sdk preflight --repo you/trek-plugin-flight-tracker --tag v1.0.0
 ```
 
-`preflight` runs everything `validate` runs, plus the four gates that genuinely need
-the network: the tag resolves to the pinned `commitSha`; the manifest **and the
-README** at that commit match the entry and pass the quality gate; the released
+`preflight` runs everything `validate` runs, plus the six gates that genuinely need
+the network: the tag resolves to the pinned `commitSha`; the **manifest** at that commit
+matches the entry; the **README** at that commit passes the quality gate; the released
 artifact downloads, hashes to the pinned **sha256**, carries **no native binaries** and
 verifies against your key; your plugin id is not bound to a different GitHub owner; and
-an update does not drop or rotate a signing key you already published under.
+an update does not drop or rotate a signing key you already published under
+(`--allow-key-change` declares a deliberate rotation — see "Rotating your signing key").
 
 Re-grading the manifest and the README *at the commit* is not redundant with the local
 pass: an author who writes the README and forgets to commit it has a green tree and a
@@ -218,7 +239,9 @@ npx trek-plugin-sdk submit --repo you/trek-plugin-flight-tracker --tag v1.0.0
 ```
 
 It forks [TREK-Plugins](https://github.com/liketrek/TREK-Plugins) (once),
-branches off the current `main`, writes (or, for an update, merges into)
+**fast-forwards your fork from the registry** (a diverged fork warns with the
+`gh repo sync --force` command to reset it, and the submit continues), branches off
+the registry's current `main`, writes (or, for an update, merges into)
 `registry/plugins/<id>.json`, pushes, and opens the PR — printing its URL. Add
 `--draft` for a draft PR, `--registry <owner/name>` for a mirror. (Requires `gh`,
 authenticated.)
@@ -244,24 +267,28 @@ changed `registry/plugins/*.json`. Nearly every rule below is a pure function of
 you have tagged anything — you should never learn any of this from CI.
 
 **Entry** (`validate-entry.mjs`): valid schema · `id` matches the filename and
-the slug pattern `^[a-z][a-z0-9-]{2,39}$` · your `id` is bound to your GitHub
+the slug pattern `^[a-z][a-z0-9-]{2,39}$` and is not one of the reserved ids
+`registry`/`install`/`rescan` (they collide with admin API route segments — CI and
+the install loader both refuse them) · your `id` is bound to your GitHub
 owner on first registration, so nobody can repoint it later (owner changes need a
-maintainer override) · homoglyph/mixed-script name check · the release tag exists
+maintainer override) · homoglyph/mixed-script name check · `versions[]` sorted
+newest-first · the release tag exists
 and resolves to `commitSha` · manifest parity at that commit (`id`, `version`,
-`type`, `apiVersion`, and `nativeModules` must not be `true`) · **the downloaded
+`type`, `apiVersion`, and `nativeModules` must not be `true`) · every declared
+permission is on TREK's known-permission list (or a valid `http:outbound:<host>`) ·
+**the downloaded
 artifact's SHA-256 matches the pin** and its size is within bounds · **no native
 binaries** in the archive · `egress[]` present (and no bare `*`) when
-`http:outbound` is declared. Any unique slug is fine **except `registry`,
-`install` and `rescan`**, which the install loader refuses (they collide with
-admin API route segments).
+`http:outbound` is declared.
 
 **README** (`check-readme.mjs`, fetched at the pinned commit): must exist at the
 repo root, contain the sections **What it does / Screenshots / Permissions /
-Setup**, carry **at least one screenshot that resolves to a real image**
-(a relative `docs/screenshot.png` is resolved against the commit), have real
-prose (**≥ 400 characters** after stripping headings/code/images/tables), contain
-no leftover scaffold placeholders, and **explain every permission** your manifest
-declares (each permission string must appear in the README).
+Setup**, and **`docs/screenshot.png` must resolve to a real image at that
+commit** — the gate fetches exactly that path, because it is what the store card
+loads; README links to other image names do not satisfy it. The README must also
+have real prose (**≥ 400 characters** after stripping headings/code/images/tables),
+contain no leftover scaffold placeholders, and **explain every permission** your
+manifest declares (each permission string must appear in the README).
 
 ## Provenance & integrity
 
@@ -294,10 +321,12 @@ npx trek-plugin-sdk publish --repo you/repo --tag v1.2.0 --sign
 
 `--sign` signs the exact artifact bytes and fills both `authorPublicKey` (entry)
 and `signature` (version) for you. If the plugin was already published signed,
-`publish` **refuses an unsigned release at step 1** — before anything is packed,
-tagged or released — because a GitHub release is immutable and learning this at
-step 4 would have burned the tag. **Back up `~/.trek-plugin/signing.key`** —
-losing it means you can't ship signed updates.
+`publish` **refuses an unsigned release at step 1** — and, since SDK 1.7.0, one
+whose signing key's *identity* differs from the published `authorPublicKey` —
+before anything is packed, tagged or released, because a GitHub release is
+immutable and learning this at step 4 would have burned the tag. **Back up
+`~/.trek-plugin/signing.key`** — losing it means a full key rotation (see below),
+which strands every install until its admin re-trusts you.
 
 **By hand with minisign**, if you prefer:
 
@@ -330,11 +359,66 @@ next to its `sha256`:
 Signing is **opt-in**, and it is a one-way door you may walk through **late**. An
 entry without `authorPublicKey`/`signature` installs on `sha256` alone; **going
 unsigned → signed later breaks nobody**, because nothing is pinned until a signed
-version installs — adding a key at v1.4.0 is a real option, not a lost cause. What
+version installs — adding a key at v1.4.0 is a real option, not a lost cause. The
+registry does require every version signed once your key appears in the entry, and
+the SDK handles that for you: your first signed update **retro-signs the older
+versions** (each pinned artifact is downloaded, verified against its `sha256`, and
+signed with the same key — a byte mismatch refuses, since that artifact no longer
+matches its pin). What
 you can never do is go back: once a plugin has shipped signed, an *unsigned* update
 is refused (`SIGNATURE_MISSING`) on every instance that already has it, and a key
 *rotation* needs a registry maintainer override (`allow-key-change`) plus an admin
-re-trust on each instance. So sign whenever you like — but back the key up.
+re-trust on each instance — see the next section. So sign whenever you like — but
+back the key up.
+
+### Rotating your signing key
+
+A rotation — lost key, compromised machine, planned hygiene — is the one signing
+change with a sanctioned path, and since SDK 1.7.0 the SDK drives its whole
+artifact half. Two flows, one rule: a rotated entry must have **every** version
+re-signed with the new key, because TREK verifies whichever version it installs
+against the entry's single `authorPublicKey`.
+
+**Without shipping a version:**
+
+```bash
+npx trek-plugin-sdk rotate-key            # from the plugin dir; --id <plugin-id> from elsewhere
+# --key <file> for a key not at ~/.trek-plugin/signing.key
+# --out entry.json writes the rotated entry for a hand-made PR instead of opening one
+```
+
+It fetches your published registry entry, downloads every pinned artifact,
+verifies each against its pinned `sha256`, re-signs all of them with the new key
+(all-or-nothing — one unfetchable or tampered artifact aborts the whole rotation),
+swaps `authorPublicKey`, and opens a registry PR titled as a rotation. (If the key
+was merely *lost*, `keygen` first — the default path is free again. A
+*compromised* key still on disk needs `--key` for the new one; `keygen` refuses to
+overwrite.)
+
+**As part of a release:**
+
+```bash
+npx trek-plugin-sdk publish --repo you/repo --tag v1.3.0 --sign --allow-key-change
+```
+
+Step 1 accepts the new key, the update merges onto your existing entry with the
+older versions re-signed under the new key, and the PR title carries
+"(key rotation)". The same `--allow-key-change` flag exists on
+`entry`/`preflight`/`submit`/`release` for hand-assembled flows.
+
+Either way, the SDK can only do the artifact half. The PR body says the rest out
+loud, and neither step is a formality:
+
+1. a **registry maintainer** must apply the `allow-key-change` label — CI refuses
+   a changed `authorPublicKey` without it, and authors can't self-serve the label;
+2. **every admin** who already installed the plugin sees `SIGNATURE_KEY_CHANGED`
+   (with both key fingerprints, to verify the new one with you out of band) and
+   must re-trust the new key before their instance receives another update.
+
+Without `--allow-key-change`, a differing key is still refused everywhere —
+deliberately, because the *accidental* version of this (publishing from a second
+machine whose freshly-generated key isn't the one you published under) wants the
+original key restored, not a rotation.
 
 ## Updating
 
