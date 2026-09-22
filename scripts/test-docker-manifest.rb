@@ -30,26 +30,35 @@ cases = {
 
   cases.each do |name, files|
     Dir.mktmpdir("trek-manifest-") do |directory|
-      if name == "no digests"
-        # do nothing
-      else
-        # We need to simulate digests-linux-amd64 and digests-linux-arm64
-        # files[0] goes to amd64, files[1] to arm64, files[2] to arm64 or just extra
-        platforms = ["digests-linux-amd64", "digests-linux-arm64"]
-        if name != "missing architecture"
-          platforms.each { |p| Dir.mkdir(File.join(directory, p)) }
-        else
-          Dir.mkdir(File.join(directory, platforms[0]))
-        end
-        
-        files.each_with_index do |digest, i|
-          p = platforms[i % 2] || platforms[0]
-          next unless Dir.exist?(File.join(directory, p))
-          target = File.join(directory, p, digest)
-          if name == "digest directory" && digest == hashes.last
-            Dir.mkdir(target)
+      if name != "no digests"
+        if filename == "docker-publish.yml"
+          # docker-publish.yml does not use merge-multiple, so it expects subdirectories
+          platforms = ["digests-linux-amd64", "digests-linux-arm64"]
+          if name != "missing architecture"
+            platforms.each { |p| Dir.mkdir(File.join(directory, p)) }
           else
-            File.write(target, "")
+            Dir.mkdir(File.join(directory, platforms[0]))
+          end
+          
+          files.each_with_index do |digest, i|
+            p = platforms[i % 2] || platforms[0]
+            next unless Dir.exist?(File.join(directory, p))
+            target = File.join(directory, p, digest)
+            if name == "digest directory" && digest == hashes.last
+              Dir.mkdir(target)
+            else
+              File.write(target, "")
+            end
+          end
+        else
+          # docker.yml and docker-dev.yml use merge-multiple: true, so they expect flat files in the root dir
+          files.each do |digest|
+            target = File.join(directory, digest)
+            if name == "digest directory" && digest == hashes.last
+              Dir.mkdir(target)
+            else
+              File.write(target, "")
+            end
           end
         end
       end
