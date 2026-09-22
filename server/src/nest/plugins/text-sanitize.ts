@@ -26,9 +26,12 @@ export function stripEmoji(s: string): string {
   const stripped = s.replace(EMOJI_RE, '');
   // Nothing removed → return verbatim so a plain string keeps its exact spacing and
   // paragraph breaks (matters for PDF paragraphs). Otherwise collapse only the
-  // horizontal gaps an emoji left, never newlines.
+  // horizontal gaps an emoji left, never newlines. The trailing-space trim carries the
+  // char in front of the run (or the line start) into the match and puts it back, so the
+  // run is only ever walked from its own start — plugin text must not make ` +$` restart
+  // inside every space of a long one.
   if (stripped === s) return s;
-  return stripped.replace(/[^\S\r\n]{2,}/g, ' ').replace(/ +$/gm, '').trim();
+  return stripped.replace(/[^\S\r\n]{2,}/g, ' ').replace(/(^|[^ ]) +$/gm, '$1').trim();
 }
 
 /** True if the string contains at least one emoji — used by the dev/validate warnings. */
@@ -37,4 +40,36 @@ export function hasEmoji(s: string): boolean {
   // or a second call could resume mid-string and miss a leading emoji.
   EMOJI_RE.lastIndex = 0;
   return EMOJI_RE.test(s);
+}
+
+// C0 and C1 controls, the Unicode line/paragraph separators, and the bidi
+// overrides and isolates. Each group defeats a different half of the rule below:
+// U+2028/9 are line breaks to a renderer but not to /\n/, and the bidi controls
+// make a string render as one thing while it tokenises as another. \t is in the
+// C0 range and goes with the rest — a tab is not meaningful in a tool description
+// and is one more way to fake structure.
+// eslint-disable-next-line no-control-regex
+const UNSAFE_CONTROL_RE = /[\u0000-\u001F\u007F-\u009F\u2028\u2029\u202A-\u202E\u2066-\u2069]/g;
+
+/**
+ * The assistant-context flavour of the render-boundary sanitiser above.
+ *
+ * A plugin's tool name, title and description are a direct, persistent and
+ * admin-invisible write into every user's assistant context. That is a stronger
+ * surface than a badge or a PDF heading, which a person reads and discounts, so
+ * this goes further than stripEmoji:
+ *
+ *  - every control character goes, not just the emoji glue;
+ *  - every whitespace run collapses to ONE SPACE, newlines included, so a
+ *    description cannot forge "\n\n## System\nIgnore previous instructions" —
+ *    a markdown heading that reads to the model like host text;
+ *  - then emoji, then a hard cap.
+ *
+ * Deliberately a sibling rather than a change to stripEmoji: that one preserves
+ * newlines on purpose (PDF paragraphs) and ~15 render call sites depend on it.
+ */
+export function sanitiseAssistantText(value: unknown, max: number): string {
+  const raw = typeof value === 'string' ? value : value == null ? '' : String(value);
+  const flattened = raw.replace(UNSAFE_CONTROL_RE, ' ').replace(/\s+/g, ' ').trim();
+  return stripEmoji(flattened).trim().slice(0, max);
 }

@@ -21,12 +21,15 @@ import type { INestApplication } from '@nestjs/common';
 import { createTables } from '../../src/db/schema';
 import { runMigrations } from '../../src/db/migrations';
 import { AuthPublicController } from '../../src/nest/auth/auth-public.controller';
-import type { RateLimitService } from '../../src/nest/auth/rate-limit.service';
+import type { RateLimitService } from '../../src/nest/common/rate-limit.service';
 
 // Tables to clear on reset, child-before-parent to be safe (FK checks are OFF during reset).
 // Keep in sync with schema.ts + migrations.ts. Intentionally excluded: categories, addons,
 // photo_providers, photo_provider_fields, schema_version (seed/config data, not user data).
 const RESET_TABLES = [
+  'school_holiday_periods',
+  'school_holiday_regions',
+  'school_holiday_countries',
   // Collab
   'file_links',
   'collab_message_reactions',
@@ -34,6 +37,15 @@ const RESET_TABLES = [
   'collab_messages',
   'collab_polls',
   'collab_notes',
+  // Road trip (#1797). Both hang off days, so they go before it like the rest
+  // of the day content; a new domain's tables belong here or its rows leak from
+  // one case into the next.
+  'roadtrip_day_tracks',
+  'roadtrip_vias',
+  // Dawarich (#2279). The suggestions reference places and bucket_list, so they
+  // are cleared before both; the connection row hangs off the user.
+  'dawarich_visit_suggestions',
+  'dawarich_connections',
   // Day content
   'day_notes',
   'todo_category_assignees',
@@ -68,9 +80,11 @@ const RESET_TABLES = [
   'days',
   // Trip
   'share_tokens',
+  'trip_invite_tokens',
   'trip_members',
   'trips',
   // Journey
+  'journey_books',
   'journey_share_tokens',
   'journey_photos',
   'journey_entries',
@@ -78,6 +92,8 @@ const RESET_TABLES = [
   'journey_trips',
   'journeys',
   // Vacay
+  'vacay_user_settings',
+  'vacay_shares',
   'vacay_entries',
   'vacay_company_holidays',
   'vacay_holiday_calendars',
@@ -102,6 +118,8 @@ const RESET_TABLES = [
   'invite_tokens',
   'tags',
   'app_settings',
+  'webauthn_challenges',
+  'webauthn_credentials',
   'users',
 ];
 
@@ -133,6 +151,38 @@ const DEFAULT_PHOTO_PROVIDERS = [
   { id: 'immich',         name: 'Immich',          enabled: 1 },
   { id: 'synologyphotos', name: 'Synology Photos',  enabled: 1 },
 ];
+
+/**
+ * Flip an addon in the test DB.
+ *
+ * The MCP `when:` gates used to be mocked at the module boundary
+ * (`vi.mock('addons.bridge')`), which worked only because the gate closed over
+ * a module-level singleton. They read their controller's injected AddonsService
+ * now, so a test toggles the same row the admin panel writes — which also means
+ * these cases exercise the real read instead of a stub of it.
+ *
+ * `resetTestDb` deliberately leaves the addons table alone, so a toggle
+ * survives into the next case: set what a case needs rather than assuming the
+ * seeded default.
+ */
+export function setAddonEnabled(db: Database.Database, addonId: string, enabled: boolean): void {
+  db.prepare(
+    'INSERT INTO addons (id, name, type, enabled) VALUES (?, ?, ?, ?) ' +
+      'ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled',
+  ).run(addonId, addonId, 'global', enabled ? 1 : 0);
+}
+
+/** Collab's sub-feature flags are opt-out app_settings, not addon rows. */
+export function setCollabFeature(
+  db: Database.Database,
+  feature: 'chat' | 'notes' | 'polls' | 'whatsnext',
+  enabled: boolean,
+): void {
+  db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)").run(
+    `collab_${feature}_enabled`,
+    enabled ? 'true' : 'false',
+  );
+}
 
 function seedDefaults(db: Database.Database): void {
   const insertCat = db.prepare('INSERT OR IGNORE INTO categories (name, color, icon) VALUES (?, ?, ?)');
@@ -179,6 +229,20 @@ export function resetTestDb(db: Database.Database): void {
   db.exec('PRAGMA foreign_keys = ON');
   seedDefaults(db);
 }
+
+/**
+ * Byte-for-byte the statement in src/db/database.ts.
+ *
+ * Exported because the same query is copied into ~90 test files, and every one
+ * of those copies had dropped `t.currency` — so the budget domain, which reads
+ * exactly that column off the access row, was only ever exercising its 'EUR'
+ * fallback. Import this instead of retyping it.
+ */
+export const CAN_ACCESS_TRIP_SQL = `
+        SELECT t.id, t.user_id, t.currency FROM trips t
+        LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = ?
+        WHERE t.id = ? AND (t.user_id = ? OR m.user_id IS NOT NULL)
+      `;
 
 /**
  * Returns the mock factory for vi.mock('../../src/db/database', ...).
@@ -229,11 +293,7 @@ export function buildDbMock(testDb: Database.Database) {
       };
     },
     canAccessTrip: (tripId: number | string, userId: number) => {
-      return testDb.prepare(`
-        SELECT t.id, t.user_id FROM trips t
-        LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = ?
-        WHERE t.id = ? AND (t.user_id = ? OR m.user_id IS NOT NULL)
-      `).get(userId, tripId, userId);
+      return testDb.prepare(CAN_ACCESS_TRIP_SQL).get(userId, tripId, userId);
     },
     isOwner: (tripId: number | string, userId: number) => {
       return !!testDb.prepare('SELECT id FROM trips WHERE id = ? AND user_id = ?').get(tripId, userId);
@@ -265,4 +325,7 @@ export const TEST_CONFIG = {
   SESSION_DURATION: '24h',
   SESSION_DURATION_MS: 86400000,
   SESSION_DURATION_SECONDS: 86400,
+  SESSION_DURATION_REMEMBER: '30d',
+  SESSION_DURATION_REMEMBER_MS: 2592000000,
+  SESSION_DURATION_REMEMBER_SECONDS: 2592000,
 };

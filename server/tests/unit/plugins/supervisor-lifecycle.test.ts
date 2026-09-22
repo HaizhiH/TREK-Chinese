@@ -17,8 +17,9 @@ function makeSupervisor() {
   (s as any).spawn = spawn;
   return { s, spawn, dispose };
 }
+// Reaches into the private `running` map so a case can assert on the live entry.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const entry = (s: PluginSupervisor, id: string, status: string) => (s as any).running.get(id);
+const entry = (s: PluginSupervisor, id: string): { status: string } => (s as any).running.get(id);
 
 describe('supervisor re-activation after failure', () => {
   const supers: PluginSupervisor[] = [];
@@ -308,5 +309,41 @@ describe('supervisor throttles plugin log/stderr volume (host-thread DoS guard)'
     expect(onLog).toHaveBeenCalledWith('p', 'warn', expect.stringContaining('2 log line(s) dropped'));
     expect(onLog).toHaveBeenCalledWith('p', 'error', 'd', undefined);
     expect(sup.droppedLogs).toBe(0);
+  });
+});
+
+/**
+ * The 'message' listener is where a rejection would escape: an EventEmitter discards
+ * what its callback returns, onMessage is async, and the host has no
+ * unhandledRejection handler — so Node 22 would end the process. A plugin getting to
+ * kill the supervisor that contains it defeats the point of the supervisor.
+ */
+describe('supervisor message handling never escapes as a rejection', () => {
+  it('logs a failed message against the plugin and keeps running', async () => {
+    const onLog = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = new PluginSupervisor((() => ({ dispose: vi.fn() })) as any, { onLog }, {});
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (s as any).onMessage = () => Promise.reject(new Error('malformed envelope'));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => (s as any).handleChildMessage({ id: 'p' }, { k: 'req', id: 'x' })).not.toThrow();
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onLog).toHaveBeenCalledWith('p', 'error', expect.stringContaining('malformed envelope'));
+  });
+
+  it('says nothing when the message is handled normally', async () => {
+    const onLog = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = new PluginSupervisor((() => ({ dispose: vi.fn() })) as any, { onLog }, {});
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (s as any).onMessage = () => Promise.resolve();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (s as any).handleChildMessage({ id: 'p' }, { k: 'evt', topic: 'log' });
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onLog).not.toHaveBeenCalled();
   });
 });

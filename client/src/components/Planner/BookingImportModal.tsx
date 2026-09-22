@@ -1,4 +1,4 @@
-import ReactDOM from 'react-dom'
+import { createPortal } from 'react-dom'
 import { useState, useRef, useEffect } from 'react'
 import { Upload, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
@@ -10,6 +10,9 @@ interface BookingImportModalProps {
   isOpen: boolean
   onClose: () => void
   tripId: number
+  /** The tab this import was started from, carried into the job so the review
+   *  can pick the right form for an item whose type had to be guessed (#2076). */
+  kind?: 'transports' | 'bookings'
 }
 
 const ACCEPTED_EXTS = ['.eml', '.pdf', '.pkpass', '.html', '.htm', '.txt']
@@ -22,7 +25,7 @@ const MAX_FILES = 5
  * (progress over the WebSocket). When it finishes, the trip page opens the per-item
  * review flow — so the user can navigate and keep editing while it works.
  */
-export default function BookingImportModal({ isOpen, onClose, tripId }: BookingImportModalProps) {
+export default function BookingImportModal({ isOpen, onClose, tripId, kind }: BookingImportModalProps) {
   const { t } = useTranslation()
   const addTask = useBackgroundTasksStore((s) => s.addTask)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -100,7 +103,7 @@ export default function BookingImportModal({ isOpen, onClose, tripId }: BookingI
       // Keep the uploaded files so the review can attach each source document to its booking —
       // in memory for the immediate path, and in IndexedDB so it survives a reload mid-parse.
       await saveImportFiles(jobId, files)
-      addTask({ id: jobId, tripId: String(tripId), label: files.map((f) => f.name).join(', '), total: files.length, files })
+      addTask({ id: jobId, tripId: String(tripId), label: files.map((f) => f.name).join(', '), total: files.length, files, mode, kind })
       handleClose()
     } catch (err: any) {
       setError(err?.response?.data?.error ?? t('reservations.import.error'))
@@ -110,8 +113,9 @@ export default function BookingImportModal({ isOpen, onClose, tripId }: BookingI
 
   if (!isOpen) return null
 
-  return ReactDOM.createPortal(
+  return createPortal(
     <div
+      role="presentation"
       className="bg-[rgba(0,0,0,0.4)]"
       style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
       onMouseDown={(e) => { mouseDownTarget.current = e.target }}
@@ -121,6 +125,7 @@ export default function BookingImportModal({ isOpen, onClose, tripId }: BookingI
       }}
     >
       <div
+        role="presentation"
         onClick={(e) => e.stopPropagation()}
         className="bg-surface-card"
         style={{ borderRadius: 16, width: '100%', maxWidth: 540, padding: 24, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', fontFamily: 'var(--font-system)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
@@ -130,7 +135,7 @@ export default function BookingImportModal({ isOpen, onClose, tripId }: BookingI
           <div style={{ flex: 1, fontSize: 'calc(15px * var(--fs-scale-subtitle, 1))', fontWeight: 700, color: 'var(--text-primary)' }}>
             {t('reservations.import.title')}
           </div>
-          <button onClick={handleClose} className="bg-transparent text-content-faint" style={{ border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}>
+          <button type="button" onClick={handleClose} className="bg-transparent text-content-faint" style={{ border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}>
             <X size={16} />
           </button>
         </div>
@@ -149,7 +154,8 @@ export default function BookingImportModal({ isOpen, onClose, tripId }: BookingI
             onChange={handleInputChange}
           />
 
-          <div
+          <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
             onDragOver={handleDragOver}
             onDragEnter={handleDragOver}
@@ -173,7 +179,7 @@ export default function BookingImportModal({ isOpen, onClose, tripId }: BookingI
             ) : (
               <span style={{ color: 'var(--text-faint)', textAlign: 'center', pointerEvents: 'none' }}>{t('reservations.import.dropHere')}</span>
             )}
-          </div>
+          </button>
 
           {error && (
             <div className="bg-[rgba(239,68,68,0.08)] text-[#b91c1c]" style={{ border: '1px solid rgba(239,68,68,0.35)', borderRadius: 10, padding: '8px 10px', fontSize: 'calc(12px * var(--fs-scale-body, 1))', whiteSpace: 'pre-wrap', marginTop: 8 }}>
@@ -184,13 +190,13 @@ export default function BookingImportModal({ isOpen, onClose, tripId }: BookingI
 
         {/* Footer */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-faint)' }}>
-          <button
+          <button type="button"
             onClick={handleClose}
             style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', color: 'var(--text-primary)', fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
           >
             {t('common.cancel')}
           </button>
-          <button
+          <button type="button"
             onClick={handleParse}
             disabled={files.length === 0 || loading}
             className={files.length > 0 && !loading ? 'bg-accent text-accent-text' : 'bg-surface-tertiary text-content-faint'}

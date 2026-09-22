@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'Perjalanan',
   'oauth.scope.group.places': 'Tempat',
+  'oauth.scope.group.collections': 'Koleksi',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': 'Perlengkapan',
   'oauth.scope.group.todos': 'To-do',
@@ -26,6 +27,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'Baca tempat, penugasan hari, tag, dan kategori',
   'oauth.scope.places:write.label': 'Kelola tempat',
   'oauth.scope.places:write.description': 'Buat, perbarui, dan hapus tempat, penugasan, dan tag',
+  'oauth.scope.collections:read.label': 'Lihat koleksi',
+  'oauth.scope.collections:read.description':
+    'Baca koleksi tempat tersimpan beserta tempat, rating, label, dan anggotanya',
+  'oauth.scope.collections:write.label': 'Kelola koleksi',
+  'oauth.scope.collections:write.description':
+    'Buat/edit koleksi, simpan, beri rating, beri label, dan salin tempat, serta bagikan daftar',
   'oauth.scope.atlas:read.label': 'Lihat Atlas',
   'oauth.scope.atlas:read.description': 'Baca negara yang dikunjungi, wilayah, dan daftar impian',
   'oauth.scope.atlas:write.label': 'Kelola Atlas',
@@ -87,5 +94,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'Berkas',
+  'oauth.scope.group.settings': 'Pengaturan',
+  'oauth.scope.files:read.label': 'Lihat berkas perjalanan',
+  'oauth.scope.files:read.description': 'Menampilkan dokumen perjalanan: nama, ukuran, siapa yang mengunggah, dan tautannya',
+  'oauth.scope.files:write.label': 'Kelola berkas perjalanan',
+  'oauth.scope.files:write.description': 'Ganti nama dan deskripsi berkas, tautkan ke pemesanan dan tempat, beri bintang dan buang ke sampah',
+  'oauth.scope.files:content.label': 'Baca isi berkas',
+  'oauth.scope.files:content.description': 'Membaca isi dokumen yang diunggah, misalnya PDF pemesanan atau tiket',
+  'oauth.scope.settings:read.label': 'Lihat preferensi Anda',
+  'oauth.scope.settings:read.description': 'Membaca satuan, format waktu, bahasa, mata uang bawaan, dan halaman awal',
+  'oauth.scope.settings:write.label': 'Ubah preferensi Anda',
+  'oauth.scope.settings:write.description': 'Mengubah satuan, format waktu, bahasa, mata uang bawaan, dan halaman awal. Tidak pernah kunci API tersimpan',
+  'oauth.scope.group.plugins': 'Plugin',
+  'oauth.scope.plugins:use.label': 'Jalankan alat plugin',
+  'oauth.scope.plugins:use.description': 'Izinkan klien ini memanggil alat yang disediakan oleh plugin yang dipasang dan disetujui administrator. Setiap plugin bertindak dengan akses yang sudah diberikan kepadanya, bukan dengan cakupan token ini',
 };
 export default oauth;

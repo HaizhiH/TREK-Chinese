@@ -10,24 +10,119 @@ export interface PluginDependency {
   id: string;
   version: string;
 }
+export interface ManifestSettingField {
+  key: string;
+  label?: string;
+  input_type?: string;
+  placeholder?: string;
+  hint?: string;
+  required?: boolean;
+  secret?: boolean;
+  scope?: 'instance' | 'user';
+  options?: Array<string | number | { value: string | number; label?: string }>;
+  oauth?: { initPath?: string; callbackPath?: string };
+  /** The field's value wherever nobody set one: the settings form pre-fills it AND the
+   * runtime resolves it (`ctx.config` / `ctx.settings.get()`), so the plugin works before
+   * anyone opens the form. Satisfies `required`. Not accepted on a `secret` field (the
+   * manifest is public); must be a boolean for a `checkbox` and one of `options` when
+   * those are declared. */
+  default?: string | number | boolean;
+}
+
+/** Every attribute a settings-field object may carry — the host silently drops anything else.
+ *  Mirrors `SETTING_FIELD_KEYS` in the host's install/manifest.ts (parity-tested in
+ *  test/permissions-parity.test.ts); change both together. */
+export const SETTING_FIELD_KEYS = [
+  'key', 'label', 'input_type', 'placeholder', 'hint', 'required', 'secret', 'scope', 'options', 'oauth', 'default',
+] as const;
+/**
+ * The `default`s a manifest declares for one settings scope, keyed by field — the
+ * host's effective value for any field nobody set. `trek-plugin dev` seeds `ctx.config`
+ * (instance) and `ctx.settings.get()` (user) from this so dev matches production.
+ * Secrets are skipped even if present (the host never resolves a secret from a default).
+ */
+export function settingDefaults(manifest: unknown, scope: 'instance' | 'user'): Record<string, string | number | boolean> {
+  const settings = (manifest as { settings?: unknown } | null)?.settings;
+  const out: Record<string, string | number | boolean> = {};
+  if (!Array.isArray(settings)) return out;
+  for (const s of settings as unknown[]) {
+    if (!s || typeof s !== 'object') continue;
+    const f = s as Record<string, unknown>;
+    if (typeof f.key !== 'string' || !f.key || f.secret === true) continue;
+    if ((f.scope === 'user' ? 'user' : 'instance') !== scope) continue;
+    const d = f.default;
+    if (typeof d === 'string' || typeof d === 'number' || typeof d === 'boolean') out[f.key] = d;
+  }
+  return out;
+}
+export interface ManifestAction {
+  key: string;
+  label?: string;
+  hint?: string;
+  danger?: boolean;
+  /** Which settings form renders the button: `'user'` (default) on the user Settings
+   * tab, run as the clicking user; `'instance'` in the admin instance-settings dialog,
+   * run as the clicking admin. Unlike settings fields, the default is `'user'`. */
+  scope?: 'user' | 'instance';
+}
+export interface ManifestCapabilities {
+  settingsUi?: boolean;
+  widget?: { title?: string; defaultSize?: string; slot?: 'sidebar' | 'hero' | 'place-detail' | 'day-detail' | 'reservation-detail' };
+  tripPage?: { replaces?: string[]; position?: number };
+  notificationChannel?: { title?: string; events?: string[] };
+  routeProfiles?: Array<{ id: string; label: string; icon?: string }>;
+  /** MCP tools published via the mcpToolProvider hook. Requires `mcp:tools`. */
+  mcpTools?: Array<{
+    name: string;
+    title?: string;
+    description: string;
+    inputSchema?: Record<string, unknown>;
+    annotations?: {
+      readOnlyHint?: boolean;
+      destructiveHint?: boolean;
+      idempotentHint?: boolean;
+      openWorldHint?: boolean;
+    };
+  }>;
+  provides?: string[];
+  emits?: string[];
+}
 export interface PluginManifest {
   id: string;
   name: string;
   version: string;
-  apiVersion: number;
-  /** The semver RANGE of TREK versions this plugin supports (">=3.2.0 <4.0.0"). */
+  /** The semver RANGE of TREK versions this plugin supports (">=4.0.0 <5.0.0"). */
   trek: string;
   type: 'integration' | 'page' | 'widget' | 'trip-page';
+  apiVersion?: number;
+  permissions?: string[];
+  egress?: string[];
+  nativeModules?: boolean;
+  operatorEgress?: boolean;
+  requiredAddons?: string[];
+  pluginDependencies?: PluginDependency[];
+  capabilities?: ManifestCapabilities;
+  settings?: ManifestSettingField[];
+  actions?: ManifestAction[];
+  icon?: string;
+  author?: string;
+  description?: string;
+  homepage?: string;
+  tags?: string[];
+  license?: string;
+}
+export interface NormalizedManifest extends PluginManifest {
+  apiVersion: number;
   permissions: string[];
   egress: string[];
-  nativeModules?: boolean;
+  nativeModules: false;
   requiredAddons: string[];
   pluginDependencies: PluginDependency[];
 }
 export interface ValidationResult {
   ok: boolean;
   errors: string[];
-  manifest?: PluginManifest;
+  manifest?: NormalizedManifest;
 }
 
 const ID_RE = /^[a-z][a-z0-9-]{2,39}$/;
@@ -75,25 +170,8 @@ export const CHANNEL_EVENTS = [
 // This is THE list. `create`'s permission picker is built from it (see PERMISSION_FAMILIES
 // in cli/ui.ts, which only supplies the grouping and hints), so a permission added here can
 // never again go missing from the scaffolder — test/cli.test.ts fails until it has an entry.
-export const KNOWN_PERMISSIONS = [
-  'db:own',
-  'db:read:trips', 'db:read:users', 'db:read:costs', 'db:read:packing', 'db:read:files',
-  'db:read:files:content', 'db:read:collab',
-  'db:read:journal', 'db:read:atlas', 'db:read:vacay', 'db:read:daynotes', 'db:read:collections',
-  'db:read:categories', 'db:read:tags', 'db:read:todos',
-  'db:write:costs', 'db:write:places', 'db:write:days', 'db:write:itinerary', 'db:write:trips',
-  'db:write:reservations', 'db:write:accommodations', 'db:write:packing', 'db:write:files',
-  'db:write:collab', 'db:write:members', 'db:write:collections', 'db:write:atlas', 'db:write:vacay',
-  'db:write:journal', 'db:write:tags', 'db:write:todos', 'db:write:daynotes',
-  'db:create:trips',
-  'db:meta',
-  'ws:broadcast:trip', 'ws:broadcast:user',
-  'hook:photo-provider', 'hook:calendar-source', 'hook:place-detail-provider', 'hook:trip-warning-provider',
-  'hook:table-contributor', 'hook:map-marker-provider', 'hook:pdf-section-provider', 'hook:atlas-layer-provider',
-  'hook:journal-entry-provider', 'hook:trip-card-provider', 'hook:notification-channel', 'hook:user-data',
-  'events:subscribe', 'jobs:run', 'http:outbound',
-  'weather:read', 'rates:read', 'notify:send', 'ai:invoke', 'oauth:client',
-];
+export { KNOWN_PERMISSIONS } from './generated/host-facts.js';
+import { KNOWN_PERMISSIONS } from './generated/host-facts.js';
 
 function isKnownPermission(p: string): boolean {
   return KNOWN_PERMISSIONS.includes(p) || p.startsWith('http:outbound:');
@@ -140,8 +218,8 @@ export function validateManifest(raw: unknown): ValidationResult {
   if (!isSatisfiableRange(m.trek)) {
     errors.push(
       typeof m.trek === 'string' && m.trek
-        ? `"trek" is not a satisfiable semver range: "${m.trek}" (e.g. ">=3.2.0 <4.0.0")`
-        : 'missing "trek" — declare the TREK versions this plugin supports, e.g. ">=3.2.0 <4.0.0"',
+        ? `"trek" is not a satisfiable semver range: "${m.trek}" (e.g. ">=4.0.0 <5.0.0")`
+        : 'missing "trek" — declare the TREK versions this plugin supports, e.g. ">=4.0.0 <5.0.0"',
     );
   }
   if (m.apiVersion !== undefined && typeof m.apiVersion !== 'number') errors.push('apiVersion must be a number');
@@ -178,6 +256,8 @@ export function validateManifest(raw: unknown): ValidationResult {
     widget?: { slot?: unknown };
     tripPage?: { replaces?: unknown; position?: unknown };
     notificationChannel?: { title?: unknown; events?: unknown };
+    routeProfiles?: unknown;
+    mcpTools?: unknown;
     provides?: unknown;
     emits?: unknown;
     settingsUi?: unknown;
@@ -222,6 +302,79 @@ export function validateManifest(raw: unknown): ValidationResult {
       }
     }
   }
+  // Mirrors the server's routeProfiles parsing: the planner's route picker shows these,
+  // so they must be well-formed and only exist alongside the routeProvider grant.
+  const routeProfiles = capabilities?.routeProfiles;
+  // Normalized routeProfiles entries (icon dropped when non-string, like the server's
+  // optStr()) — populated only when routeProfiles is present and shaped as an array;
+  // used to build the output below in place of the raw, possibly-dirty input array.
+  let normalizedRouteProfiles: Array<{ id: string; label: string; icon?: string }> | undefined;
+  if (routeProfiles !== undefined) {
+    if (!permissions.includes('hook:route-provider')) {
+      errors.push('capabilities.routeProfiles requires the "hook:route-provider" permission');
+    }
+    if (!Array.isArray(routeProfiles)) errors.push('capabilities.routeProfiles must be an array');
+    else {
+      if (routeProfiles.length > 3) errors.push('capabilities.routeProfiles: at most 3 profiles');
+      const seen = new Set<string>();
+      normalizedRouteProfiles = [];
+      for (const v of routeProfiles) {
+        const p = (v && typeof v === 'object' ? v : {}) as { id?: unknown; label?: unknown; icon?: unknown };
+        const id = typeof p.id === 'string' ? p.id : '';
+        if (!/^[a-z][a-z0-9-]{0,23}$/.test(id)) errors.push('capabilities.routeProfiles: id must be lowercase [a-z][a-z0-9-], max 24 chars');
+        else if (seen.has(id)) errors.push(`capabilities.routeProfiles: duplicate id "${id}"`);
+        else seen.add(id);
+        const label = typeof p.label === 'string' ? p.label.trim() : '';
+        if (!label || label.length > 40) errors.push('capabilities.routeProfiles: label is required (max 40 chars)');
+        // icon is optional; a non-string icon is silently dropped, not rejected — mirrors
+        // the server's optStr() (server/src/nest/plugins/install/manifest.ts:519-521),
+        // which returns undefined for a non-string value rather than throwing. Length is
+        // never rejected either — the server slices to 40 chars at install time.
+        const icon = typeof p.icon === 'string' ? p.icon : undefined;
+        normalizedRouteProfiles.push(icon !== undefined ? { id, label, icon } : { id, label });
+      }
+    }
+  }
+  // MCP tools go into every user's assistant context, so the declaration is
+  // checked here too rather than only at install: an author should hear about a
+  // malformed one from `trek-plugin validate`, not from a tool that never shows up.
+  const mcpTools = capabilities?.mcpTools;
+  if (mcpTools !== undefined) {
+    if (!permissions.includes('mcp:tools')) {
+      errors.push('capabilities.mcpTools requires the "mcp:tools" permission');
+    }
+    if (!Array.isArray(mcpTools)) errors.push('capabilities.mcpTools must be an array');
+    else {
+      if (mcpTools.length > 8) errors.push('capabilities.mcpTools: at most 8 tools');
+      const seenTools = new Set<string>();
+      for (const v of mcpTools) {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) {
+          errors.push('capabilities.mcpTools entries must be objects');
+          continue;
+        }
+        const t = v as Record<string, unknown>;
+        const name = typeof t.name === 'string' ? t.name : '';
+        if (!/^[a-z0-9_]{1,48}$/.test(name)) {
+          errors.push('capabilities.mcpTools: name must be lowercase [a-z0-9_], max 48 chars');
+          continue;
+        }
+        if (seenTools.has(name)) errors.push(`capabilities.mcpTools: duplicate name "${name}"`);
+        seenTools.add(name);
+        if (typeof t.description !== 'string' || !t.description.trim()) {
+          errors.push(`capabilities.mcpTools["${name}"]: description is required`);
+        }
+        if (t.inputSchema !== undefined) {
+          const schema = t.inputSchema as Record<string, unknown> | null;
+          if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+            errors.push(`capabilities.mcpTools["${name}"]: inputSchema must be an object`);
+          } else if (schema.type !== undefined && schema.type !== 'object') {
+            errors.push(`capabilities.mcpTools["${name}"]: inputSchema root type must be "object"`);
+          }
+        }
+      }
+    }
+  }
+
   // Settings keys become JSON object keys in the plugin's stored config, so they are
   // constrained (mirrors the server's SETTING_KEY_RE). `__proto__`/`constructor` would
   // resolve off Object.prototype on read and make a required field look configured for
@@ -236,6 +389,50 @@ export function validateManifest(raw: unknown): ValidationResult {
       }
       if (s.scope !== undefined && s.scope !== 'user' && s.scope !== 'instance') {
         errors.push(`settings["${key}"].scope must be "user" or "instance"`);
+      }
+      if (s.options !== undefined) {
+        if (!Array.isArray(s.options)) {
+          errors.push('settings option list must be an array');
+        } else {
+          for (const o of s.options) {
+            if (typeof o === 'string' || typeof o === 'number') continue;
+            if (o && typeof o === 'object') {
+              const value = (o as { value?: unknown }).value;
+              if (value === undefined || value === null || String(value) === '') {
+                errors.push('settings option must have a non-empty "value"');
+              }
+            } else {
+              errors.push(`invalid settings option ${JSON.stringify(o)} (expected a string or { value, label })`);
+            }
+          }
+        }
+      }
+      if (s.oauth !== undefined) {
+        if (!s.oauth || typeof s.oauth !== 'object' || Array.isArray(s.oauth)) {
+          errors.push('settings oauth must be an object');
+        } else {
+          for (const k of ['initPath', 'callbackPath'] as const) {
+            const v = (s.oauth as Record<string, unknown>)[k];
+            if (v !== undefined && typeof v !== 'string') errors.push(`settings oauth.${k} must be a string`);
+          }
+        }
+      }
+      if (s.default !== undefined) {
+        const d = s.default;
+        if (typeof d !== 'string' && typeof d !== 'number' && typeof d !== 'boolean') {
+          errors.push(`settings["${key}"].default must be a string, number or boolean`);
+        } else if (s.secret === true) {
+          errors.push(`settings["${key}"].default is not allowed on a secret field (the manifest is public — it would ship the secret in plaintext)`);
+        } else if (s.input_type === 'checkbox' && typeof d !== 'boolean') {
+          errors.push(`settings["${key}"].default must be a boolean for a checkbox field`);
+        } else if (Array.isArray(s.options) && s.options.length > 0) {
+          const values = (s.options as unknown[]).map((o) =>
+            o && typeof o === 'object' ? String((o as { value?: unknown }).value) : String(o),
+          );
+          if (!values.includes(String(d))) {
+            errors.push(`settings["${key}"].default must be one of the declared options (${values.join(', ')})`);
+          }
+        }
       }
     }
   }
@@ -253,6 +450,9 @@ export function validateManifest(raw: unknown): ValidationResult {
         if (seen.has(key)) errors.push(`duplicate action "${key}"`);
         seen.add(key);
         if (a.label !== undefined && typeof a.label !== 'string') errors.push(`action "${key}" label must be a string`);
+        if (a.scope !== undefined && a.scope !== 'user' && a.scope !== 'instance') {
+          errors.push(`action "${key}".scope must be "user" or "instance"`);
+        }
       }
     }
   }
@@ -263,23 +463,38 @@ export function validateManifest(raw: unknown): ValidationResult {
   const pluginDependencies = validatePluginDependencies(m.pluginDependencies, typeof m.id === 'string' ? m.id : '', errors);
 
   if (errors.length) return { ok: false, errors };
-  return {
-    ok: true,
-    errors: [],
-    manifest: {
-      id: m.id as string,
-      name: m.name as string,
-      version: m.version as string,
-      apiVersion: typeof m.apiVersion === 'number' ? m.apiVersion : 1,
-      trek: m.trek as string,
-      type: m.type as PluginManifest['type'],
-      permissions,
-      egress,
-      nativeModules: false,
-      requiredAddons,
-      pluginDependencies,
-    },
+  const manifest: NormalizedManifest = {
+    id: m.id as string,
+    name: m.name as string,
+    version: m.version as string,
+    apiVersion: typeof m.apiVersion === 'number' ? m.apiVersion : 1,
+    trek: m.trek as string,
+    type: m.type as PluginManifest['type'],
+    permissions,
+    egress,
+    nativeModules: false,
+    requiredAddons,
+    pluginDependencies,
   };
+  // Carried through verbatim when present — absent stays absent (no undefined keys) — except
+  // routeProfiles, which is rebuilt from normalizedRouteProfiles so a dropped (non-string)
+  // icon doesn't leak the raw input value back out.
+  if (m.capabilities !== undefined) {
+    const rawCapabilities = m.capabilities as ManifestCapabilities;
+    manifest.capabilities = normalizedRouteProfiles !== undefined
+      ? { ...rawCapabilities, routeProfiles: normalizedRouteProfiles }
+      : rawCapabilities;
+  }
+  if (m.settings !== undefined) manifest.settings = m.settings as ManifestSettingField[];
+  if (m.actions !== undefined) manifest.actions = m.actions as ManifestAction[];
+  if (m.operatorEgress !== undefined) manifest.operatorEgress = m.operatorEgress as boolean;
+  if (m.icon !== undefined) manifest.icon = m.icon as string;
+  if (m.author !== undefined) manifest.author = m.author as string;
+  if (m.description !== undefined) manifest.description = m.description as string;
+  if (m.homepage !== undefined) manifest.homepage = m.homepage as string;
+  if (m.tags !== undefined) manifest.tags = m.tags as string[];
+  if (m.license !== undefined) manifest.license = m.license as string;
+  return { ok: true, errors: [], manifest };
 }
 
 // Export/event names exposed to other plugins (dots allowed for event names).

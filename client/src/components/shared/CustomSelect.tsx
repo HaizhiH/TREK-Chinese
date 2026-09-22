@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
-import ReactDOM from 'react-dom'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
+import { useAnchoredPosition, scrollAnchorIntoView } from '../../hooks/useAnchoredPosition'
 
 interface SelectOption {
   // Callers use both string keys and numeric ids (e.g. day/place ids) as values;
@@ -23,6 +24,33 @@ interface CustomSelectProps {
   style?: React.CSSProperties
   size?: 'sm' | 'md'
   disabled?: boolean
+  /**
+   * How wide the open menu is.
+   *
+   * 'anchor' (the default) keeps it exactly as wide as the trigger, which is what a
+   * select normally wants. 'content' lets it grow to its longest option instead, for the
+   * cases where the trigger is a narrow flex item and the options are place names: there
+   * the trigger has to shorten to share its row, and a menu that shortened with it would
+   * offer a list of identical prefixes.
+   */
+  menuFit?: 'anchor' | 'content'
+}
+
+/** How wide a content-fitted menu may get before it stops reading as a menu. */
+const MENU_MAX_WIDTH = 420
+
+/**
+ * How much room a content-fitted menu has, measured from the trigger's left edge.
+ *
+ * Bounded by the trigger's own container first: a select sits inside a panel, and a menu
+ * that grew past that panel's edge would hang over whatever is beside it — here, the map.
+ * The window is the second bound, for a container that reaches the edge of the screen.
+ */
+function menuRoom(anchor: HTMLElement | null, left: number): number {
+  const toWindowEdge = typeof window === 'undefined' ? MENU_MAX_WIDTH : window.innerWidth - left - 8
+  const box = anchor?.parentElement?.getBoundingClientRect()
+  const toPanelEdge = box && box.width > 0 ? box.right - left : Number.POSITIVE_INFINITY
+  return Math.min(MENU_MAX_WIDTH, toWindowEdge, toPanelEdge)
 }
 
 export default function CustomSelect({
@@ -34,6 +62,7 @@ export default function CustomSelect({
   style = {},
   size = 'md',
   disabled = false,
+  menuFit = 'anchor',
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -41,8 +70,16 @@ export default function CustomSelect({
   const dropRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
+  // Follows the trigger while the sheet scrolls and while the on-screen keyboard
+  // resizes the viewport, instead of freezing at the rect measured on open (#1999).
+  const anchored = useAnchoredPosition(ref, open)
+
   useEffect(() => {
-    if (open && searchable && searchRef.current) searchRef.current.focus()
+    if (!open || !searchable || !searchRef.current) return
+    searchRef.current.focus()
+    // Focusing raises the keyboard on a phone; scroll the trigger up so the list
+    // it just opened is not left underneath it (#2000).
+    scrollAnchorIntoView(ref.current)
   }, [open, searchable])
 
   useEffect(() => {
@@ -118,18 +155,25 @@ export default function CustomSelect({
       </button>
 
       {/* Dropdown */}
-      {open && ReactDOM.createPortal(
+      {open && createPortal(
         <div ref={dropRef} style={{
           position: 'fixed',
-          ...(() => {
-            const r = ref.current?.getBoundingClientRect()
-            if (!r) return { top: 0, left: 0, width: 200 }
-            const spaceBelow = window.innerHeight - r.bottom
-            const openUp = spaceBelow < 220 && r.top > spaceBelow
-            return openUp
-              ? { bottom: window.innerHeight - r.top + 4, left: r.left, width: r.width }
-              : { top: r.bottom + 4, left: r.left, width: r.width }
-          })(),
+          ...(anchored
+            ? {
+                ...(anchored.flipped ? { bottom: anchored.bottom } : { top: anchored.top }),
+                left: anchored.left,
+                // Never narrower than the trigger, and never past the right-hand edge of
+                // the window. The cap is read at render time rather than measured, and
+                // that is enough: every reason the anchor moved already re-renders this.
+                ...(menuFit === 'content'
+                  ? {
+                      minWidth: anchored.width,
+                      width: 'max-content',
+                      maxWidth: Math.max(anchored.width, menuRoom(ref.current, anchored.left)),
+                    }
+                  : { width: anchored.width }),
+              }
+            : { top: 0, left: 0, width: 200 }),
           zIndex: 99999,
           background: 'var(--bg-card)',
           backdropFilter: 'blur(24px) saturate(180%)',
@@ -139,7 +183,7 @@ export default function CustomSelect({
           boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
           overflow: 'hidden',
           animation: 'trek-menu-enter 200ms cubic-bezier(0.23, 1, 0.32, 1)',
-          transformOrigin: 'top center',
+          transformOrigin: anchored?.flipped ? 'bottom center' : 'top center',
           willChange: 'transform, opacity',
         }}>
           {/* Search */}
@@ -161,8 +205,18 @@ export default function CustomSelect({
             </div>
           )}
 
-          {/* Options */}
-          <div style={{ maxHeight: 220, overflowY: 'auto', padding: '4px' }}>
+          {/* Options — capped at whatever the viewport still shows, so a list opened
+              beside an on-screen keyboard shrinks instead of hiding under it (#2000). */}
+          <div style={{
+            maxHeight: Math.min(220, Math.max(96, (anchored?.maxHeight ?? 220) - (searchable ? 38 : 0))),
+            overflowY: 'auto',
+            // The panel is portaled to document.body and positioned fixed, so its
+            // scroll chain runs to the viewport rather than to the sheet it looks
+            // like it belongs to. On a phone that meant a flick past either end of
+            // the list moved the page instead (#2078).
+            overscrollBehavior: 'contain',
+            padding: '4px',
+          }}>
             {filtered.length === 0 ? (
               <div style={{ padding: '10px 12px', fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: 'var(--text-faint)', textAlign: 'center' }}>—</div>
             ) : (

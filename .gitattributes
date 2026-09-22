@@ -15,6 +15,7 @@
 *.sh   text eol=lf
 # Binary files — no line ending conversion
 *.png  binary
+*.webp binary
 *.jpg  binary
 *.jpeg binary
 *.gif  binary
@@ -25,3 +26,5 @@
 *.eot  binary
 *.pdf  binary
 *.zip  binary
+# A GPX fixture whose byte-order mark and CRLF line endings are what it tests
+server/tests/fixtures/gpx/bom-crlf.gpx -text

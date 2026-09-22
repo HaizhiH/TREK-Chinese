@@ -70,6 +70,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Cruise',
   'reservations.type.event': 'Evenement',
   'reservations.type.tour': 'Rondleiding',
+  'reservations.type.parking': 'Parkeren',
   'reservations.type.other': 'Overig',
   'reservations.type.bus': 'Bus',
   'reservations.type.ferry': 'Veerboot',
@@ -127,6 +128,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': 'Aankomst',
   'reservations.span.inTransit': 'Onderweg',
   'reservations.span.pickup': 'Ophalen',
+  'reservations.span.dropOff': 'Inleveren',
   'reservations.span.return': 'Inleveren',
   'reservations.span.active': 'Actief',
   'reservations.span.start': 'Start',
@@ -162,6 +164,8 @@ const reservations: TranslationStrings = {
     'Gesynchroniseerd vanuit AirTrail — wijzigingen blijven beide kanten op gesynchroniseerd.',
   'reservations.airtrail.notSynced': 'Niet gesynchroniseerd',
   'reservations.airtrail.notSyncedHint': 'Deze vlucht is in AirTrail verwijderd en wordt niet meer gesynchroniseerd.',
+  'reservations.airtrail.layoverHint':
+    'Geïmporteerd uit AirTrail. Een vlucht met meerdere trajecten en overstap heeft geen enkele AirTrail-vlucht om mee te synchroniseren en blijft daarom een eenmalige import.',
   'reservations.airtrail.loadError': 'Je AirTrail-vluchten konden niet worden geladen.',
   'reservations.airtrail.imported': '{count} vlucht(en) geïmporteerd',
   'reservations.airtrail.skippedDuplicate': '{count} al in deze reis, overgeslagen',
@@ -181,5 +185,8 @@ const reservations: TranslationStrings = {
   'reservations.removeExpense': 'Kostenpost verwijderen',
   'reservations.urlLabel': 'Link',
   'reservations.urlPlaceholder': 'https://...',
+  'reservations.travelers.label': 'Reizigers',
+  'reservations.travelers.assign': 'Reizigers toewijzen',
+  'reservations.travelers.none': 'Nog geen reisgenoten in deze reis.',
 };
 export default reservations;

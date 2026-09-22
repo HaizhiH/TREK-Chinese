@@ -17,12 +17,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { createTestDb } from '../../helpers/test-db';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_PATH = resolve(here, '../../../src/db/migrations.ts');
+const MIGRATIONS_PATH = resolve(__dirname, '../../../src/db/migrations.ts');
 const migrationsSource = readFileSync(MIGRATIONS_PATH, 'utf8');
 
 /**
@@ -84,9 +82,6 @@ function findDestructiveStatements(src: string): DestructiveHit[] {
  * Rows are preserved across the rebuild.
  */
 const ALLOWED_DESTRUCTIVE: Record<string, string> = {
-  'DROP TABLE roadtrip_day_boundaries': 'Upstream v4.3.0: rebuild CHECK constraint, copying all rows first.',
-  'DELETE FROM reservation_day_positions': 'Upstream v4.3.0: remove only invalid cross-trip links.',
-  'DELETE FROM hidden_regions': 'Upstream v4.3.0: remove only duplicate Guangdong tombstones after renaming.',
   // ── table rebuilds (data preserved) ──────────────────────────────────────
   'DROP TABLE budget_items':
     'Migration 12: rebuild to drop a stale NOT NULL DEFAULT on persons/days. Rows copied first.',
@@ -122,6 +117,8 @@ const ALLOWED_DESTRUCTIVE: Record<string, string> = {
     'Migration 87 journey rebuild: old data SELECTed into memory and re-inserted into new schema.',
   'DROP TABLE journeys':
     'Migration 87 journey rebuild: old data SELECTed into memory and re-inserted into new schema.',
+  'DROP TABLE roadtrip_day_boundaries':
+    'Rebuild to lift the day_number CHECK that mirrored the old 365-day trip limit (#2403). Rows copied first.',
 
   // ── template/cache scaffolding drops (no user content lost) ──────────────
   'DROP TABLE packing_template_items':
@@ -142,6 +139,10 @@ const ALLOWED_DESTRUCTIVE: Record<string, string> = {
     'Atlas enclave fix: DELETE ... WHERE place_id IN (places inside specific enclave boxes) — invalidate stale region cache; re-resolved on next request.',
   'DELETE FROM visited_regions':
     'Atlas geoBoundaries swap (#1119): DELETE ... WHERE id = ? — after UPDATE OR IGNORE re-codes a manually-marked region to its current code, drop only the single leftover row whose UNIQUE(user_id, region_code) collision caused the update to be skipped (a duplicate of a region the user already has).',
+  'DELETE FROM hidden_regions':
+    'Guangdong rename (#2284): DELETE ... WHERE region_code = the retired CN-GUANGZHOUPROVINCE, run right after an UPDATE OR IGNORE re-codes the tombstone. Only a row the update had to skip survives to here, and it can only be skipped because UNIQUE(user_id, region_code) already holds the same tombstone under the correct code, so the user keeps the region hidden either way.',
+  'DELETE FROM reservation_day_positions':
+    'DELETE ... WHERE the row joins a reservation and a day sitting on different trips. The table has no trip_id and its two foreign keys only require the ids to exist, so a pair that never belonged together was storable; the writer scopes to the trip now and this clears what earlier builds allowed. Bounded by the join — a row whose reservation and day agree on their trip is untouched.',
 };
 
 describe('migration hygiene — destructive operation guard', () => {

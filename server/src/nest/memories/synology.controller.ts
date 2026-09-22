@@ -1,11 +1,12 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import type { User } from '../../types';
-import type { ServiceResult } from '../../services/memories/helpersService';
-import { fail, success } from '../../services/memories/helpersService';
+import type { ServiceResult } from './memories.helpers';
+import { fail, success } from './memories.helpers';
 import { MemoriesService } from './memories.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { SynologySearchDto, SynologySettingsDto, SynologyTestDto } from './memories.dto';
 
 function _parseStringBodyField(value: unknown): string {
   return String(value ?? '').trim();
@@ -14,6 +15,17 @@ function _parseStringBodyField(value: unknown): string {
 function _parseNumberBodyField(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Minutes east of UTC, clamped to the range real zones live in (-12:00 to
+ * +14:00). Anything unreadable is 0, which is the UTC day this route searched
+ * before the browser could say which day it meant.
+ */
+function _parseUtcOffsetBodyField(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(-720, Math.min(840, Math.trunc(parsed)));
 }
 
 /**
@@ -47,7 +59,7 @@ export class SynologyMemoriesController {
   }
 
   @Put('settings')
-  async putSettings(@CurrentUser() user: User, @Body() body: Record<string, unknown>, @Res() res: Response): Promise<void> {
+  async putSettings(@CurrentUser() user: User, @Body() body: SynologySettingsDto, @Res() res: Response): Promise<void> {
     const synology_url = _parseStringBodyField(body.synology_url);
     const synology_username = _parseStringBodyField(body.synology_username);
     const synology_password = _parseStringBodyField(body.synology_password);
@@ -67,7 +79,7 @@ export class SynologyMemoriesController {
 
   @Post('test')
   @HttpCode(200)
-  async test(@CurrentUser() user: User, @Body() body: Record<string, unknown>, @Res() res: Response): Promise<void> {
+  async test(@CurrentUser() user: User, @Body() body: SynologyTestDto, @Res() res: Response): Promise<void> {
     const synology_url = _parseStringBodyField(body.synology_url);
     const synology_username = _parseStringBodyField(body.synology_username);
     const synology_password = _parseStringBodyField(body.synology_password);
@@ -110,17 +122,20 @@ export class SynologyMemoriesController {
 
   @Post('search')
   @HttpCode(200)
-  async search(@CurrentUser() user: User, @Body() body: Record<string, unknown>, @Res() res: Response): Promise<void> {
+  async search(@CurrentUser() user: User, @Body() body: SynologySearchDto, @Res() res: Response): Promise<void> {
     const from = _parseStringBodyField(body.from);
     const to = _parseStringBodyField(body.to);
     let offset = _parseNumberBodyField(body.offset, 0);
     const page = _parseNumberBodyField(body.page, 1) - 1;
     let limit = _parseNumberBodyField(body.limit, 100);
     const size = _parseNumberBodyField(body.size, 0);
+    // `offset` is rows to skip, `utc_offset_minutes` is which 24 hours from/to
+    // name. Two different things that a shared name would silently swap (#2336).
+    const tzOffsetMinutes = _parseUtcOffsetBodyField(body.utc_offset_minutes);
     if (size > 0) limit = size;
     if (page > 0) offset = page * limit;
 
-    this.handle(res, await this.memories.synologySearchPhotos(user.id, from || undefined, to || undefined, offset, limit));
+    this.handle(res, await this.memories.synologySearchPhotos(user.id, from || undefined, to || undefined, offset, limit, tzOffsetMinutes));
   }
 
   @Get('assets/:tripId/:photoId/:ownerId/info')

@@ -31,6 +31,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Creuer',
   'reservations.type.event': 'Esdeveniment',
   'reservations.type.tour': 'Excursió',
+  'reservations.type.parking': 'Aparcament',
   'reservations.type.other': 'Altres',
   'reservations.type.bus': 'Autobús',
   'reservations.type.ferry': 'Ferri',
@@ -88,6 +89,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': 'Arribada',
   'reservations.span.inTransit': 'En trànsit',
   'reservations.span.pickup': 'Recollida',
+  'reservations.span.dropOff': 'Lliurament',
   'reservations.span.return': 'Devolució',
   'reservations.span.active': 'Actiu',
   'reservations.span.start': 'Inici',
@@ -165,6 +167,8 @@ const reservations: TranslationStrings = {
     "Sincronitzat des d'AirTrail — les edicions es mantenen sincronitzades en ambdós sentits.",
   'reservations.airtrail.notSynced': 'No sincronitzat',
   'reservations.airtrail.notSyncedHint': "Aquest vol s'ha eliminat a AirTrail i ja no es sincronitza.",
+  'reservations.airtrail.layoverHint':
+    "Importat des d'AirTrail. Un vol de diversos trams amb escala no té cap vol únic d'AirTrail amb què sincronitzar-se, així que es manté com una importació única.",
   'reservations.airtrail.loadError': "No s'han pogut carregar els teus vols d'AirTrail.",
   'reservations.airtrail.imported': '{count} vol(s) importat(s)',
   'reservations.airtrail.skippedDuplicate': '{count} ja existents en aquest viatge, ignorats',
@@ -182,5 +186,8 @@ const reservations: TranslationStrings = {
   'reservations.linkedExpense': 'Despesa vinculada',
   'reservations.removeExpense': 'Eliminar despesa',
   'reservations.airtrail.joinConnection': 'Importar com un sol vol amb escala a {stops}',
+  'reservations.travelers.label': 'Viatgers',
+  'reservations.travelers.assign': 'Assigna viatgers',
+  'reservations.travelers.none': 'Encara no hi ha viatgers al viatge.',
 };
 export default reservations;

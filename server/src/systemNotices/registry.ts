@@ -31,9 +31,97 @@ export const RETIRED_NOTICE_IDS = [
   'v3-mcp',
   'v3-features',
   'welcome-v1',
+  'release-4-0-0',
 ] as const;
 
 export const SYSTEM_NOTICES: SystemNotice[] = [
+  // ── Release notes: what the current release brought, and a note from the maintainer ──
+  // One entry for every release. Each big release swaps the copy (the release_notes
+  // keys) and the version below, and keeps this id. `recurring: 'per-version'` brings
+  // it back to every user on every upgrade, a patch release included, so nobody is
+  // ever left on a version with nothing to show. No upper bound for the same reason.
+  {
+    id: 'release-notes',
+    recurring: 'per-version',
+    display: 'modal',
+    severity: 'info',
+    titleKey: 'system_notice.release_notes.headline',
+    bodyKey: 'system_notice.release_notes.intro',
+    release: {
+      version: '4.3.0',
+      eyebrowKey: 'system_notice.release_notes.eyebrow',
+      headlineKey: 'system_notice.release_notes.headline',
+      introKey: 'system_notice.release_notes.intro',
+      featuresLabelKey: 'system_notice.release_notes.features_label',
+      featuresAsideKey: 'system_notice.release_notes.features_aside',
+      features: [
+        {
+          iconName: 'Database',
+          visual: 'places-api',
+          titleKey: 'system_notice.release_notes.feature_places_title',
+          bodyKey: 'system_notice.release_notes.feature_places_body',
+        },
+        {
+          iconName: 'Route',
+          visual: 'roadtrip',
+          titleKey: 'system_notice.release_notes.feature_roadtrip_title',
+          bodyKey: 'system_notice.release_notes.feature_roadtrip_body',
+        },
+        {
+          iconName: 'MapPin',
+          visual: 'dawarich',
+          titleKey: 'system_notice.release_notes.feature_dawarich_title',
+          bodyKey: 'system_notice.release_notes.feature_dawarich_body',
+        },
+        {
+          iconName: 'FolderSync',
+          visual: 'docsync',
+          layout: 'wide',
+          titleKey: 'system_notice.release_notes.feature_docsync_title',
+          bodyKey: 'system_notice.release_notes.feature_docsync_body',
+        },
+      ],
+      footnoteKey: 'system_notice.release_notes.footnote',
+      notes: {
+        labelKey: 'system_notice.release_notes.notes_label',
+        href: 'https://github.com/liketrek/TREK/releases/tag/v4.3.0',
+      },
+      note: {
+        eyebrowKey: 'system_notice.release_notes.note_eyebrow',
+        titleKey: 'system_notice.release_notes.note_title',
+        bodyKey: 'system_notice.release_notes.note_body',
+        promiseLabelKey: 'system_notice.release_notes.promise_label',
+        promiseLeadKey: 'system_notice.release_notes.promise_lead',
+        promiseTextKey: 'system_notice.release_notes.promise_text',
+        bodyAfterKey: 'system_notice.release_notes.note_body_after',
+        closingKey: 'system_notice.release_notes.note_closing',
+      },
+      supportLeadKey: 'system_notice.release_notes.support_lead',
+      supportTextKey: 'system_notice.release_notes.support_text',
+    },
+    cta: {
+      kind: 'link',
+      labelKey: 'system_notice.release_notes.cta_bmc',
+      href: 'https://buymeacoffee.com/mauriceboe',
+    },
+    secondaryCta: {
+      kind: 'link',
+      labelKey: 'system_notice.release_notes.cta_kofi',
+      href: 'https://ko-fi.com/mauriceboe',
+    },
+    dismissible: true,
+    // Desktop-only: the two-column layout has no phone form, and the phone has its
+    // own onboarding.
+    desktopOnly: true,
+    // It asks the reader to fund the project, and on a managed install they already
+    // pay whoever runs it.
+    conditions: [{ kind: 'managed', is: false }],
+    publishedAt: '2026-09-15T00:00:00Z',
+    priority: 110,
+    // Where the thank-you notice below hands over; nothing on 3.x ships this copy.
+    minVersion: '4.0.0',
+  },
+
   // ── Thank-you + support the project — shown once per install AND once per upgrade ──
   // `recurring: 'per-version'` re-surfaces it whenever the app version moves up.
   {
@@ -61,10 +149,19 @@ export const SYSTEM_NOTICES: SystemNotice[] = [
     dismissible: true,
     // Desktop-only: the support modal is suppressed on small/mobile viewports.
     desktopOnly: true,
-    conditions: [],
+    // Not on a centrally administered install. The body thanks the reader for
+    // installing TREK and asks them to fund it, and there the reader installed
+    // nothing and already pays whoever runs it. Gated rather than reworded: the
+    // text is right for everyone it was written for.
+    conditions: [{ kind: 'managed', is: false }],
     publishedAt: '2026-06-27T00:00:00Z',
     priority: 100,
     recurring: 'per-version',
+    // From 4.0.0 on, the release modal carries the same thank-you and the same
+    // two support links, so this one would be the second half of a message the
+    // reader just read. Retired by version rather than deleted: installs still
+    // on 3.x keep it.
+    maxVersion: '4.0.0',
   },
 
   // ── 3.0.14 admin notice — whitespace migration collision ───────────────────
@@ -82,6 +179,9 @@ export const SYSTEM_NOTICES: SystemNotice[] = [
       { kind: 'existingUserBeforeVersion', version: '3.0.14' },
       { kind: 'role', roles: ['admin'] },
       { kind: 'custom', id: 'whitespace-collision-detected' },
+      // The body says to check the server logs. On a managed install the reader
+      // has none, and the operator sees the same collision in theirs.
+      { kind: 'managed', is: false },
     ],
     publishedAt: '2026-05-03T00:00:00Z',
     priority: 85,

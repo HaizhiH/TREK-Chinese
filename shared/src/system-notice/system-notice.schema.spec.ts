@@ -52,6 +52,76 @@ describe('systemNoticeDtoSchema', () => {
     ).toBe(true);
   });
 
+  it('accepts a release notice and keeps its optional pieces optional', () => {
+    const base = {
+      id: 'release-notes',
+      display: 'modal' as const,
+      severity: 'info' as const,
+      titleKey: 't',
+      bodyKey: 'b',
+      dismissible: true,
+      release: {
+        version: '4.3.0',
+        eyebrowKey: 'e',
+        headlineKey: 'h',
+        introKey: 'i',
+        featuresLabelKey: 'fl',
+        features: [
+          { iconName: 'Database', titleKey: 'f1t', bodyKey: 'f1b' },
+          { iconName: 'Route', visual: 'roadtrip', titleKey: 'f2t', bodyKey: 'f2b' },
+          { iconName: 'FolderSync', visual: 'docsync', layout: 'wide', titleKey: 'f3t', bodyKey: 'f3b' },
+        ],
+        note: {
+          eyebrowKey: 'ne',
+          titleKey: 'nt',
+          bodyKey: 'nb',
+          promiseLabelKey: 'pl',
+          promiseLeadKey: 'plead',
+          promiseTextKey: 'pt',
+          bodyAfterKey: 'nba',
+          closingKey: 'nc',
+        },
+        supportLeadKey: 'slead',
+        supportTextKey: 's',
+      },
+    };
+    expect(systemNoticeDtoSchema.safeParse(base).success).toBe(true);
+
+    const withExtras = {
+      ...base,
+      release: {
+        ...base.release,
+        featuresAsideKey: 'fa',
+        notes: { labelKey: 'notes', href: 'https://example.test' },
+        footnoteKey: 'fn',
+      },
+    };
+    expect(systemNoticeDtoSchema.safeParse(withExtras).success).toBe(true);
+  });
+
+  it('rejects a release block missing the maintainer note', () => {
+    expect(
+      systemNoticeDtoSchema.safeParse({
+        id: 'release-x',
+        display: 'modal',
+        severity: 'info',
+        titleKey: 't',
+        bodyKey: 'b',
+        dismissible: true,
+        release: {
+          version: '4.3.0',
+          eyebrowKey: 'e',
+          headlineKey: 'h',
+          introKey: 'i',
+          featuresLabelKey: 'fl',
+          features: [],
+          supportLeadKey: 'slead',
+          supportTextKey: 's',
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects an unknown display value and a malformed CTA', () => {
     expect(
       systemNoticeDtoSchema.safeParse({

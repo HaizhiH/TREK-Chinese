@@ -50,10 +50,43 @@ const system_notice: TranslationStrings = {
   'system_notice.thank_you_support.highlight_community': 'Built together with the community',
   'system_notice.thank_you_support.cta_bmc': 'Buy Me a Coffee',
   'system_notice.thank_you_support.cta_kofi': 'Support on Ko-fi',
+  // The release modal. One stable set of keys: each big release swaps the copy in place.
+  'system_notice.release_notes.eyebrow': 'Update installed',
+  'system_notice.release_notes.headline': 'Four things TREK now does on its own.',
+  'system_notice.release_notes.intro': 'Its own place API, road trips planned end to end, your location history back in your hands, and your documents in sync.',
+  'system_notice.release_notes.features_label': 'The headliners',
+  'system_notice.release_notes.features_aside': 'Far from everything',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'The first open source travel planner with its own place API. 73.6 million places, no key, no quota.',
+  'system_notice.release_notes.feature_roadtrip_title': 'Roadtrip Addon',
+  'system_notice.release_notes.feature_roadtrip_body': 'Plans the drive itself: route, distance, hours and stops. Off until an admin turns it on.',
+  'system_notice.release_notes.feature_dawarich_title': 'Dawarich Integration',
+  'system_notice.release_notes.feature_dawarich_body': 'The self-hosted answer to Google Timeline, now readable inside TREK. TREK reads, and only reads.',
+  'system_notice.release_notes.footnote': 'Plus a long list of smaller changes across the rest of TREK.',
+  'system_notice.release_notes.notes_label': 'Release notes',
+  'system_notice.release_notes.note_eyebrow': 'A note from the maintainer',
+  'system_notice.release_notes.note_title': 'You are the reason I keep building TREK.',
+  'system_notice.release_notes.note_body':
+    'TREK began as a small tool for my own trips, written after work because I wanted a better way to plan them. It never really stopped growing. Almost everything you use was built late at night, on weekends, on trains, next to a full-time job, and there were plenty of evenings I quietly wondered whether anyone out there would ever open it.',
+  'system_notice.release_notes.promise_label': 'The promise',
+  'system_notice.release_notes.promise_lead': 'TREK stays free, forever.',
+  'system_notice.release_notes.promise_text':
+    'Every feature, every update, for everyone. No paid tiers, no subscriptions, no catch.',
+  'system_notice.release_notes.note_body_after':
+    'Then you did. Within a few months there were thousands of you: stars, bug reports, translations into languages I do not speak, pull requests from people I have never met. I still check the repository first thing every morning, and it still does not quite feel real.',
+  'system_notice.release_notes.note_closing': 'Thank you for being here, from Maurice.',
+  'system_notice.release_notes.support_lead':
+    'TREK is free and always will be, but servers, domains and a lot of late nights are not.',
+  'system_notice.release_notes.support_text':
+    'If it has earned a place in your trips, buy me a coffee and help keep the next release coming.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'Support on Ko-fi',
   'system_notice.pager.prev': 'Previous notice',
   'system_notice.pager.next': 'Next notice',
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': 'Go to notice {n}',
   'system_notice.pager.position': 'Notice {current} of {total}',
+  'system_notice.release_notes.feature_docsync_title': 'Document Sync',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud and Synology Drive. A trip’s documents flow both ways with the store you already run.',
 };
 export default system_notice;

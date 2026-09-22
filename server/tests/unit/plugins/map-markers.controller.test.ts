@@ -13,17 +13,18 @@ const { canAccessTrip, pluginsEnabled } = vi.hoisted(() => ({
 vi.mock('../../../src/db/database', () => ({ db: { prepare: () => ({ get: () => undefined }) }, canAccessTrip }));
 vi.mock('../../../src/nest/plugins/kill-switch', () => ({ pluginsEnabled }));
 
-import { MapMarkersController } from '../../../src/nest/plugins/map-markers.controller';
-import type { PluginRuntimeService } from '../../../src/nest/plugins/plugin-runtime.service';
+import { MapMarkersController } from '../../../src/nest/plugins/contributions/map-markers.controller';
+import type { PluginHooks } from '../../../src/nest/plugins/plugin-hooks.service';
+import type { DatabaseService } from '../../../src/nest/database/database.service';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const req = (id?: number) => ({ user: id === undefined ? undefined : { id } }) as any;
 function controller(invoke: (id: string) => unknown, providers = ['p1']) {
   const runtime = {
     providersOf: vi.fn(() => providers),
-    invokeHook: vi.fn(async (id: string) => invoke(id)),
-  } as unknown as PluginRuntimeService;
-  return { c: new MapMarkersController(runtime), runtime };
+    mapMarkers: vi.fn(async (id: string) => invoke(id)),
+  } as unknown as PluginHooks;
+  return { c: new MapMarkersController(runtime, { canAccessTrip } as unknown as DatabaseService), runtime };
 }
 const mk = (over: Record<string, unknown> = {}) => ({ id: 'm1', lat: 48.85, lng: 2.35, ...over });
 

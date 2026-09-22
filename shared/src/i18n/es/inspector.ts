@@ -14,6 +14,8 @@ const inspector: TranslationStrings = {
   'inspector.confirmedRes': 'Reserva confirmada',
   'inspector.pendingRes': 'Reserva pendiente',
   'inspector.google': 'Google Maps',
+  'inspector.navigation': 'Navegación',
+  'inspector.openWith': 'Abrir con',
   'inspector.openStreetMap': 'OpenStreetMap',
   'inspector.website': 'Abrir la web',
   'inspector.saveToCollection': 'Guardar en colección',
@@ -22,5 +24,8 @@ const inspector: TranslationStrings = {
   'inspector.editRes': 'Editar reserva',
   'inspector.participants': 'Participantes',
   'inspector.trackStats': 'Datos de la ruta',
+  'inspector.trackColor': 'Color de la ruta',
+  'inspector.trackColorAuto': 'Color automático',
+  'inspector.trackColorCustom': 'Elegir color personalizado',
 };
 export default inspector;

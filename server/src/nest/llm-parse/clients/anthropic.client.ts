@@ -1,7 +1,9 @@
 import type { LlmExtractionClient, LlmExtractionInput } from '../llm-provider.interface';
 import { safeFetchLlm } from '../../../utils/ssrfGuard';
+import { readEnv } from '../../../app-config';
+import { toReservationList } from '../lenient-json';
+import { UnreadableLlmResponse } from './openai-compatible.client';
 
-const TIMEOUT_MS = 120_000;
 const MAX_TOKENS = 8192;
 const ANTHROPIC_VERSION = '2023-06-01';
 const TOOL_NAME = 'emit_reservations';
@@ -15,7 +17,11 @@ const TOOL_NAME = 'emit_reservations';
  */
 export class AnthropicClient implements LlmExtractionClient {
   async extract(input: LlmExtractionInput): Promise<Record<string, unknown>[]> {
-    const base = (input.baseUrl ?? 'https://api.anthropic.com').replace(/\/+$/, '');
+    // The lookbehind pins the run to its own start. Without it `\/+$` restarts at every
+    // slash of a trailing run that turns out not to end the string, rescanning to the
+    // end each time; the assertion only rules out start positions the leftmost match
+    // could never have used, so the trimmed result is unchanged.
+    const base = (input.baseUrl ?? 'https://api.anthropic.com').replace(/(?<!\/)\/+$/, '');
     const url = `${base}/v1/messages`;
 
     const content: unknown[] = [];
@@ -46,7 +52,7 @@ export class AnthropicClient implements LlmExtractionClient {
     };
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), readEnv().integrations.llmTimeoutMs);
     let res: Response;
     try {
       // baseUrl is user-configurable — guard it against pointing at the cloud
@@ -78,10 +84,20 @@ export class AnthropicClient implements LlmExtractionClient {
     if (data.stop_reason === 'refusal') {
       throw new Error('Anthropic declined to process this document');
     }
+    // A run that hits the cap stops mid-tool-call, so what arrives is a fragment
+    // of the list or nothing at all — and a forced tool that was not called left
+    // no list either. Neither is "this document holds no booking", but both came
+    // back as [] and reached the person as an empty preview with nothing in the
+    // log: the #2375 symptom, on the provider the dropdown offers first.
+    if (data.stop_reason === 'max_tokens') {
+      throw new UnreadableLlmResponse(
+        `the answer was cut off at the ${MAX_TOKENS}-token limit — the document is too long to extract in one pass`,
+      );
+    }
 
     const toolUse = data.content?.find(b => b.type === 'tool_use' && b.name === TOOL_NAME);
-    const reservations = toolUse?.input?.reservations;
-    return Array.isArray(reservations) ? (reservations as Record<string, unknown>[]) : [];
+    if (!toolUse) throw new UnreadableLlmResponse(`the model answered without calling ${TOOL_NAME}`);
+    return toReservationList(toolUse.input?.reservations);
   }
 }
 

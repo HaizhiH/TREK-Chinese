@@ -1,16 +1,64 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react'
+import { useEffect, useRef, useImperativeHandle, useCallback, type Ref } from 'react'
 import L from 'leaflet'
 import { useSettingsStore } from '../../store/settingsStore'
+import { useCartoApiKey } from '../../hooks/useTileUrl'
+import { isGcj02Basemap, isVectorStyle, resolveTileUrl } from '../../utils/tileUrl'
+import { OFM_DARK, OFM_POSITRON, attributionForTile } from '../../constants/mapDefaults'
+import { attachVectorBasemap, detachBasemapLayer, restyleBasemap, type BasemapLayer } from '../Map/VectorBasemap'
+import { crsForBasemap } from '../Map/gcj02Crs'
+import { escapeHtml, type JourneyTrack } from '@trek/shared'
+import { ensureJourneyPopupStyle, formatMarkerDate, journeyPopupHtml } from './journeyMapPopup'
 
 export interface MapMarkerItem {
   id: string
   lat: number
   lng: number
   label: string
+  locationName: string
   mood?: string | null
   time: string
   dayColor: string
   dayLabel: number
+  photoUrls: string[]
+}
+
+/**
+ * Grid clustering in screen space.
+ *
+ * The Journey maps have never had clustering, and the library the planner uses
+ * hangs off react-leaflet while this map drives Leaflet directly. Bucketing by
+ * rounded pixel position is a few lines, is deterministic, and is enough for the
+ * job: photos of one place collapse into one thumbnail with a count, and pulling
+ * the map apart separates them again.
+ */
+const PHOTO_CLUSTER_PX = 64
+
+function clusterPhotos(
+  map: L.Map,
+  photos: MapPhoto[],
+): { lat: number; lng: number; members: MapPhoto[] }[] {
+  const buckets = new Map<string, MapPhoto[]>()
+  for (const photo of photos) {
+    const pt = map.latLngToContainerPoint([photo.lat, photo.lng])
+    const key = `${Math.round(pt.x / PHOTO_CLUSTER_PX)}:${Math.round(pt.y / PHOTO_CLUSTER_PX)}`
+    const list = buckets.get(key)
+    if (list) list.push(photo)
+    else buckets.set(key, [photo])
+  }
+  return [...buckets.values()].map(members => ({
+    // Anchor on the first member rather than the centroid: the thumbnail shown is
+    // that photo's, so the pin should point where that picture was taken.
+    lat: members[0].lat,
+    lng: members[0].lng,
+    members,
+  }))
+}
+
+function photoMarkerHtml(thumbUrl: string, count: number): string {
+  const badge = count > 1
+    ? `<span style="position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#fff;border:1.5px solid rgba(0,0,0,.12);box-shadow:0 1px 4px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#111827;line-height:1;box-sizing:border-box;">${count}</span>`
+    : ''
+  return `<div style="position:relative;width:48px;height:48px;border-radius:12px;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);background-image:url('${encodeURI(thumbUrl)}');background-size:cover;background-position:center;"></div>${badge}`
 }
 
 export interface JourneyMapHandle {
@@ -19,27 +67,56 @@ export interface JourneyMapHandle {
   invalidateSize: () => void
 }
 
+/** A photo that knows where it was taken (#1614). */
+export interface MapPhoto {
+  id: string
+  lat: number
+  lng: number
+  thumbUrl: string
+}
+
 interface MapEntry {
   id: string
   lat: number
   lng: number
   title?: string | null
+  location_name?: string | null
   mood?: string | null
   entry_date: string
   dayColor?: string
   dayLabel?: number
+  /** Thumbnails for the marker card, already resolved by the caller (the share view signs its own). */
+  photoUrls?: string[]
 }
 
 interface Props {
+  ref?: Ref<JourneyMapHandle>
   checkins: any[]
   entries: MapEntry[]
+  /** Photos placed by their own capture coordinates, clustered by proximity. */
+  photos?: MapPhoto[]
+  onPhotoClick?: (photoIds: string[]) => void
   trail?: { lat: number; lng: number }[]
+  /** Routed GPX geometries from the journey's trips (#1260). */
+  tracks?: JourneyTrack[]
   height?: number
   dark?: boolean
   activeMarkerId?: string | null
   onMarkerClick?: (id: string, type?: string) => void
   fullScreen?: boolean
+  /**
+   * Leave the marker labels off.
+   *
+   * On the phone the map sits above a carousel whose active card already carries
+   * the entry's name, and a tooltip on touch is a tap-to-open box rather than a
+   * hover hint — so it says the same thing twice and covers the map to do it
+   * (discussion #2299). On desktop the label is the only name a marker has, so
+   * this stays off there.
+   */
+  hideMarkerTooltip?: boolean
   paddingBottom?: number
+  /** CARTO key from the share payload: the public journey has no settings store to read. */
+  cartoApiKey?: string
 }
 
 function buildMarkerItems(entries: MapEntry[]): MapMarkerItem[] {
@@ -51,10 +128,12 @@ function buildMarkerItems(entries: MapEntry[]): MapMarkerItem[] {
         lat: e.lat,
         lng: e.lng,
         label: e.title || 'Entry',
+        locationName: e.location_name || '',
         mood: e.mood,
         time: e.entry_date,
         dayColor: e.dayColor || '#52525B',
         dayLabel: e.dayLabel ?? 1,
+        photoUrls: e.photoUrls ?? [],
       })
     }
   }
@@ -83,13 +162,37 @@ function markerSvg(dayColor: string, dayLabel: number, highlighted: boolean): st
 }
 
 const EMPTY_TRAIL: { lat: number; lng: number }[] = []
+const EMPTY_TRACKS: JourneyTrack[] = []
+/** Fallback when a track carries no colour of its own, matching the planner's default. */
+const TRACK_FALLBACK_COLOR = '#4f46e5'
 
-const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
-  { entries, trail, height = 220, dark, activeMarkerId, onMarkerClick, fullScreen, paddingBottom },
-  ref
+function JourneyMap(
+  { entries, photos, onPhotoClick, trail, tracks, height = 220, dark, activeMarkerId, onMarkerClick, fullScreen, paddingBottom, cartoApiKey, hideMarkerTooltip, ref }: Props,
 ) {
+  // Read through a ref: the flag is fixed per surface, and putting it in the
+  // marker effect's deps would rebuild every marker for nothing.
+  const hideMarkerTooltipRef = useRef(hideMarkerTooltip)
+  hideMarkerTooltipRef.current = hideMarkerTooltip
   const stableTrail = trail || EMPTY_TRAIL
+  const stableTracks = tracks || EMPTY_TRACKS
   const mapTileUrl = useSettingsStore(s => s.settings.map_tile_url)
+  const storedCartoKey = useCartoApiKey()
+  const cartoKey = cartoApiKey || storedCartoKey
+  const tileUrl = resolveTileUrl(mapTileUrl, dark ? OFM_DARK : OFM_POSITRON, cartoKey)
+  // Amap's tiles are GCJ-02 (see gcj02Crs.ts), the same shift the planner map
+  // applies. Leaflet fixes a map's CRS at construction, so this one value is
+  // allowed to rebuild the map where a template change only retiles it.
+  const isGcjBasemap = !isVectorStyle(tileUrl) && isGcj02Basemap(tileUrl)
+  // Read through a ref by the map effect, retiled in place by its own effect below:
+  // the CARTO key reaches the store after the first render, and rebuilding the map
+  // for that raced with the markers and layers already on it (#2097).
+  const tileUrlRef = useRef(tileUrl)
+  tileUrlRef.current = tileUrl
+  const tileLayerRef = useRef<L.TileLayer | null>(null)
+  // GL layer or the raster stand-in a browser without WebGL gets instead (#2288).
+  const glLayerRef = useRef<BasemapLayer | null>(null)
+  // The vector basemap loads async; a map torn down before it lands must not get one.
+  const cancelledRef = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<string, L.Marker>>(new Map())
@@ -97,6 +200,9 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
   const highlightedRef = useRef<string | null>(null)
   const onMarkerClickRef = useRef(onMarkerClick)
   onMarkerClickRef.current = onMarkerClick
+  const photoLayerRef = useRef<L.LayerGroup | null>(null)
+  const onPhotoClickRef = useRef(onPhotoClick)
+  onPhotoClickRef.current = onPhotoClick
 
   const darkRef = useRef(dark)
   darkRef.current = dark
@@ -135,12 +241,22 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
     }
   }, [])
 
+  /**
+   * Bring an entry's marker under the reader without changing how far out they are.
+   *
+   * This fires on every step through the timeline, and it used to force zoom 12.
+   * Reading a journey from a country view therefore yanked the map to street level
+   * on the first scroll and kept it there: every marker filled the screen, and the
+   * one thing a map is for — where is this, relative to everything else — was gone
+   * (discussion #2299). Panning keeps the frame the reader chose; the initial
+   * fitBounds is what decides how close the journey starts out.
+   */
   const focusMarker = useCallback((id: string) => {
     highlightMarker(id)
     const marker = markersRef.current.get(id)
     if (marker && mapRef.current) {
       try {
-        mapRef.current.flyTo(marker.getLatLng(), Math.max(mapRef.current.getZoom(), 12), { duration: 0.5 })
+        mapRef.current.panTo(marker.getLatLng(), { animate: true, duration: 0.5 })
       } catch { /* map not yet initialized */ }
     }
   }, [])
@@ -154,40 +270,64 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
   useEffect(() => {
     if (!containerRef.current) return
 
-    if (mapRef.current) {
-      mapRef.current.remove()
-      mapRef.current = null
-    }
     markersRef.current.clear()
 
+    const crs = crsForBasemap(isGcjBasemap)
     const map = L.map(containerRef.current, {
+      ...(crs ? { crs } : {}),
       zoomControl: false,
-      attributionControl: true,
+      // Added below with `prefix: false` so it collapses to the credit alone; see
+      // the GL twin for why it is not a strip of text across the bottom.
+      attributionControl: false,
       scrollWheelZoom: fullScreen ? true : false,
       dragging: true,
       touchZoom: true,
     })
+    L.control.attribution({ position: 'bottomright', prefix: false }).addTo(map)
     mapRef.current = map
+    cancelledRef.current = false
 
-    const defaultTile = dark
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
-    L.tileLayer(mapTileUrl || defaultTile, {
-      maxZoom: 18,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      referrerPolicy: 'strict-origin-when-cross-origin',
-      // Leaflet defaults updateWhenIdle:true on mobile (waits for pan to settle
-      // before loading tiles). On the journey mobile combined view we flyTo
-      // constantly when switching cards, so tiles lag visibly — force eager
-      // updates and keep a larger ring of off-screen tiles ready.
-      updateWhenIdle: false,
-      keepBuffer: 4,
-    } as any).addTo(map)
+    // The basemap is a vector style unless the user brought their own raster
+    // template, so which layer draws it is decided per template rather than once.
+    if (isVectorStyle(tileUrlRef.current)) {
+      void attachVectorBasemap(map, tileUrlRef.current, glLayerRef, () => cancelledRef.current)
+    } else {
+      const tiles = L.tileLayer(tileUrlRef.current, {
+        maxZoom: 18,
+        attribution: attributionForTile(tileUrlRef.current),
+        referrerPolicy: 'strict-origin-when-cross-origin',
+        // Leaflet defaults updateWhenIdle:true on mobile (waits for pan to settle
+        // before loading tiles). On the journey mobile combined view we flyTo
+        // constantly when switching cards, so tiles lag visibly — force eager
+        // updates and keep a larger ring of off-screen tiles ready.
+        updateWhenIdle: false,
+        keepBuffer: 4,
+      } as any)
+      tiles.addTo(map)
+      tileLayerRef.current = tiles
+    }
 
     const items = buildMarkerItems(entries)
     itemsRef.current = items
 
     const allCoords: L.LatLngTuple[] = []
+    /**
+     * Track geometry is kept OUT of the fit set (#2194) and used only when there
+     * is nothing else to frame.
+     *
+     * A journey's opening viewport should show the journey — its entries and the
+     * trail between them. Letting a recorded GPX into the bounds meant one drive
+     * across a country zoomed the map out until the entries were specks, which
+     * is what the reporter's screenshot shows. JourneyMapGL already fits on
+     * entries + trail alone, so for every journey that has entries the two
+     * renderers now agree where they used to differ.
+     *
+     * They still differ for a journey with tracks and nothing else: this one
+     * frames the tracks, JourneyMapGL falls back to the world view. Framing the
+     * only thing on the map is the better of the two, and converging the GL side
+     * is a change to a renderer this issue is not about.
+     */
+    const trackCoords: L.LatLngTuple[] = []
 
     if (stableTrail.length > 1) {
       const coords = stableTrail.map(p => [p.lat, p.lng] as L.LatLngTuple)
@@ -196,6 +336,24 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
         dashArray: '6 4', lineCap: 'round',
       }).addTo(map)
       coords.forEach(c => allCoords.push(c))
+    }
+
+    // GPX tracks — drawn solid and in their own colour, so they read as a recorded
+    // route rather than as the dashed line that merely connects entries in time order.
+    // A white casing keeps them legible on satellite tiles, same as the planner map.
+    for (const track of stableTracks) {
+      if (track.points.length < 2) continue
+      const coords = track.points.map(([lat, lng]) => [lat, lng] as L.LatLngTuple)
+      const color = track.color || TRACK_FALLBACK_COLOR
+      L.polyline(coords, { color: '#ffffff', weight: 6, opacity: 0.75, lineCap: 'round', lineJoin: 'round' }).addTo(map)
+      const line = L.polyline(coords, { color, weight: 3.5, opacity: 0.95, lineCap: 'round', lineJoin: 'round' })
+      // Same tooltip the markers on this map use, rather than Leaflet's default box:
+      // it follows the appearance tokens, so it lands right in dark mode and with
+      // transparency switched off. Escaped because a string handed to bindTooltip
+      // becomes innerHTML, and a track name is a place name off a shared trip.
+      if (track.name) line.bindTooltip(escapeHtml(track.name), { sticky: true, direction: 'top', className: 'map-tooltip' })
+      line.addTo(map)
+      coords.forEach(c => trackCoords.push(c))
     }
 
     // route polyline — only in non-fullscreen (sidebar map) mode
@@ -223,11 +381,27 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
       })
 
       const marker = L.marker(pos, { icon }).addTo(map)
-      marker.bindTooltip(item.label, {
-        direction: 'top',
-        offset: [0, -MARKER_H],
-        className: 'map-tooltip',
-      })
+      // The same card the GL renderer shows, from the same builder: which map
+      // engine a reader happens to have selected should not change what a marker
+      // tells them (discussion #2299). The builder escapes everything that came
+      // from a person, which matters most here — this map is what the public
+      // journey page renders.
+      if (!hideMarkerTooltipRef.current) {
+        ensureJourneyPopupStyle()
+        marker.bindTooltip(
+          journeyPopupHtml({
+            title: item.label || item.locationName || 'Entry',
+            place: item.label ? item.locationName : '',
+            date: formatMarkerDate(item.time),
+            photoUrls: item.photoUrls,
+          }),
+          {
+            direction: 'top',
+            offset: [0, -MARKER_H],
+            className: 'map-tooltip trek-journey-tooltip',
+          },
+        )
+      }
 
       marker.on('click', () => {
         onMarkerClickRef.current?.(item.id)
@@ -241,9 +415,12 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
       if (!mapRef.current) return
       try {
         map.invalidateSize()
-        if (allCoords.length > 0) {
+        // Tracks only get a say when the journey has nothing located of its own —
+        // a world view would be worse than framing the one thing on the map.
+        const fitCoords = allCoords.length > 0 ? allCoords : trackCoords
+        if (fitCoords.length > 0) {
           const pb = paddingBottom || 50
-          map.fitBounds(L.latLngBounds(allCoords), { paddingTopLeft: [50, 50], paddingBottomRight: [50, pb], maxZoom: 16 })
+          map.fitBounds(L.latLngBounds(fitCoords), { paddingTopLeft: [50, 50], paddingBottomRight: [50, pb], maxZoom: 16 })
         } else {
           map.setView([30, 0], 2)
         }
@@ -255,11 +432,76 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
     }, 200)
 
     return () => {
+      cancelledRef.current = true
       map.remove()
       mapRef.current = null
+      tileLayerRef.current = null
+      detachBasemapLayer(glLayerRef.current)
+      glLayerRef.current = null
       markersRef.current.clear()
     }
-  }, [entries, stableTrail, dark, mapTileUrl, fullScreen, paddingBottom])
+  }, [entries, stableTrail, stableTracks, dark, fullScreen, paddingBottom, isGcjBasemap])
+
+  // Retile in place rather than through the effect above, which would drop every
+  // marker and track it just drew. A vector basemap restyles instead, which also
+  // avoids spending a WebGL context on every theme toggle.
+  useEffect(() => {
+    if (isVectorStyle(tileUrl)) restyleBasemap(glLayerRef.current, tileUrl)
+    else tileLayerRef.current?.setUrl(tileUrl)
+  }, [tileUrl])
+
+  // Photo layer (#1614). Its own effect on purpose: photos arriving must not tear
+  // down and rebuild the map the way the entry effect does. Redrawn on zoom and
+  // pan because the clustering is done in screen space.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    const draw = () => {
+      photoLayerRef.current?.remove()
+      photoLayerRef.current = null
+      if (!photos?.length) return
+
+      // The initial view (setView/fitBounds) is set on a deferred rAF in the
+      // map-build effect above, so this can run before the map has a center/zoom
+      // — latLngToContainerPoint throws in that window. Skip; the moveend/zoomend
+      // listener below redraws once the deferred view lands.
+      try {
+        map.getCenter()
+      } catch {
+        return
+      }
+
+      const group = L.layerGroup()
+      for (const cluster of clusterPhotos(map, photos)) {
+        const marker = L.marker([cluster.lat, cluster.lng], {
+          icon: L.divIcon({
+            className: '',
+            iconSize: [48, 48],
+            iconAnchor: [24, 24],
+            html: photoMarkerHtml(cluster.members[0].thumbUrl, cluster.members.length),
+          }),
+          // Below the entry pins: the itinerary is the point of the map, the photos
+          // are context.
+          zIndexOffset: -500,
+        })
+        marker.on('click', () => onPhotoClickRef.current?.(cluster.members.map(m => m.id)))
+        group.addLayer(marker)
+      }
+      group.addTo(map)
+      photoLayerRef.current = group
+    }
+
+    draw()
+    map.on('zoomend', draw)
+    map.on('moveend', draw)
+    return () => {
+      map.off('zoomend', draw)
+      map.off('moveend', draw)
+      photoLayerRef.current?.remove()
+      photoLayerRef.current = null
+    }
+  }, [photos, entries, stableTrail, stableTracks, dark, fullScreen, paddingBottom])
 
   // react to activeMarkerId prop changes — runs after map is built
   useEffect(() => {
@@ -269,11 +511,11 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
       highlightMarker(activeMarkerId)
       const marker = markersRef.current.get(activeMarkerId)
       if (!marker || !mapRef.current) return
-      // fitBounds may still be pending when this fires — getZoom() throws
-      // "Set map center and zoom first" until the map has a view. Guard it.
+      // Pan, don't zoom — see focusMarker. fitBounds may still be pending when this
+      // fires, and panTo on a map with no view throws "Set map center and zoom
+      // first", so the catch is where the map gets its first one.
       try {
-        const currentZoom = mapRef.current.getZoom()
-        mapRef.current.flyTo(marker.getLatLng(), Math.max(currentZoom, 12), { duration: 0.5 })
+        mapRef.current.panTo(marker.getLatLng(), { animate: true, duration: 0.5 })
       } catch {
         mapRef.current.setView(marker.getLatLng(), 12)
       }
@@ -291,7 +533,7 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
         style={{ width: '100%', height: '100%' }}
       />
       <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 400, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <button
+        <button type="button"
           onClick={zoomIn}
           style={{
             width: 32, height: 32, borderRadius: 8,
@@ -303,7 +545,7 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
             cursor: 'pointer', fontSize: 'calc(16px * var(--fs-scale-subtitle, 1))', fontWeight: 700, lineHeight: 1,
           }}
         >+</button>
-        <button
+        <button type="button"
           onClick={zoomOut}
           style={{
             width: 32, height: 32, borderRadius: 8,
@@ -318,6 +560,6 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
       </div>
     </div>
   )
-})
+}
 
 export default JourneyMap

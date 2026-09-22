@@ -1,8 +1,7 @@
-import { SUPPORTED_LANGUAGE_CODES as SUPPORTED_LANG_CODES } from '@trek/shared';
-
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { readEnv } from './app-config';
 
 const dataDir = path.resolve(__dirname, '../data');
 const jwtSecretFile = path.join(dataDir, '.jwt_secret');
@@ -37,8 +36,34 @@ if (_encryptionKey) {
   // Try the dedicated key file first (covers all installs after first start).
   try {
     _encryptionKey = fs.readFileSync(encKeyFile, 'utf8').trim();
-  } catch {
+  } catch (readErr: unknown) {
+    const code = (readErr as NodeJS.ErrnoException)?.code;
+    if (code !== 'ENOENT') {
+      // The file is there, we just cannot read it (permissions, I/O error).
+      // Continuing would resolve a different key and overwrite this one below,
+      // which permanently orphans every stored secret. Refuse to start instead.
+      // The errno goes in the line because this exit crash-loops the container,
+      // and the code is the only part that says which of these it is.
+      console.error(
+        `FATAL: could not read ${encKeyFile} (${code ?? 'no errno'}) -`,
+        readErr instanceof Error ? readErr.message : readErr,
+      );
+      if (code === 'EISDIR') {
+        // Compose creating a missing bind-mount source as a directory is by far
+        // the most common way this file stops being a file.
+        console.error('EISDIR: the path is a directory. A bind mount pointed at data/.encryption_key created it as one — remove it and mount the data directory instead.');
+      }
+      console.error('Fix the file permissions or set ENCRYPTION_KEY explicitly.');
+      process.exit(1);
+    }
     // File not found — first start on an existing or fresh install.
+  }
+
+  if (!_encryptionKey && fs.existsSync(encKeyFile)) {
+    // Present but empty: a truncated write, a full disk, a broken restore.
+    // Same reasoning as above. Regenerating here would silently replace the real key.
+    console.error('FATAL:', encKeyFile, 'is empty. Restore it from backup or set ENCRYPTION_KEY.');
+    process.exit(1);
   }
 
   if (!_encryptionKey) {
@@ -107,70 +132,24 @@ export function updateJwtSecret(newSecret: string): void {
   JWT_SECRET = newSecret;
 }
 
-// DEFAULT_LANGUAGE sets the language shown on the login page before the user
-// selects one. Only applies when the user has no saved language preference.
-const rawDefaultLang = process.env.DEFAULT_LANGUAGE?.toLowerCase() || 'en';
-if (!SUPPORTED_LANG_CODES.includes(rawDefaultLang)) {
-  console.warn(
-    `DEFAULT_LANGUAGE="${rawDefaultLang}" is not supported. Falling back to "en". Supported: ${SUPPORTED_LANG_CODES.join(', ')}`,
-  );
-}
-export const DEFAULT_LANGUAGE = SUPPORTED_LANG_CODES.includes(rawDefaultLang) ? rawDefaultLang : 'en';
+// DEFAULT_LANGUAGE / SESSION_DURATION* parsing moved into src/app-config
+// (env.schema.ts validates fail-fast at boot; derive.ts resolves/falls back).
+// Re-exported here — frozen at import, exactly like before — so the many
+// importers of this module (mcp, middleware, services, e2e harness) are
+// untouched. This module now owns only key material (above).
+const sessionEnv = readEnv().session;
 
-// SESSION_DURATION controls how long a TREK session (the `trek_session` JWT
-// cookie) stays valid before re-login is required. Accepts ms-style strings:
-// '1h', '12h', '7d', '30d', '90d', etc. It applies to BOTH the JWT `exp` claim
-// and the cookie `maxAge`, so the two never drift apart. Invalid values warn at
-// startup and fall back to the default. Does not affect the short-lived MFA
-// challenge token or MCP OAuth tokens — those keep their own TTL.
-const DEFAULT_SESSION_DURATION = '24h';
-const DURATION_UNITS_MS: Record<string, number> = {
-  ms: 1,
-  s: 1000,
-  m: 60_000,
-  h: 3_600_000,
-  d: 86_400_000,
-  w: 604_800_000,
-  y: 31_557_600_000,
-};
-function parseDurationMs(value: string): number | null {
-  const m = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w|y)?$/i.exec(value.trim());
-  if (!m) return null;
-  const n = parseFloat(m[1]);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return n * DURATION_UNITS_MS[(m[2] || 'ms').toLowerCase()];
-}
-const rawSessionDuration = process.env.SESSION_DURATION?.trim() || DEFAULT_SESSION_DURATION;
-const parsedSessionMs = parseDurationMs(rawSessionDuration);
-if (parsedSessionMs == null) {
-  console.warn(
-    `SESSION_DURATION="${rawSessionDuration}" is not a valid duration (use e.g. 1h, 7d, 30d). Falling back to "${DEFAULT_SESSION_DURATION}".`,
-  );
-}
+/** Default login-page language, validated against the supported set ('en' fallback). */
+export const DEFAULT_LANGUAGE = readEnv().app.defaultLanguage;
 /** Human-readable session length actually in effect (for logs/diagnostics). */
-export const SESSION_DURATION = parsedSessionMs == null ? DEFAULT_SESSION_DURATION : rawSessionDuration;
+export const SESSION_DURATION = sessionEnv.duration;
 /** Session length in milliseconds — used for the cookie `maxAge`. */
-export const SESSION_DURATION_MS = parsedSessionMs ?? parseDurationMs(DEFAULT_SESSION_DURATION)!;
+export const SESSION_DURATION_MS = sessionEnv.durationMs;
 /** Session length in seconds — passed to `jwt.sign({ expiresIn })` (number = seconds). */
-export const SESSION_DURATION_SECONDS = Math.floor(SESSION_DURATION_MS / 1000);
-
-// SESSION_DURATION_REMEMBER is the session length used when the user ticks
-// "Remember me" on the login form: a longer-lived JWT `exp` claim plus a
-// persistent `trek_session` cookie `maxAge`. An unticked login keeps
-// SESSION_DURATION and a browser-session cookie (no `maxAge`). Same ms-style
-// format and fallback behavior as SESSION_DURATION.
-const DEFAULT_SESSION_DURATION_REMEMBER = '30d';
-const rawRememberDuration = process.env.SESSION_DURATION_REMEMBER?.trim() || DEFAULT_SESSION_DURATION_REMEMBER;
-const parsedRememberMs = parseDurationMs(rawRememberDuration);
-if (parsedRememberMs == null) {
-  console.warn(
-    `SESSION_DURATION_REMEMBER="${rawRememberDuration}" is not a valid duration (use e.g. 7d, 30d, 90d). Falling back to "${DEFAULT_SESSION_DURATION_REMEMBER}".`,
-  );
-}
+export const SESSION_DURATION_SECONDS = sessionEnv.durationSeconds;
 /** Human-readable "remember me" session length actually in effect (for logs/diagnostics). */
-export const SESSION_DURATION_REMEMBER =
-  parsedRememberMs == null ? DEFAULT_SESSION_DURATION_REMEMBER : rawRememberDuration;
+export const SESSION_DURATION_REMEMBER = sessionEnv.durationRemember;
 /** "Remember me" session length in milliseconds — used for the persistent cookie `maxAge`. */
-export const SESSION_DURATION_REMEMBER_MS = parsedRememberMs ?? parseDurationMs(DEFAULT_SESSION_DURATION_REMEMBER)!;
+export const SESSION_DURATION_REMEMBER_MS = sessionEnv.durationRememberMs;
 /** "Remember me" session length in seconds — passed to `jwt.sign({ expiresIn })`. */
-export const SESSION_DURATION_REMEMBER_SECONDS = Math.floor(SESSION_DURATION_REMEMBER_MS / 1000);
+export const SESSION_DURATION_REMEMBER_SECONDS = sessionEnv.durationRememberSeconds;

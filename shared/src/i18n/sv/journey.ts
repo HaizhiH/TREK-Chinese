@@ -54,6 +54,7 @@ const journey: TranslationStrings = {
   'journey.frontpage.subtitle': 'Förvandla dina resor till minnen du aldrig kommer att glömma',
   'journey.frontpage.createJourney': 'Skapa Journey',
   'journey.frontpage.activeJourney': 'Aktiv Journey',
+  'journey.frontpage.latestJourney': 'Senaste Journey',
   'journey.frontpage.allJourneys': 'Alla Journeys',
   'journey.frontpage.journeys': 'journeys',
   'journey.frontpage.createNew': 'Skapa en ny Journey',
@@ -75,6 +76,8 @@ const journey: TranslationStrings = {
   'journey.detail.backToJourney': 'Tillbaka till Journey',
   'journey.detail.syncedWithTrips': 'Synkroniserat med resor',
   'journey.detail.addEntry': 'Lägg till inlägg',
+  'journey.detail.jumpToTop': 'Till toppen',
+  'journey.detail.jumpToLast': 'Till senaste inlägget',
   'journey.detail.newEntry': 'Ny inlägg',
   'journey.detail.editEntry': 'Redigera inlägg',
   'journey.detail.noEntries': 'Inga inlägg än så länge',
@@ -125,6 +128,12 @@ const journey: TranslationStrings = {
   'journey.editor.photoFirst': '1:a',
   'journey.editor.makeFirst': 'Gör 1:a',
   'journey.editor.searching': 'Söker...',
+  'journey.editor.useCurrentLocation': 'Använd min nuvarande plats',
+  'journey.editor.locationPermissionDenied':
+    'Platsåtkomst nekades. Tillåt den i webbläsarens inställningar och försök igen.',
+  'journey.editor.locationTimeout': 'Tidsgränsen för att hämta din plats överskreds. Försök igen.',
+  'journey.editor.locationUnavailable': 'Din plats kunde inte fastställas.',
+  'journey.editor.locationInsecureContext': 'Plats kräver en säker anslutning (HTTPS).',
   'journey.mood.amazing': 'Fantastiskt',
   'journey.mood.good': 'Bra',
   'journey.mood.neutral': 'Neutral',
@@ -186,6 +195,9 @@ const journey: TranslationStrings = {
   'journey.settings.name': 'Namn',
   'journey.settings.subtitle': 'Undertext',
   'journey.settings.subtitlePlaceholder': 't.ex. Thailand, Vietnam och Kambodja',
+  'journey.settings.tracks': 'GPX-spår',
+  'journey.settings.showTripTracks': 'Visa alla GPX-spår från resor',
+  'journey.settings.showTripTracksHint': 'Ritar de inspelade rutterna från de länkade resorna på kartan.',
   'journey.settings.endJourney': 'Arkivera Journey',
   'journey.settings.reopenJourney': 'Återställ Journey',
   'journey.settings.archived': 'Journey arkiverad',
@@ -227,5 +239,407 @@ const journey: TranslationStrings = {
   'journey.picker.noAlbums': 'Inga album hittades',
   'journey.picker.selectDate': 'Välj datum',
   'journey.picker.search': 'Sök',
+  'journey.editor.externalPhotos': 'External photos', // en-fallback
+  'journey.editor.externalPhotosFor': 'Photos for {date}', // en-fallback
+  'journey.editor.externalPhotosNearby': 'Nearby photos first', // en-fallback
+  'journey.editor.externalPhotosNoLocation': 'All photos from this day', // en-fallback
+  'journey.editor.externalPhotosQueued': 'queued', // en-fallback
+  'journey.editor.externalPhotosUnavailable': 'No connected photo providers are available.', // en-fallback
+  'journey.editor.externalPhotosPartialFailed': '{failed} photo groups failed — save again to retry', // en-fallback
+  'journey.picker.day': 'This day', // en-fallback
+  'journey.studio.title': 'TREK Studio', // en-fallback
+  'journey.studio.open': 'Studio', // en-fallback
+  'journey.studio.openAria': 'Open the photo book studio', // en-fallback
+  'journey.studio.backToJourney': 'Back to the journey', // en-fallback
+  'journey.studio.format': 'Page format', // en-fallback
+  'journey.studio.formatA4Landscape': 'A4 landscape', // en-fallback
+  'journey.studio.formatA4Portrait': 'A4 portrait', // en-fallback
+  'journey.studio.formatSquare21': 'Square 21 × 21 cm', // en-fallback
+  'journey.studio.formatSquare30': 'Square 30 × 30 cm', // en-fallback
+  'journey.studio.pages': 'Pages', // en-fallback
+  'journey.studio.cover': 'Cover', // en-fallback
+  'journey.studio.inspector': 'Properties', // en-fallback
+  'journey.studio.inspectorEmpty': 'Select something on the page to edit it.', // en-fallback
+  'journey.studio.emptySpread': 'This spread is still empty', // en-fallback
+  'journey.studio.autoLayout': 'Auto layout', // en-fallback
+  'journey.studio.export': 'Export', // en-fallback
+  'journey.studio.day': 'DAG',
+  'journey.studio.stations': 'Etapper',
+  'journey.studio.peersHere': 'här',
+  'journey.studio.folioAuto': 'Automatiskt',
+  'journey.studio.exportLayout': 'Layout',
+  'journey.studio.exportPages': 'Enkelsidor',
+  'journey.studio.exportPagesHint': 'Ett blad per sida, i läsordning. Det är vad ett tryckeri vill ha.',
+  'journey.studio.exportSpreads': 'Uppslag',
+  'journey.studio.exportSpreadsHint': 'Två sidor i taget, så som boken öppnas. För läsning.',
+  'journey.studio.exportFinishing': 'Efterbehandling',
+  'journey.studio.exportMarks': 'Skärmärken',
+  'journey.studio.exportMarksHint': 'Lägger till {bleed} mm utfall på varje kant och märker ut var det ska skäras',
+  'journey.studio.exportNote': '{sheets} blad på {width} × {height} mm. Webbläsaren gör en PDF av utskriftsvyn.',
+  'journey.studio.exportOpen': 'Utskriftsvy',
+  'journey.studio.exportSave': 'Spara som PDF',
+  'journey.studio.exportPreparing': 'Förbereder',
+  'journey.studio.exportSheetCount': '{count} blad',
+  'journey.studio.undo': 'Undo', // en-fallback
+  'journey.studio.redo': 'Redo', // en-fallback
+  'journey.studio.zoomIn': 'Zoom in', // en-fallback
+  'journey.studio.zoomOut': 'Zoom out', // en-fallback
+  'journey.studio.zoomFit': 'Fit to view', // en-fallback
+  'journey.studio.downloadSpread': 'Ladda ner det här uppslaget',
+  'journey.studio.downloadSpreadHint': 'Sparar uppslagets design som en fil, utan fotografierna, att dela eller återanvända',
+  'journey.studio.importSpread': 'Importera',
+  'journey.studio.importSpreadHint': 'Lägger till ett uppslag från en nedladdad designfil',
+  'journey.studio.importSpreadFailed': 'Filen är inte ett uppslag från TREK Studio',
+  'journey.studio.desktopOnly': 'Studio needs a bigger screen', // en-fallback
+  'journey.studio.desktopOnlyHint': 'Att formge en bok kräver plats, så Studio finns bara på datorn, och det gör pdf:en också. Allt annat i resan fungerar som vanligt här.', // en-fallback
+  'journey.studio.formatA5Landscape': 'A5 landscape', // en-fallback
+  'journey.studio.bookView': 'Book view', // en-fallback
+  'journey.studio.multiple': 'Several', // en-fallback
+  'journey.studio.kind.photo': 'Photo', // en-fallback
+  'journey.studio.kind.text': 'Text', // en-fallback
+  'journey.studio.kind.shape': 'Shape', // en-fallback
+  'journey.studio.position': 'Position', // en-fallback
+  'journey.studio.width': 'W', // en-fallback
+  'journey.studio.height': 'H', // en-fallback
+  'journey.studio.text': 'Text', // en-fallback
+  'journey.studio.typography': 'Type', // en-fallback
+  'journey.studio.leading': 'Line', // en-fallback
+  'journey.studio.colour': 'Colour', // en-fallback
+  'journey.studio.autoColour': 'Automatiskt',
+  'journey.studio.countryNames': 'Namn',
+  'journey.studio.crop': 'Crop', // en-fallback
+  'journey.studio.look': 'Look', // en-fallback
+  'journey.studio.radius': 'Corner', // en-fallback
+  'journey.studio.shape': 'Shape', // en-fallback
+  'journey.studio.arrange': 'Arrange', // en-fallback
+  'journey.studio.toFront': 'Bring to front', // en-fallback
+  'journey.studio.forward': 'Bring forward', // en-fallback
+  'journey.studio.backward': 'Send backward', // en-fallback
+  'journey.studio.toBack': 'Send to back', // en-fallback
+  'journey.studio.lock': 'Lock', // en-fallback
+  'journey.studio.unlock': 'Unlock', // en-fallback
+  'journey.studio.delete': 'Delete', // en-fallback
+  'journey.studio.pageHint': 'Page', // en-fallback
+  'journey.studio.boundHint': 'Follows the journal entry. Editing it here breaks that link.', // en-fallback
+  'journey.studio.fit.cover': 'Fill', // en-fallback
+  'journey.studio.fit.contain': 'Fit', // en-fallback
+  'journey.studio.filter.none': 'Original', // en-fallback
+  'journey.studio.filter.bw': 'Black & white', // en-fallback
+  'journey.studio.filter.warm': 'Warm', // en-fallback
+  'journey.studio.shapeKind.rect': 'Rectangle', // en-fallback
+  'journey.studio.shapeKind.ellipse': 'Ellipse', // en-fallback
+  'journey.studio.focalHint': 'Drag the point to choose what stays in frame.', // en-fallback
+  'journey.studio.backCover': 'Back cover', // en-fallback
+  'journey.studio.sections': 'Sections', // en-fallback
+  'journey.studio.content': 'Content', // en-fallback
+  'journey.studio.elements': 'Elements', // en-fallback
+  'journey.studio.templates': 'Layouts', // en-fallback
+  'journey.studio.photos': 'Photos', // en-fallback
+  'journey.studio.entries': 'Entries', // en-fallback
+  'journey.studio.addToPage': 'Add to this page', // en-fallback
+  'journey.studio.noPhotos': 'This journey has no photos yet.', // en-fallback
+  'journey.studio.untitled': 'Untitled', // en-fallback
+  'journey.studio.addTitle': 'Title', // en-fallback
+  'journey.studio.addStory': 'Story', // en-fallback
+  'journey.studio.addPlace': 'Place', // en-fallback
+  'journey.studio.shapes': 'Shapes', // en-fallback
+  'journey.studio.frames': 'Ramar', // en-fallback
+  'journey.studio.emptyFrame': 'Empty frame', // en-fallback
+  'journey.studio.frameHint': 'An empty frame marks where a picture goes. Drop one on it from Content.', // en-fallback
+  'journey.studio.shapeKind.line': 'Line', // en-fallback
+  'journey.studio.styleTitle': 'Heading', // en-fallback
+  'journey.studio.styleSubtitle': 'Subheading', // en-fallback
+  'journey.studio.styleBody': 'Body text', // en-fallback
+  'journey.studio.styleCaption': 'Caption', // en-fallback
+  'journey.studio.sampleHeading': 'A heading', // en-fallback
+  'journey.studio.sampleSubheading': 'A subheading', // en-fallback
+  'journey.studio.sampleBody': 'Write something about this day.', // en-fallback
+  'journey.studio.sampleCaption': 'Caption', // en-fallback
+  'journey.studio.templatesCoverHint': 'Layouts apply to the inside spreads. The cover and the back are designed on their own.', // en-fallback
+  'journey.studio.tpl.heroStory': 'Hero and story', // en-fallback
+  'journey.studio.tpl.fullBleed': 'One picture, full spread', // en-fallback
+  'journey.studio.tpl.twoUp': 'Two full pages', // en-fallback
+  'journey.studio.tpl.grid4': 'Four up', // en-fallback
+  'journey.studio.tpl.grid6': 'Six up', // en-fallback
+  'journey.studio.tpl.strip': 'Strip and text', // en-fallback
+  'journey.studio.tpl.quietText': 'Text only', // en-fallback
+  'journey.studio.tpl.portraitPair': 'A pair', // en-fallback
+  'journey.studio.dropPhotoHere': 'Dra din bild\nhit',
+  'journey.studio.searchContent': 'Search photos and entries', // en-fallback
+  'journey.studio.noMatches': 'Nothing matches that.', // en-fallback
+  'journey.studio.decorations': 'Decoration', // en-fallback
+  'journey.studio.quoteMark': 'Quotation mark', // en-fallback
+  'journey.studio.circleOutline': 'Outlined circle', // en-fallback
+  'journey.studio.roundFrame': 'Rounded frame', // en-fallback
+  'journey.studio.shapeKind.rounded': 'Rounded rectangle', // en-fallback
+  'journey.studio.shapeKind.triangle': 'Triangle', // en-fallback
+  'journey.studio.shapeKind.outline': 'Outline only', // en-fallback
+  'journey.studio.travel': 'Resa',
+  'journey.studio.travelEmpty': 'Siffrorna för den här resan är inte klara än.',
+  'journey.studio.grids': 'Rutnät',
+  'journey.studio.gridHint': 'Ett rutnät lägger ut ett block med tomma ramar. Dra foton dit från Innehåll.',
+  'journey.studio.lines': 'Linjer',
+  'journey.studio.frameStyles': 'Ramstilar',
+  'journey.studio.frameShapes': 'Ramformer',
+  'journey.studio.plainFrame': 'Enkel',
+  'journey.studio.polaroidFrame': 'Polaroid',
+  'journey.studio.whiteFrame': 'Vit kant',
+  'journey.studio.shadowFrame': 'Skugga',
+  'journey.studio.filmFrame': 'Film',
+  'journey.studio.tapeFrame': 'Tejpad',
+  'journey.studio.shapeGroup.basic': 'Grundformer',
+  'journey.studio.shapeGroup.polygons': 'Polygoner',
+  'journey.studio.shapeGroup.stars': 'Stjärnor',
+  'journey.studio.shapeGroup.arrows': 'Pilar',
+  'journey.studio.shapeGroup.speech': 'Pratbubblor',
+  'journey.studio.shapeGroup.travel': 'Resa',
+  'journey.studio.shapeGroup.decor': 'Dekoration',
+  'journey.studio.shapeGroup.banners': 'Banderoller',
+  'journey.studio.summary': 'Sammanfattning',
+  'journey.studio.tripSummary': 'Resesammanfattning',
+  'journey.studio.statsRow': 'En rad',
+  'journey.studio.statsFull': 'Allt',
+  'journey.studio.routeMap': 'Ruttkarta',
+  'journey.studio.mapStyle.minimal': 'Minimal',
+  'journey.studio.mapStyle.outline': 'Kontur',
+  'journey.studio.mapStyle.paper': 'Papper',
+  'journey.studio.mapStyle.dark': 'Mörk',
+  'journey.studio.countries': 'Länder',
+  'journey.studio.countryList': 'Landlista',
+  'journey.studio.countryGrid': 'Landrutnät',
+  'journey.studio.noCountries': 'Inga länder har tagits fram för den här resan än.',
+  'journey.studio.noRoute': 'Inga stopp med koordinater än.',
+  'journey.studio.marks': 'Märken',
+  'journey.studio.dateMark': 'Datum',
+  'journey.studio.dayMark': 'Dagräknare',
+  'journey.studio.dayWord': 'DAG',
+  'journey.studio.coordsMark': 'Koordinater',
+  'journey.studio.coordsDms': 'Grader',
+  'journey.studio.coordsDecimal': 'Decimal',
+  'journey.studio.flagMark': 'Flagga',
+  'journey.studio.distanceMark': 'Avstånd',
+  'journey.studio.metric.distance': 'Avstånd',
+  'journey.studio.metric.days': 'Dagar',
+  'journey.studio.metric.steps': 'Stopp',
+  'journey.studio.metric.photos': 'Foton',
+  'journey.studio.metric.countries': 'Länder',
+  'journey.studio.metric.places': 'Platser',
+  'journey.studio.metric.furthest': 'Längst bort',
+  'journey.studio.kind.map': 'Karta',
+  'journey.studio.kind.stats': 'Siffror',
+  'journey.studio.kind.countries': 'Länder',
+  'journey.studio.kind.badge': 'Märke',
+  'journey.studio.kind.list': 'Lista',
+  'journey.studio.kind.icon': 'Ikon',
+  'journey.studio.duplicate': 'Duplicera',
+  'journey.studio.style': 'Stil',
+  'journey.studio.shows': 'Visning',
+  'journey.studio.size': 'Storlek',
+  'journey.studio.weight': 'Vikt',
+  'journey.studio.italic': 'Kursiv',
+  'journey.studio.tracking': 'Teckenavstånd',
+  'journey.studio.rotation': 'Rotation',
+  'journey.studio.opacity': 'Opacitet',
+  'journey.studio.fill': 'Fyllning',
+  'journey.studio.fillOn': 'Fylld',
+  'journey.studio.stroke': 'Kontur',
+  'journey.studio.strokeWidth': 'Tjocklek',
+  'journey.studio.gradient': 'Toning',
+  'journey.studio.gradientDown': 'Nedåt',
+  'journey.studio.gradientUp': 'Uppåt',
+  'journey.studio.showIcons': 'Ikoner',
+  'journey.studio.mapFit': 'Område',
+  'journey.studio.mapPadding': 'Marginal',
+  'journey.studio.mapShape': 'Form',
+  'journey.studio.align.left': 'Vänster',
+  'journey.studio.align.center': 'Centrerat',
+  'journey.studio.align.right': 'Höger',
+  'journey.studio.markStyle.plain': 'Enkel',
+  'journey.studio.markStyle.chip': 'Fylld',
+  'journey.studio.markStyle.outline': 'Konturerad',
+  'journey.studio.markStyle.stacked': 'Staplad',
+  'journey.studio.icon': 'Ikon',
+  'journey.studio.iconAndLabel': 'Ikon & text',
+  'journey.studio.iconOnly': 'Bara ikon',
+  'journey.studio.labelOnly': 'Bara text',
+  'journey.studio.icons': 'Ikoner',
+  'journey.studio.iconsForTravel': 'För resor',
+  'journey.studio.iconsAll': 'Alla ikoner',
+  'journey.studio.searchIcons': 'Sök ikoner',
+  'journey.studio.lineWidth': 'Tjocklek',
+  'journey.studio.mask': 'Beskär till form',
+  'journey.studio.maskNone': 'Ingen',
+  'journey.studio.frameStyle': 'Ram',
+  'journey.studio.mapLayers': 'Lager',
+  'journey.studio.showLand': 'Länder',
+  'journey.studio.showRoute': 'Rutt',
+  'journey.studio.showPins': 'Stopp',
+  'journey.studio.showLabels': 'Etiketter',
+  'journey.studio.units': 'Enheter',
+  'journey.studio.metrics': 'Siffror',
+  'journey.studio.layout': 'Layout',
+  'journey.studio.layoutGrid': 'Rutnät',
+  'journey.studio.layoutRow': 'Rad',
+  'journey.studio.layoutColumn': 'Kolumn',
+  'journey.studio.layoutList': 'Lista',
+  'journey.studio.showOutline': 'Konturer',
+  'journey.studio.showFlag': 'Flaggor',
+  'journey.studio.showName': 'Namn',
+  'journey.studio.textScale': 'Textstorlek',
+  'journey.studio.accent': 'Accent',
+  'journey.studio.refresh': 'Uppdatera från resan',
+  'journey.studio.staleHint': 'Resan har ändrats sedan de här siffrorna togs.',
+  'journey.studio.align': 'Justering',
+  'journey.studio.filter.cool': 'Kall',
+  'journey.studio.filter.fade': 'Blekt',
+  'journey.studio.filter.contrast': 'Kraftfull',
+  'journey.studio.strokeStyle': 'Streck',
+  'journey.studio.strokeSolid': 'Heldragen',
+  'journey.studio.strokeDashed': 'Streckad',
+  'journey.studio.strokeDotted': 'Prickad',
+  'journey.studio.singleFigures': 'Enskilda siffror',
+  'journey.studio.addPage': 'Lägg till uppslag',
+  'journey.studio.addPageAfter': 'Infoga uppslag efter',
+  'journey.studio.duplicatePage': 'Duplicera uppslag',
+  'journey.studio.deletePage': 'Ta bort uppslag',
+  'journey.studio.movePageUp': 'Flytta tidigare',
+  'journey.studio.movePageDown': 'Flytta senare',
+  'journey.studio.beta': 'Beta',
+  'journey.studio.addProsCons': 'För- och nackdelar',
+  'journey.studio.showMarks': 'Tecken',
+  'journey.studio.formatCustom': 'Eget format',
+  'journey.studio.document': 'Dokument',
+  'journey.studio.pageNumbers': 'Sidnummer',
+  'journey.studio.pageNumbersOn': 'På',
+  'journey.studio.pageNumbersOff': 'Av',
+  'journey.studio.folio.outer': 'Yttre',
+  'journey.studio.folio.inner': 'Inre',
+  'journey.studio.folio.centre': 'Centrerat',
+  'journey.studio.folioStart': 'Börjar på',
+  'journey.studio.folioMargin': 'Marginal',
+  'journey.studio.relayoutSpread': 'Detta uppslag',
+  'journey.studio.relayoutSpreadHint': 'Bygg om från dess anteckning',
+  'journey.studio.relayoutSpreadNone': 'Detta uppslag kommer inte från en anteckning',
+  'journey.studio.relayoutBook': 'Hela boken',
+  'journey.studio.relayoutBookHint': 'Ersätter alla sidor — kan ångras',
+  'journey.studio.tpl.coverFull': 'Utfallande',
+  'journey.studio.tpl.coverBand': 'Bild och band',
+  'journey.studio.tpl.coverWindow': 'Inramad',
+  'journey.studio.tpl.coverQuiet': 'Endast text',
+  'journey.studio.tpl.coverHalf': 'Två halvor',
+  'journey.studio.tpl.fullText': 'Bild och text',
+  'journey.studio.tpl.grid9': 'Nio',
+  'journey.studio.tpl.mosaic': 'Mosaik',
+  'journey.studio.tpl.bandQuote': 'Ord emellan',
+  'journey.studio.tpl.staggerFour': 'Fyra förskjutna',
+  'journey.studio.weightMissing': 'Det här typsnittet har inte den vikten',
+  'journey.studio.mapSource': 'Kartkälla',
+  'journey.studio.mapSourceVector': 'Konturer',
+  'journey.studio.mapSourceRelief': 'Relief',
+  'journey.studio.mapSourceSatellite': 'Satellit',
+  'journey.studio.mapSourceSatelliteHint': 'Molnfri Sentinel-2, får tryckas fritt med källhänvisning. Skarp ända ner till en gata i staden.',
+  'journey.studio.routeLook': 'Linjen',
+  'journey.studio.routeStyle': 'Linjestil',
+  'journey.studio.routePlain': 'Vanlig',
+  'journey.studio.routeDrawn': 'Tecknad',
+  'journey.studio.routeArc': 'Långa etapper',
+  'journey.studio.routeStraight': 'Rak',
+  'journey.studio.routeBow': 'Böjd',
+  'journey.studio.routeDashArcs': 'Strecka de böjda etapperna',
+  'journey.studio.mapStops': 'Stopp',
+  'journey.studio.pinDot': 'Punkter',
+  'journey.studio.pinPhoto': 'Foton',
+  'journey.studio.pinPhotoNone': 'Inga foton på de här stoppen än, så de ritas som punkter.',
+  'journey.studio.roads': 'Vägar',
+  'journey.studio.roadsFetch': 'Följ vägarna',
+  'journey.studio.roadsFollow': 'Via vägar',
+  'journey.studio.roadsDirect': 'Fågelvägen',
+  'journey.studio.recommended': 'rekommenderas',
+  'journey.studio.bleed': 'Utfall',
+  'journey.studio.safeArea': 'Skyddszon',
+  'journey.studio.roadsAgain': 'Hämta igen',
+  'journey.studio.roadsClear': 'Rensa',
+  'journey.studio.roadsBusy': 'Hämtar',
+  'journey.studio.roadsHint': 'Fråga en ruttjänst om vilken väg varje etapp kördes. Långa etapper lämnas som de är.',
+  'journey.studio.roadsHave': 'Vägarna sparas i den här boken, så den trycker samma linje offline.',
+  'journey.studio.mapPerTrip': 'En resa i taget',
+  'journey.studio.mapWholeJourney': 'Hela Journey',
+  'journey.studio.mapScope': 'Visning',
+  'journey.studio.mapPrintDpi': 'Trycks i ungefär',
+  'journey.studio.mapPrintDpiLow': 'oskarpt i den här storleken, prova ett vidare utsnitt eller en annan källa',
+  'journey.studio.mapSourceReliefHint': 'NASA:s reliefskuggning, får tryckas fritt. Bra för ett land eller en kontinent, för grov för en stad.',
+  'journey.studio.mapSourceTiles': 'Kartrutor',
+  'journey.studio.mapSourceStatic': 'Mapbox',
+  'journey.studio.mapSourceHint': 'Hämtas vid rendering och trycks med sin källhänvisning',
+  'journey.studio.mapZoom': 'Zoom',
+  'journey.studio.mapFraming': 'Utsnitt',
+  'journey.studio.mapFitStops': 'Stopp',
+  'journey.studio.mapFitCountry': 'Hela landet',
+  'journey.studio.mapPadTight': 'Tajt',
+  'journey.studio.mapPadNormal': 'Normalt',
+  'journey.studio.mapPadWide': 'Brett',
+  'journey.studio.mapPadFar': 'Mycket brett',
+  'journey.studio.mapClipRect': 'I ram',
+  'journey.studio.mapClipCountry': 'Urklippt',
+  'journey.studio.mapClipNeedsCountry': 'Det behövs ett land att klippa mot',
+  'journey.studio.mapCutVector': 'Urklipp',
+  'journey.studio.mapCutTiles': 'Urklippt karta',
+  'journey.studio.mapZoomAuto': 'Anpassa',
+  'journey.studio.saving': 'Sparar',
+  'journey.studio.saved': 'Sparat',
+  'journey.studio.saveFailed': 'Inte sparat',
+  'journey.studio.saveRetry': 'Försök igen',
+  'journey.studio.saveConflict': 'Någon annan har sparat den här boken',
+  'journey.studio.saveTakeTheirs': 'Deras',
+  'journey.studio.saveKeepMine': 'Min',
+  'journey.studio.rotate': 'Rotera',
+  'journey.studio.rotateLeft': 'Rotera åt vänster',
+  'journey.studio.rotateRight': 'Rotera åt höger',
+  'journey.studio.saveReadOnly': 'Skrivskyddad, sparas inte',
+  'journey.studio.filterPhotos': 'Filtrera foton',
+  'journey.studio.filterAll': 'Alla foton',
+  'journey.studio.filterLoose': 'Inte i något inlägg',
+  'journey.studio.filterRecent': 'Nyss uppladdade',
+  'journey.studio.filterThisPage': 'Den här sidan',
+  'journey.studio.entryPhotos': 'Foton',
+  'journey.studio.noEntryPhotos': 'Det här inlägget har inga foton än.',
+  'journey.studio.noLoosePhotos': 'Alla foton här hör till ett inlägg.',
+  'journey.studio.uploadPhotos': 'Ladda upp foton',
+  'journey.studio.uploadHint': 'Släpp bilder här eller klicka för att välja',
+  'journey.studio.uploadToEntry': 'Nya bilder hamnar i det här inlägget',
+  'journey.studio.uploadToGallery': 'Nya bilder hamnar i galleriet',
+  'journey.studio.uploading': 'Laddar upp {done} av {total}',
+  'journey.studio.dropFilesHere': 'Släpp för att lägga till bilderna',
+  'journey.studio.videosSkipped': '{count} videor lämnades utanför. En bok rymmer bilder.',
+  'journey.studio.fillPage': 'Fyll sidan',
+  'journey.studio.fillSpread': 'Fyll uppslaget',
+  'journey.studio.fillHint': 'Sträcker ut bilden över hela sidan, utfall inräknat, och lägger den bakom allt annat.',
+  'journey.studio.stops': 'Stopp',
+  'journey.studio.stopsHint':
+    'Varje stopp räknas med i rutten, sträckan och länderna. Stäng av ett för att utelämna det, till exempel din hemmaflygplats.',
+  'journey.studio.stopOn': 'Räknas',
+  'journey.studio.stopOff': 'Utelämnat',
+  'journey.studio.stopToggle': 'Räkna med det här stoppet',
+  'journey.studio.stopsFailed': 'Stoppet kunde inte ändras.',
+  'journey.editor.statsExcluded': 'Utelämna från rutten',
+  'journey.editor.statsExcludedHint':
+    'Stoppet finns kvar i dagboken men räknas inte med i sträckan, länderna eller kartan i Studio.',
+  'journey.entry.offRoute': 'Utanför rutten',
+  'journey.suggestions.dismiss': 'Avfärda det här förslaget',
+  'journey.suggestions.dismissed': 'Förslaget avfärdat',
+  'journey.suggestions.restore': 'Hämta tillbaka avfärdade förslag',
+  'journey.suggestions.restoreCount': 'Avfärdade förslag ({count})',
+  'journey.suggestions.restored': '{count} förslag är tillbaka',
+  'journey.detail.addOnThisDay': 'Lägg till ett inlägg den här dagen',
+  'journey.detail.jumpToDay': 'Hoppa till {date}',
+  'journey.detail.searchPlaceholder': 'Sök i den här resan',
+  'journey.detail.searchEmpty': 'Inget inlägg matchar ”{query}”',
+  'journey.settings.entryFields': 'Fält i inlägget',
+  'journey.settings.entryFieldsHint': 'Stäng av det som den här resan inte använder. Inget som redan skrivits går förlorat.',
+  'journey.settings.showVerdict': 'För- och nackdelar',
+  'journey.settings.showMood': 'Humör',
+  'journey.settings.showWeather': 'Väder',
+  'journey.entry.suggestion': 'Förslag',
+  'journey.editor.addDetails': '+ Detaljer',
 };
 export default journey;

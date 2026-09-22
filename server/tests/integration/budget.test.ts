@@ -63,9 +63,17 @@ beforeAll(async () => {
 beforeEach(() => {
   resetTestDb(testDb);
   resetRateLimits(nestApp);
+  // GET /budget/settlement reaches ExchangeRatesService.getRates unconditionally
+  // (budget.service.ts settlement()), and that is a real fetch to
+  // api.frankfurter.dev with a 10 s abort. Without this stub the suite talks to
+  // the internet: slow, offline-dependent, and it makes the run take minutes
+  // longer on a machine that cannot reach it. Fail closed — every assertion here
+  // is single-currency, so rates never enter the arithmetic.
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
 });
 
 afterAll(async () => {
+  vi.unstubAllGlobals();
   await nestApp.close();
   testDb.close();
 });
@@ -416,7 +424,7 @@ describe('Reorder budget items', () => {
 
     // Restrict budget_edit to trip_owner only
     testDb.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('perm_budget_edit', 'trip_owner')").run();
-    const { invalidatePermissionsCache } = await import('../../src/services/permissions');
+    const { invalidatePermissionsCache } = await import('../../src/nest/permissions/permissions-cache');
     invalidatePermissionsCache();
 
     const res = await request(app)
@@ -519,7 +527,7 @@ describe('Budget edit permission enforcement', () => {
     const trip = createTrip(testDb, owner.id);
     addTripMember(testDb, trip.id, member.id);
 
-    const { invalidatePermissionsCache } = await import('../../src/services/permissions');
+    const { invalidatePermissionsCache } = await import('../../src/nest/permissions/permissions-cache');
     testDb.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('perm_budget_edit', 'trip_owner')").run();
     invalidatePermissionsCache();
 
@@ -540,7 +548,7 @@ describe('Budget edit permission enforcement', () => {
     addTripMember(testDb, trip.id, member.id);
     createBudgetItem(testDb, trip.id, { name: 'Item', category: 'Transport' });
 
-    const { invalidatePermissionsCache } = await import('../../src/services/permissions');
+    const { invalidatePermissionsCache } = await import('../../src/nest/permissions/permissions-cache');
     testDb.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('perm_budget_edit', 'trip_owner')").run();
     invalidatePermissionsCache();
 

@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'الرحلات',
   'oauth.scope.group.places': 'الأماكن',
+  'oauth.scope.group.collections': 'المجموعات',
   'oauth.scope.group.packing': 'الأمتعة',
   'oauth.scope.group.todos': 'المهام',
   'oauth.scope.group.budget': 'الميزانية',
@@ -24,6 +25,11 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'قراءة الأماكن وتعيينات الأيام والعلامات والفئات',
   'oauth.scope.places:write.label': 'إدارة الأماكن',
   'oauth.scope.places:write.description': 'إنشاء وتحديث وحذف الأماكن والتعيينات والعلامات',
+  'oauth.scope.collections:read.label': 'عرض المجموعات',
+  'oauth.scope.collections:read.description': 'قراءة مجموعات الأماكن المحفوظة وأماكنها وتقييماتها وتسمياتها وأعضائها',
+  'oauth.scope.collections:write.label': 'إدارة المجموعات',
+  'oauth.scope.collections:write.description':
+    'إنشاء وتعديل المجموعات، وحفظ الأماكن وتقييمها وتسميتها ونسخها، ومشاركة القوائم',
   'oauth.scope.atlas:read.label': 'عرض Atlas',
   'oauth.scope.atlas:read.description': 'قراءة الدول والمناطق المزارة وقائمة الأمنيات',
   'oauth.scope.atlas:write.label': 'إدارة Atlas',
@@ -87,5 +93,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'الملفات',
+  'oauth.scope.group.settings': 'الإعدادات',
+  'oauth.scope.files:read.label': 'عرض ملفات الرحلة',
+  'oauth.scope.files:read.description': 'سرد مستندات الرحلة: الأسماء والأحجام ومن رفعها وبماذا ترتبط',
+  'oauth.scope.files:write.label': 'إدارة ملفات الرحلة',
+  'oauth.scope.files:write.description': 'إعادة تسمية الملفات ووصفها وربطها بالحجوزات والأماكن وتمييزها ونقلها إلى سلة المهملات',
+  'oauth.scope.files:content.label': 'قراءة محتوى الملفات',
+  'oauth.scope.files:content.description': 'قراءة محتوى مستند مرفوع، مثل ملف PDF لحجز أو تذكرة',
+  'oauth.scope.settings:read.label': 'عرض تفضيلاتك',
+  'oauth.scope.settings:read.description': 'قراءة الوحدات وتنسيق الوقت واللغة والعملة الافتراضية وصفحة البداية',
+  'oauth.scope.settings:write.label': 'تغيير تفضيلاتك',
+  'oauth.scope.settings:write.description': 'تغيير الوحدات وتنسيق الوقت واللغة والعملة الافتراضية وصفحة البداية. لا مفاتيح API المخزنة أبدًا',
+  'oauth.scope.group.plugins': 'الإضافات',
+  'oauth.scope.plugins:use.label': 'تشغيل أدوات الإضافات',
+  'oauth.scope.plugins:use.description': 'السماح لهذا التطبيق باستدعاء الأدوات التي توفرها الإضافات التي ثبّتها المسؤول ووافق عليها. تعمل كل إضافة بالصلاحيات الممنوحة لها مسبقًا، وليس بنطاقات هذا الرمز',
 };
 export default oauth;

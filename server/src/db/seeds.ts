@@ -1,5 +1,7 @@
 import Database from 'better-sqlite3';
 import crypto from 'crypto';
+import { readEnv } from '../app-config';
+import { seedDocumentProviders } from './document-provider-seed';
 
 // bcrypt cost factor for the seeded admin password — kept in sync with authService.
 const BCRYPT_COST = 12;
@@ -9,14 +11,15 @@ const BCRYPT_COST = 12;
 // are only relevant after the first user exists; at that point seeds have already
 // finished and skip via the userCount > 0 guard above.
 function isOidcOnlyConfigured(): boolean {
-  if (process.env.OIDC_ONLY?.toLowerCase() !== 'true') return false;
-  return !!(process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID);
+  const oidc = readEnv().oidc;
+  if (!oidc.only) return false;
+  return !!(oidc.issuer && oidc.clientId);
 }
 
 function seedAdminAccount(db: Database.Database): void {
   try {
-    const env_admin_email = process.env.ADMIN_EMAIL;
-    const env_admin_pw = process.env.ADMIN_PASSWORD;
+    const env_admin_email = readEnv().adminBootstrap.email;
+    const env_admin_pw = readEnv().adminBootstrap.password;
     const adminEnvProvided = !!(env_admin_email || env_admin_pw);
 
     const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
@@ -34,7 +37,7 @@ function seedAdminAccount(db: Database.Database): void {
     // Demo mode seeds its own admin (admin@trek.app, username 'admin') right after this.
     // Creating a first-run admin here would grab username 'admin' first and make the demo
     // seeder fail on the UNIQUE(username) constraint, leaving the demo user uncreated.
-    if (process.env.DEMO_MODE?.toLowerCase() === 'true') return;
+    if (readEnv().demo.enabled) return;
 
     if (isOidcOnlyConfigured()) {
       console.log('');
@@ -116,10 +119,12 @@ function seedAddons(db: Database.Database): void {
       { id: 'vacay', name: 'Vacay', description: 'Personal vacation day planner with calendar view', type: 'global', icon: 'CalendarDays', enabled: 1, sort_order: 10 },
       { id: 'atlas', name: 'Atlas', description: 'World map of your visited countries with travel stats', type: 'global', icon: 'Globe', enabled: 1, sort_order: 11 },
       { id: 'mcp', name: 'MCP', description: 'Model Context Protocol for AI assistant integration', type: 'integration', icon: 'Terminal', enabled: 0, sort_order: 12 },
-      { id: 'naver_list_import', name: 'Naver List Import', description: 'Import places from shared Naver Maps lists', type: 'trip', icon: 'Link2', enabled: 1, sort_order: 13 },
+      { id: 'naver_list_import', name: 'Naver List Import', description: 'Import places from a shared Naver Maps list', type: 'integration', icon: 'Link2', enabled: 1, sort_order: 13 },
       { id: 'collab', name: 'Collab', description: 'Notes, polls, and live chat for trip collaboration', type: 'trip', icon: 'Users', enabled: 1, sort_order: 6 },
+      { id: 'roadtrip', name: 'Road trip', description: 'Drives with stops along the route, driving times, and arrival times that update themselves', type: 'trip', icon: 'Route', enabled: 0, sort_order: 7 },
       { id: 'journey', name: 'Journey', description: 'Trip tracking & travel journal — check-ins, photos, daily stories', type: 'global', icon: 'Compass', enabled: 0, sort_order: 35 },
-      { id: 'airtrail', name: 'AirTrail', description: 'Sync flights from your self-hosted AirTrail instance', type: 'integration', icon: 'Plane', enabled: 0, sort_order: 14 },
+      { id: 'airtrail', name: 'AirTrail', description: 'Sync flights from your AirTrail instance', type: 'integration', icon: 'Plane', enabled: 0, sort_order: 14 },
+      { id: 'dawarich', name: 'Dawarich', description: 'Read visits and recorded routes from your Dawarich instance — suggested journal entries, places and countries you confirm yourself', type: 'integration', icon: 'Dawarich', enabled: 0, sort_order: 17 },
       { id: 'llm_parsing', name: 'AI Parsing', description: 'LLM fallback for booking imports kitinerary cannot read', type: 'integration', icon: 'Sparkles', enabled: 0, sort_order: 15 },
       { id: 'collections', name: 'Collections', description: 'Personal place library — save places across trips into named lists, copy into any trip, share with others', type: 'global', icon: 'Bookmark', enabled: 0, sort_order: 16 },
     ];
@@ -160,6 +165,13 @@ function seedAddons(db: Database.Database): void {
     for (const f of providerFields) {
       insertProviderField.run(f.provider_id, f.field_key, f.label, f.input_type, f.placeholder, f.hint, f.required, f.secret, f.settings_key, f.payload_key, f.sort_order);
     }
+
+    // Document providers live in their own pair of tables (see the migration
+    // for why they are not a `kind` column on photo_providers). Seeded from the
+    // same helper the migration uses, so a fresh install and an upgraded one
+    // agree.
+    seedDocumentProviders(db);
+
     console.log('Default addons seeded');
   } catch (err: unknown) {
     console.error('Error seeding addons:', err instanceof Error ? err.message : err);

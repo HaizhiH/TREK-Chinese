@@ -9,6 +9,7 @@ import { Crown, UserMinus, UserPlus, Users, LogOut, Link2, Trash2, Copy, Check, 
 import { useTranslation } from '../../i18n'
 import { getApiErrorMessage } from '../../types'
 import CustomSelect from '../shared/CustomSelect'
+import { copyText } from '../../utils/clipboard'
 
 interface AvatarProps {
   username: string
@@ -22,7 +23,7 @@ function Avatar({ username, avatarUrl, size = 32 }: AvatarProps) {
   }
   const letter = (username || '?')[0].toUpperCase()
   const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#ef4444', '#06b6d4']
-  const color = colors[letter.charCodeAt(0) % colors.length]
+  const color = colors[(letter.codePointAt(0) ?? 0) % colors.length]
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', background: color,
@@ -78,13 +79,12 @@ function ShareLinkSection({ tripId, t }: { tripId: number; t: (key: string, para
     } catch { toast.error(t('common.error')) }
   }
 
-  const handleCopy = () => {
-    if (shareUrl) {
-      navigator.clipboard.writeText(shareUrl)
-      setCopied(true)
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-      copyTimerRef.current = setTimeout(() => setCopied(false), 2000)
-    }
+  const handleCopy = async () => {
+    if (!shareUrl) return
+    if (!(await copyText(shareUrl))) return
+    setCopied(true)
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000)
   }
 
   if (loading) return null
@@ -106,7 +106,7 @@ function ShareLinkSection({ tripId, t }: { tripId: number; t: (key: string, para
           { key: 'share_budget', label: t('share.permBudget') },
           { key: 'share_collab', label: t('share.permCollab') },
         ].map(opt => (
-          <button key={opt.key} onClick={() => !opt.always && handleUpdatePerms(opt.key, !perms[opt.key])}
+          <button type="button" key={opt.key} onClick={() => !opt.always && handleUpdatePerms(opt.key, !perms[opt.key])}
             style={{
               display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 20,
               border: '1.5px solid', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500, cursor: opt.always ? 'default' : 'pointer',
@@ -132,7 +132,7 @@ function ShareLinkSection({ tripId, t }: { tripId: number; t: (key: string, para
               flex: 1, border: 'none', background: 'none', fontSize: 'calc(11px * var(--fs-scale-caption, 1))',
               outline: 'none', fontFamily: 'monospace',
             }} />
-            <button onClick={handleCopy} style={{
+            <button type="button" onClick={handleCopy} style={{
               display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 6,
               border: 'none', background: copied ? '#16a34a' : 'var(--accent)', color: copied ? 'white' : 'var(--accent-text)',
               fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.2s',
@@ -140,7 +140,7 @@ function ShareLinkSection({ tripId, t }: { tripId: number; t: (key: string, para
               {copied ? <><Check size={10} /> {t('common.copied')}</> : <><Copy size={10} /> {t('common.copy')}</>}
             </button>
           </div>
-          <button onClick={handleDelete} style={{
+          <button type="button" onClick={handleDelete} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
             padding: '6px 0', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)',
             background: 'rgba(239,68,68,0.06)', color: '#ef4444', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500,
@@ -150,7 +150,7 @@ function ShareLinkSection({ tripId, t }: { tripId: number; t: (key: string, para
           </button>
         </div>
       ) : (
-        <button onClick={handleCreate} className="border border-dashed border-edge text-content-muted" style={{
+        <button type="button" onClick={handleCreate} className="border border-dashed border-edge text-content-muted" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           width: '100%', padding: '8px 0', borderRadius: 8,
           background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 500,
@@ -201,9 +201,8 @@ function TripInviteLinkSection({ tripId, t }: { tripId: number; t: (key: string,
     finally { setBusy(false) }
   }
 
-  const copy = () => {
-    if (!inviteUrl) return
-    navigator.clipboard.writeText(inviteUrl)
+  const copy = async () => {
+    if (!(await copyText(inviteUrl))) return
     setCopied(true)
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
     copyTimerRef.current = setTimeout(() => setCopied(false), 2000)
@@ -223,7 +222,7 @@ function TripInviteLinkSection({ tripId, t }: { tripId: number; t: (key: string,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div className="bg-surface-tertiary border border-edge-faint" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px', borderRadius: 8 }}>
             <input type="text" value={inviteUrl} readOnly className="text-content" style={{ flex: 1, border: 'none', background: 'none', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', outline: 'none', fontFamily: 'monospace' }} />
-            <button onClick={copy} style={{
+            <button type="button" onClick={copy} style={{
               display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 6,
               border: 'none', background: copied ? '#16a34a' : 'var(--accent)', color: copied ? 'white' : 'var(--accent-text)',
               fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.2s',
@@ -232,14 +231,14 @@ function TripInviteLinkSection({ tripId, t }: { tripId: number; t: (key: string,
             </button>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={create} disabled={busy} className="border border-edge text-content-muted" style={{
+            <button type="button" onClick={create} disabled={busy} className="border border-edge text-content-muted" style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
               padding: '6px 0', borderRadius: 8, background: 'none', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500,
               cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
             }}>
               <Link2 size={11} /> {t('trip.invite.regenerate')}
             </button>
-            <button onClick={remove} disabled={busy} style={{
+            <button type="button" onClick={remove} disabled={busy} style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
               padding: '6px 0', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)',
               background: 'rgba(239,68,68,0.06)', color: '#ef4444', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500,
@@ -250,7 +249,7 @@ function TripInviteLinkSection({ tripId, t }: { tripId: number; t: (key: string,
           </div>
         </div>
       ) : (
-        <button onClick={create} disabled={busy} className="border border-dashed border-edge text-content-muted" style={{
+        <button type="button" onClick={create} disabled={busy} className="border border-dashed border-edge text-content-muted" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           width: '100%', padding: '8px 0', borderRadius: 8,
           background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 500,
@@ -324,7 +323,6 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
   }
 
   const handleAdd = async () => {
-    if (!selectedUserId) return
     setAdding(true)
     try {
       const target = allUsers.find(u => String(u.id) === String(selectedUserId))
@@ -370,7 +368,14 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
     }
   }
 
+  // Enter commits, and the blur that follows would send the same rename a second
+  // time. Only the first commit per editing session goes through; a failed one
+  // reopens the gate so the user can retry from the still-open input.
+  const renameCommittedRef = useRef(false)
+
   const handleRenameGuest = async (userId) => {
+    if (renameCommittedRef.current) return
+    renameCommittedRef.current = true
     const name = renameValue.trim()
     if (!name) { setRenamingGuestId(null); return }
     try {
@@ -378,6 +383,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
       setRenamingGuestId(null)
       await loadMembers(true)
     } catch (err: unknown) {
+      renameCommittedRef.current = false
       toast.error(getApiErrorMessage(err, t('members.guestRenameError')))
     }
   }
@@ -464,7 +470,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
               style={{ flex: 1 }}
               size="sm"
             />
-            <button
+            <button type="button"
               onClick={handleAdd}
               disabled={adding || !selectedUserId}
               style={{
@@ -520,7 +526,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
                       </div>
                     </div>
                     {isCurrentOwner && member.role !== 'owner' && (
-                      <button
+                      <button type="button"
                         onClick={() => handleTransfer(member.id, member.username)}
                         disabled={transferringId === member.id}
                         title={t('members.makeOwner')}
@@ -532,7 +538,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
                       </button>
                     )}
                     {canRemove && (
-                      <button
+                      <button type="button"
                         onClick={() => handleRemove(member.id, isSelf)}
                         disabled={removingId === member.id}
                         title={isSelf ? t('members.leaveTrip') : t('members.removeAccess')}
@@ -572,7 +578,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
                     autoFocus
                     value={renameValue}
                     onChange={e => setRenameValue(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') handleRenameGuest(g.id); if (e.key === 'Escape') setRenamingGuestId(null) }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleRenameGuest(g.id); if (e.key === 'Escape') { renameCommittedRef.current = true; setRenamingGuestId(null) } }}
                     onBlur={() => handleRenameGuest(g.id)}
                     maxLength={50}
                     className="bg-surface border border-edge text-content"
@@ -588,8 +594,8 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
                 )}
                 {isCurrentOwner && renamingGuestId !== g.id && (
                   <>
-                    <button
-                      onClick={() => { setRenamingGuestId(g.id); setRenameValue(g.username) }}
+                    <button type="button"
+                      onClick={() => { renameCommittedRef.current = false; setRenamingGuestId(g.id); setRenameValue(g.username) }}
                       title={t('common.rename')}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: 6, display: 'flex', color: 'var(--text-faint)' }}
                       onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
@@ -597,7 +603,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
                     >
                       <Pencil size={13} />
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => handleDeleteGuest(g.id)}
                       disabled={removingId === g.id}
                       title={t('members.removeAccess')}
@@ -624,7 +630,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
                 className="bg-surface border border-edge text-content"
                 style={{ flex: 1, minWidth: 0, fontSize: 'calc(13px * var(--fs-scale-body, 1))', padding: '8px 10px', borderRadius: 10, outline: 'none', fontFamily: 'inherit' }}
               />
-              <button
+              <button type="button"
                 onClick={handleAddGuest}
                 disabled={addingGuest || !newGuestName.trim()}
                 style={{

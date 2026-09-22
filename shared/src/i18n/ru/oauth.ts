@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'Поездки',
   'oauth.scope.group.places': 'Места',
+  'oauth.scope.group.collections': 'Коллекции',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': 'Вещи',
   'oauth.scope.group.todos': 'Задачи',
@@ -26,6 +27,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'Чтение мест, назначений по дням, тегов и категорий',
   'oauth.scope.places:write.label': 'Управление местами',
   'oauth.scope.places:write.description': 'Создание, обновление и удаление мест, назначений и тегов',
+  'oauth.scope.collections:read.label': 'Просмотр коллекций',
+  'oauth.scope.collections:read.description':
+    'Чтение коллекций сохранённых мест, входящих в них мест, оценок, меток и участников',
+  'oauth.scope.collections:write.label': 'Управление коллекциями',
+  'oauth.scope.collections:write.description':
+    'Создание и изменение коллекций, сохранение, оценка, добавление меток и копирование мест, а также предоставление доступа к спискам',
   'oauth.scope.atlas:read.label': 'Просмотр Atlas',
   'oauth.scope.atlas:read.description': 'Чтение посещённых стран, регионов и списка желаний',
   'oauth.scope.atlas:write.label': 'Управление Atlas',
@@ -88,5 +95,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'Файлы',
+  'oauth.scope.group.settings': 'Настройки',
+  'oauth.scope.files:read.label': 'Просмотр файлов поездки',
+  'oauth.scope.files:read.description': 'Список документов поездки: названия, размеры, кто их загрузил и с чем они связаны',
+  'oauth.scope.files:write.label': 'Управление файлами поездки',
+  'oauth.scope.files:write.description': 'Переименование и описание файлов, привязка к бронированиям и местам, отметка и удаление в корзину',
+  'oauth.scope.files:content.label': 'Чтение содержимого файлов',
+  'oauth.scope.files:content.description': 'Чтение содержимого загруженного документа, например PDF бронирования или билета',
+  'oauth.scope.settings:read.label': 'Просмотр ваших настроек',
+  'oauth.scope.settings:read.description': 'Чтение единиц измерения, формата времени, языка, валюты по умолчанию и стартовой страницы',
+  'oauth.scope.settings:write.label': 'Изменение ваших настроек',
+  'oauth.scope.settings:write.description': 'Изменение единиц измерения, формата времени, языка, валюты по умолчанию и стартовой страницы. Никогда сохранённых ключей API',
+  'oauth.scope.group.plugins': 'Плагины',
+  'oauth.scope.plugins:use.label': 'Запуск инструментов плагинов',
+  'oauth.scope.plugins:use.description': 'Позволяет этому клиенту вызывать инструменты, которые предоставляют плагины, установленные и одобренные администратором. Каждый плагин действует с уже выданными ему правами, а не с областями доступа этого токена',
 };
 export default oauth;

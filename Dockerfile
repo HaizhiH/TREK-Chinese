@@ -20,6 +20,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/
 COPY client/package.json ./client/
+COPY client/scripts/patch-maplibre.mjs ./client/scripts/
 RUN npm ci --workspace=client
 COPY --from=shared-builder /app/shared/dist ./shared/dist
 COPY client/ ./client/
@@ -46,17 +47,24 @@ COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/
 COPY server/package.json ./server/
 
+# The trailing chown runs in this layer on purpose: it covers the manifests and
+# the freshly installed node_modules while they are already part of this layer's
+# changeset, so it costs nothing. Everything copied after this point carries
+# --chown=node:node for the same reason — a recursive chown in a later layer
+# would copy up every inode it touches and duplicate the whole tree in the image.
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends tzdata dumb-init wget ca-certificates python3 build-essential \
-    libkitinerary-bin && \
+    libkitinerary-bin libsqlite3-0 && \
     npm ci --workspace=server --omit=dev && \
     ln -sf "$(find /usr/lib -name kitinerary-extractor -type f | head -1)" /usr/local/bin/kitinerary-extractor; \
     apt-get purge -y python3 build-essential && \
     apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+    rm -rf /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
+    chown -R node:node /app
 
-# gosu rebuilt with a current Go toolchain (stage 0) — used by CMD to drop to node.
+# gosu rebuilt with a current Go toolchain (stage 0) — the entrypoint script uses
+# it to drop to node.
 COPY --from=gosu-build /out/gosu /usr/local/bin/gosu
 
 ENV XDG_CACHE_HOME=/tmp/kf6-cache
@@ -66,34 +74,42 @@ ENV QT_QPA_PLATFORM=offscreen
 # Override with KITINERARY_EXTRACTOR_PATH if you install it elsewhere.
 ENV KITINERARY_EXTRACTOR_PATH=/usr/local/bin/kitinerary-extractor
 
-COPY --from=server-builder /app/server/dist ./server/dist
+COPY --chown=node:node --from=server-builder /app/server/dist ./server/dist
 # Runtime data assets read from server/assets at runtime: airports.json (flight
 # transport search) and atlas/*.geojson.gz (Atlas country/region map). The build
 # only emits dist, so these must be copied explicitly or the features silently
 # degrade to empty in the image.
-COPY --from=server-builder /app/server/assets ./server/assets
+COPY --chown=node:node --from=server-builder /app/server/assets ./server/assets
 # The in-app help pages (/help) read this straight from disk at runtime, so the
 # docs always match the version running. Without it, wikiService falls back to
 # fetching the GitHub wiki, which tracks main and needs network access.
-COPY wiki ./wiki
+COPY --chown=node:node wiki ./wiki
 # tsconfig-paths/register reads this at runtime to resolve MCP SDK paths.
-COPY server/tsconfig.json ./server/
+COPY --chown=node:node server/tsconfig.json ./server/
 # Encryption-key rotation is run on demand via tsx (a prod dep) straight from the
 # raw .ts source — it never enters dist, so it must be copied in explicitly or
 # `node --import tsx scripts/migrate-encryption.ts` fails with module-not-found.
-COPY server/scripts/migrate-encryption.ts ./server/scripts/migrate-encryption.ts
+COPY --chown=node:node server/scripts/migrate-encryption.ts ./server/scripts/migrate-encryption.ts
 # Admin recovery script (node server/reset-admin.js) for locked-out installs.
-COPY server/reset-admin.js ./server/reset-admin.js
-COPY --from=shared-builder /app/shared/dist ./shared/dist
-COPY --from=client-builder /app/client/dist ./server/public
-COPY --from=client-builder /app/client/public/fonts ./server/public/fonts
+COPY --chown=node:node server/reset-admin.js ./server/reset-admin.js
+COPY --chown=node:node --from=shared-builder /app/shared/dist ./shared/dist
+COPY --chown=node:node --from=client-builder /app/client/dist ./server/public
+COPY --chown=node:node --from=client-builder /app/client/public/fonts ./server/public/fonts
 
-RUN mkdir -p /app/data/logs /app/uploads/files /app/uploads/covers /app/uploads/avatars /app/uploads/photos && \
+# journey/ and places/ must be listed here and in server/src/index.ts (#1762) —
+# a dir created lazily on first upload needs write permission on the uploads
+# mount point itself, which fails with EACCES when the bind-mounted host dir
+# isn't writable by node. Only paths this layer creates are chowned; anything
+# already in the image arrived node-owned via --chown above.
+RUN mkdir -p /app/data/logs /app/uploads/files /app/uploads/covers /app/uploads/avatars \
+      /app/uploads/photos /app/uploads/journey /app/uploads/places && \
     ln -s /app/uploads /app/server/uploads && \
     ln -s /app/data /app/server/data && \
-    chown -R node:node /app
+    chown -R node:node /app/data /app/uploads && \
+    chown -h node:node /app/server/uploads /app/server/data
 
 ENV NODE_ENV=production
+ENV NODE_USE_ENV_PROXY=1
 ENV PORT=3000
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
@@ -103,9 +119,14 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:3000/api/health || exit 1
 
+# Start-up lives in a script, not an inline `sh -c` string: container management
+# UIs re-tokenise Config.Cmd when you edit a container in place, and a command
+# carrying quotes does not survive that round-trip (the container then dies with
+# a shell syntax error before Node starts). A CMD of one bare token does.
+COPY server/scripts/entrypoint.sh /usr/local/bin/trek-entrypoint
+# Root-owned on purpose — this is what calls gosu, so it runs before the drop to
+# node. chmod is explicit because a checkout on Windows carries no exec bit.
+RUN chmod 0755 /usr/local/bin/trek-entrypoint
+
 ENTRYPOINT ["dumb-init", "--"]
-# Preflight: if the app code is missing, a volume was almost certainly mounted
-# over /app (it hides the image's node_modules + dist). Fail with actionable
-# guidance instead of a cryptic "Cannot find module 'tsconfig-paths/register'".
-# cd into server/ so tsconfig-paths/register finds tsconfig.json and ../node_modules resolves correctly.
-CMD ["sh", "-c", "if [ ! -f /app/server/dist/index.js ] || [ ! -d /app/node_modules/tsconfig-paths ]; then echo 'FATAL: TREK application files are missing from the image.'; echo 'A volume is likely mounted over /app, which hides the app code.'; echo 'Mount ONLY your data and uploads dirs: -v ./data:/app/data -v ./uploads:/app/uploads'; echo 'Do NOT mount a volume at /app. See the Troubleshooting section of the README.'; exit 1; fi; chown -R node:node /app/data /app/uploads 2>/dev/null || true; cd /app/server && exec gosu node node --require tsconfig-paths/register dist/index.js"]
+CMD ["/usr/local/bin/trek-entrypoint"]

@@ -1,12 +1,26 @@
-// FE-OAUTH-SCOPES-001 to FE-OAUTH-SCOPES-010
+// FE-OAUTH-SCOPES-001 to FE-OAUTH-SCOPES-014
 import { describe, it, expect } from 'vitest'
-import { SCOPE_GROUPS, ALL_SCOPES, SCOPE_GROUP_NAMES, getScopesByGroup } from './oauthScopes'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { SCOPE_GROUPS, ALL_SCOPES, SCOPE_GROUP_NAMES, getScopesByGroup, PRESET_OPT_IN_ONLY, PRESET_SCOPES_DEFAULT, PRESET_SCOPES_READONLY } from './oauthScopes'
+
+// The consent page mirrors the server's scope list by hand, so read the server
+// file and compare. Parsing keeps this a client-only test (no server import).
+function readServerScopes(): string[] {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const src = readFileSync(resolve(here, '../../../server/src/mcp/scopes.ts'), 'utf8')
+  const block = src.slice(src.indexOf('export const SCOPES = {'))
+  const body = block.slice(0, block.indexOf('} as const;'))
+  return [...body.matchAll(/^\s*[A-Z_]+:\s*'([a-z]+:[a-z]+)'/gm)].map(m => m[1])
+}
 
 describe('SCOPE_GROUPS', () => {
   it('FE-OAUTH-SCOPES-001: contains all expected scope keys', () => {
     const expected = [
       'trips:read', 'trips:write', 'trips:delete', 'trips:share',
       'places:read', 'places:write',
+      'collections:read', 'collections:write',
       'atlas:read', 'atlas:write',
       'packing:read', 'packing:write',
       'todos:read', 'todos:write',
@@ -16,6 +30,8 @@ describe('SCOPE_GROUPS', () => {
       'notifications:read', 'notifications:write',
       'vacay:read', 'vacay:write',
       'geo:read', 'weather:read',
+      'journey:read', 'journey:write', 'journey:share',
+      'plugins:use',
     ]
     for (const scope of expected) {
       expect(SCOPE_GROUPS).toHaveProperty(scope)
@@ -32,8 +48,16 @@ describe('SCOPE_GROUPS', () => {
 })
 
 describe('ALL_SCOPES', () => {
-  it('FE-OAUTH-SCOPES-003: contains exactly 27 scopes', () => {
-    expect(ALL_SCOPES).toHaveLength(27)
+  it('FE-OAUTH-SCOPES-003: contains exactly as many scopes as the server defines', () => {
+    expect(ALL_SCOPES).toHaveLength(readServerScopes().length)
+  })
+
+  it('FE-OAUTH-SCOPES-011: matches server/src/mcp/scopes.ts exactly', () => {
+    const serverScopes = readServerScopes()
+    // Guards the parse itself: a moved file or a reformatted list must fail
+    // here rather than quietly compare two empty sets.
+    expect(serverScopes.length).toBeGreaterThan(0)
+    expect(new Set(ALL_SCOPES)).toEqual(new Set(serverScopes))
   })
 
   it('FE-OAUTH-SCOPES-004: matches Object.keys(SCOPE_GROUPS)', () => {
@@ -98,5 +122,28 @@ describe('getScopesByGroup', () => {
     const groups = getScopesByGroup(t)
     expect(groups['Trips']).toBeDefined()
     expect(groups['oauth.scope.group.trips']).toBeUndefined()
+  })
+})
+
+describe('client presets', () => {
+  // The presets are written as "everything except deletes", so a new scope joins
+  // them silently. That is right for a scope over the user's own data and wrong
+  // for one that runs third-party code, so the exclusion gets a test.
+  it('FE-OAUTH-SCOPES-012: never offers an opt-in-only scope by default', () => {
+    expect(PRESET_OPT_IN_ONLY.size).toBeGreaterThan(0)
+    for (const scope of PRESET_OPT_IN_ONLY) {
+      expect(PRESET_SCOPES_DEFAULT).not.toContain(scope)
+      expect(PRESET_SCOPES_READONLY).not.toContain(scope)
+    }
+  })
+
+  it('FE-OAUTH-SCOPES-013: still offers every other non-destructive scope', () => {
+    const expected = ALL_SCOPES.filter(s => !s.includes(':delete') && !PRESET_OPT_IN_ONLY.has(s))
+    expect(PRESET_SCOPES_DEFAULT).toEqual(expected)
+    expect(PRESET_SCOPES_DEFAULT).toContain('trips:write')
+  })
+
+  it('FE-OAUTH-SCOPES-014: the read-only preset stays read-only', () => {
+    expect(PRESET_SCOPES_READONLY.every(s => s.endsWith(':read'))).toBe(true)
   })
 })

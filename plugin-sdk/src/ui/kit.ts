@@ -279,6 +279,125 @@ body.trek-ui {
 @media (max-width: 639px) {
   .trek-modal-enter { animation: trek-drawer-enter 320ms cubic-bezier(0.32, 0.72, 0, 1); }
 }
+
+/* Mobile layer ------------------------------------------------------------- *
+ * TREK 4 gives the phone its own design: a translucent, border-led surface over
+ * a gradient, no drop shadows, and touch feedback rather than hover. The host
+ * hands the mobile palette (--m-*) down with the rest of the tokens whenever a
+ * frame is mounted inside the mobile shell, so these rules only restate the
+ * SHAPE — the colours come from the same variables the native screens use.
+ *
+ * Everything here is keyed on [data-form-factor="phone"], which the host sets
+ * from the viewport it reports. On desktop not a single rule below applies. */
+
+[data-form-factor="phone"] .trek-ui,
+[data-form-factor="phone"] body.trek-ui { font-size: 15px; }
+
+/* The card is the workhorse. On the phone it is a translucent tile with a hairline
+   border and no shadow — a drop shadow over the gradient reads as a sticker. */
+[data-form-factor="phone"] .trek-card {
+  background: var(--m-card, var(--bg-card));
+  border: 1px solid var(--m-cbr, var(--border-primary));
+  border-radius: 16px;
+  box-shadow: none;
+  padding: 14px;
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+}
+[data-form-factor="phone"] .trek-glass {
+  background: var(--m-glass, var(--glass-bg));
+  border-color: var(--m-gbr, var(--glass-border));
+  border-radius: 20px;
+  box-shadow: none;
+  padding: 16px;
+}
+
+/* Touch has no hover. The lift on hover never fires on a phone and the pressed
+   state never existed, so a tap gave no feedback at all. */
+[data-form-factor="phone"] .trek-card.trek-interactive:hover,
+[data-form-factor="phone"] .trek-glass.trek-interactive:hover { transform: none; box-shadow: none; }
+[data-form-factor="phone"] .trek-interactive:active,
+[data-form-factor="phone"] .trek-btn:active,
+[data-form-factor="phone"] .trek-row:active { transform: scale(.985); opacity: .9; }
+[data-form-factor="phone"] .trek-btn:hover { filter: none; }
+
+/* 44px is the smallest target that reliably hits on a phone. */
+[data-form-factor="phone"] .trek-btn { min-height: 44px; border-radius: 12px; }
+[data-form-factor="phone"] .trek-row { min-height: 48px; }
+
+/* An input below 16px makes iOS Safari zoom the page on focus, and the zoom does
+   not come back. This is the single most common mobile bug in embedded UI. */
+[data-form-factor="phone"] .trek-input,
+[data-form-factor="phone"] .trek-select,
+[data-form-factor="phone"] .trek-textarea { font-size: 16px; min-height: 44px; border-radius: 12px; }
+
+/* Ink follows the mobile palette where it exists. */
+[data-form-factor="phone"] .trek-title { color: var(--m-ink, var(--text-primary)); }
+[data-form-factor="phone"] .trek-sub,
+[data-form-factor="phone"] .trek-muted { color: var(--m-muted, var(--text-muted)); }
+
+/* A filling surface owns its own scrolling: the host will not scroll for it, and
+   a height report is discarded. Anchor the body and scroll the content. */
+[data-fill] .trek-ui, [data-fill] body.trek-ui { height: 100%; overflow: hidden; }
+[data-fill] .trek-scroll {
+  height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Building blocks the native mobile screens are made of, so a plugin does not
+   have to reverse-engineer them from screenshots. */
+.trek-eyebrow {
+  font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--m-faint, var(--text-faint));
+}
+.trek-countpill {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--m-ic, var(--bg-tertiary)); color: var(--m-muted, var(--text-muted));
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.trek-sectionhead {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  margin: 15px 0 2px; padding: 0 2px; background: none; border: 0;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.trek-statusdot { width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--m-st-neutral, var(--text-faint)); }
+.trek-statusdot[data-status="confirmed"] { background: var(--m-st-confirmed, var(--success)); }
+.trek-statusdot[data-status="pending"] { background: var(--m-st-pending, var(--warning)); }
+.trek-statusdot[data-status="info"] { background: var(--m-st-info, var(--info)); }
+.trek-statusdot[data-status="danger"] { background: var(--m-st-danger, var(--danger)); }
+.trek-iconbtn {
+  display: inline-grid; place-items: center; flex: none;
+  width: 38px; height: 38px; border-radius: 999px; cursor: pointer;
+  background: var(--m-ic, var(--bg-tertiary));
+  border: 1px solid var(--m-gbr, var(--border-primary));
+  color: var(--m-ink, var(--text-primary));
+}
+.trek-iconbtn:active { transform: scale(.94); }
+.trek-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.trek-field > .trek-field-label {
+  font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--m-faint, var(--text-faint));
+}
+.trek-field > .trek-field-value {
+  font-size: 13px; font-weight: 600; color: var(--m-ink, var(--text-primary));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.trek-segmented {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px;
+  background: var(--m-glass, var(--bg-tertiary));
+  border: 1px solid var(--m-gbr, var(--border-primary));
+}
+.trek-segmented > button {
+  border: 0; background: none; cursor: pointer; font: inherit;
+  padding: 8px 16px; border-radius: 999px; white-space: nowrap;
+  font-size: 13px; font-weight: 500; color: var(--m-ink, var(--text-primary));
+}
+.trek-segmented > button[aria-pressed="true"],
+.trek-segmented > button.on {
+  background: var(--m-act, var(--accent)); color: var(--m-actfg, var(--accent-text)); font-weight: 600;
+}
+
 .trek-backdrop-enter { animation: trek-backdrop-enter 180ms var(--trek-ease-quint); }
 .trek-toast-enter { animation: trek-toast-enter 260ms var(--trek-ease-quint); will-change: transform, opacity; }
 .trek-pie-reveal {
@@ -359,16 +478,35 @@ export const TREK_THEME_JS = `(function () {
   var lastCtx = null;
   var pending = {};
   var pendingConfirms = {};
+  var pendingGeo = {};
+  var geoWatchers = [];
   var seq = 0;
   var lastH = -1;
 
-  function send(msg) { try { window.parent.postMessage(msg, '*'); } catch (e) {} }
+  function send(msg) { try { window.parent.postMessage(msg, '*'); return true; } catch (e) { return false; } }
+  // postMessage throws synchronously on a value structured clone cannot carry (a
+  // function, a DOM node, a Proxy). Swallowing that left the request registered and
+  // the promise pending forever, so the same call rejects under the mock host and
+  // hangs in the real one. Drop the entry and reject with the host's own code.
+  function unsendable(bucket, id, code, message) { delete bucket[id]; var e = new Error(message); e.code = code; return e; }
   function setFlag(name, on) { if (on) { docEl.setAttribute(name, ''); } else { docEl.removeAttribute(name); } }
 
   function applyContext(m) {
     if (m.theme) { docEl.setAttribute('data-theme', m.theme); }
     if (m.locale) { docEl.setAttribute('lang', m.locale); }
     docEl.setAttribute('dir', m.dir === 'rtl' ? 'rtl' : 'ltr');
+    // Where this frame sits, and in what shape. data-form-factor drives the
+    // mobile layer of this stylesheet; data-surface lets a plugin tell a
+    // full-height tab from a widget that reports its height. The insets are the
+    // space the HOST already keeps clear — exposed so a plugin can align its own
+    // sticky chrome with the host's, not so it adds padding on top.
+    var vp = m.viewport || {};
+    if (vp.formFactor) { docEl.setAttribute('data-form-factor', vp.formFactor); }
+    if (vp.surface) { docEl.setAttribute('data-surface', vp.surface); }
+    setFlag('data-fill', vp.fill);
+    var ins = vp.insets || {};
+    docEl.style.setProperty('--trek-inset-top', (ins.top || 0) + 'px');
+    docEl.style.setProperty('--trek-inset-bottom', (ins.bottom || 0) + 'px');
     var t = m.tokens || {};
     for (var k in t) {
       if (Object.prototype.hasOwnProperty.call(t, k) && t[k]) { docEl.style.setProperty(k, t[k]); }
@@ -406,6 +544,15 @@ export const TREK_THEME_JS = `(function () {
     } else if (m.type === 'trek:confirm:result') {
       var c = pendingConfirms[m.requestId];
       if (c) { delete pendingConfirms[m.requestId]; c(!!m.confirmed); }
+    } else if (m.type === 'trek:geolocation:result') {
+      var g = pendingGeo[m.requestId];
+      if (g) {
+        delete pendingGeo[m.requestId];
+        if (m.error) { var gerr = new Error('geolocation: ' + m.error); gerr.code = m.error; g.reject(gerr); }
+        else { g.resolve(m.position || m); }
+      }
+    } else if (m.type === 'trek:geolocation:update') {
+      for (var w = 0; w < geoWatchers.length; w++) { try { geoWatchers[w](m.position || null, m.error || null); } catch (e) {} }
     } else if (m.type === 'trek:event') {
       for (var j = 0; j < evtHandlers.length; j++) { try { evtHandlers[j](m.event, m.tripId); } catch (e) {} }
     }
@@ -446,9 +593,41 @@ export const TREK_THEME_JS = `(function () {
     mount: function (node, target) { (target || document.body).appendChild(node); return node; }
   };
 
+  var session = {
+    get: function (key, opts) {
+      var id = 's' + (++seq);
+      return new Promise(function (resolve, reject) {
+        pending[id] = { resolve: resolve, reject: reject };
+        if (!send({ type: 'trek:session:get', requestId: id, key: key, scope: opts && opts.scope })) { reject(unsendable(pending, id, 'SESSION_INVALID_VALUE', 'session value must be JSON-serialisable')); }
+      });
+    },
+    set: function (key, value, opts) {
+      var id = 's' + (++seq);
+      return new Promise(function (resolve, reject) {
+        pending[id] = { resolve: resolve, reject: reject };
+        if (!send({ type: 'trek:session:set', requestId: id, key: key, value: value, scope: opts && opts.scope })) { reject(unsendable(pending, id, 'SESSION_INVALID_VALUE', 'session value must be JSON-serialisable')); }
+      });
+    },
+    remove: function (key, opts) {
+      var id = 's' + (++seq);
+      return new Promise(function (resolve, reject) {
+        pending[id] = { resolve: resolve, reject: reject };
+        if (!send({ type: 'trek:session:remove', requestId: id, key: key, scope: opts && opts.scope })) { reject(unsendable(pending, id, 'SESSION_INVALID_VALUE', 'session value must be JSON-serialisable')); }
+      });
+    },
+    clear: function (opts) {
+      var id = 's' + (++seq);
+      return new Promise(function (resolve, reject) {
+        pending[id] = { resolve: resolve, reject: reject };
+        if (!send({ type: 'trek:session:clear', requestId: id, scope: opts && opts.scope })) { reject(unsendable(pending, id, 'SESSION_INVALID_VALUE', 'session value must be JSON-serialisable')); }
+      });
+    }
+  };
+
   var api = {
     context: null,
     ui: ui,
+    session: session,
     ready: function () { send({ type: 'trek:ready' }); },
     requestContext: function () { send({ type: 'trek:context:request' }); },
     onContext: function (cb) {
@@ -467,7 +646,7 @@ export const TREK_THEME_JS = `(function () {
       var id = 'c' + (++seq);
       return new Promise(function (resolve) {
         pendingConfirms[id] = resolve;
-        send({ type: 'trek:confirm', requestId: id, title: opts.title, message: opts.message, confirmLabel: opts.confirmLabel, cancelLabel: opts.cancelLabel, danger: opts.danger });
+        if (!send({ type: 'trek:confirm', requestId: id, title: opts.title, message: opts.message, confirmLabel: opts.confirmLabel, cancelLabel: opts.cancelLabel, danger: opts.danger })) { delete pendingConfirms[id]; resolve(false); }
       });
     },
     // Core-event names for the trip in view ({ event, tripId } only, no payloads) —
@@ -481,8 +660,40 @@ export const TREK_THEME_JS = `(function () {
       var id = 'r' + (++seq);
       return new Promise(function (resolve, reject) {
         pending[id] = { resolve: resolve, reject: reject };
-        send({ type: 'trek:invoke', requestId: id, sub: sub, method: opts.method, body: opts.body });
+        if (!send({ type: 'trek:invoke', requestId: id, sub: sub, method: opts.method, body: opts.body })) { reject(unsendable(pending, id, 'error', 'invoke body must be JSON-serialisable')); }
       });
+    },
+    // Host-brokered browser position (needs the geolocation:read grant; the
+    // browser's own site prompt still applies). get() resolves one position;
+    // watch(cb) streams updates — cb(position, error) — until every returned
+    // unsubscribe ran, which also releases the host's GPS watch.
+    geolocation: {
+      get: function () {
+        var id = 'g' + (++seq);
+        return new Promise(function (resolve, reject) {
+          pendingGeo[id] = { resolve: resolve, reject: reject };
+          send({ type: 'trek:geolocation', requestId: id, action: 'get' });
+        });
+      },
+      watch: function (cb) {
+        geoWatchers.push(cb);
+        if (geoWatchers.length === 1) {
+          var id = 'g' + (++seq);
+          // The start ack resolves silently; a start error (e.g. forbidden) is
+          // surfaced through the callback so watch() itself never throws.
+          pendingGeo[id] = { resolve: function () {}, reject: function (e) { try { cb(null, e && e.code ? e.code : 'unavailable'); } catch (x) {} } };
+          send({ type: 'trek:geolocation', requestId: id, action: 'watch' });
+        }
+        return function () {
+          var i = geoWatchers.indexOf(cb);
+          if (i >= 0) { geoWatchers.splice(i, 1); }
+          if (geoWatchers.length === 0) {
+            var cid = 'g' + (++seq);
+            pendingGeo[cid] = { resolve: function () {}, reject: function () {} };
+            send({ type: 'trek:geolocation', requestId: cid, action: 'clear' });
+          }
+        };
+      }
     }
   };
   window.trek = api;

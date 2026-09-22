@@ -1,22 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react'
-import ReactDOM from 'react-dom'
-import { X, Sun, Cloud, CloudRain, CloudSnow, CloudDrizzle, CloudLightning, Wind, Droplets, Sunrise, Sunset, Hotel, Calendar, MapPin, LogIn, LogOut, Hash, Pencil, Plane, Utensils, Train, Car, Ship, Ticket, FileText, Users, ChevronsDown, ChevronsUp, TramFront } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { X, Sun, Cloud, CloudRain, CloudSnow, CloudDrizzle, CloudLightning, Wind, Droplets, Sunrise, Sunset, Hotel, Calendar, MapPin, LogIn, LogOut, Hash, Pencil, Plane, Utensils, Train, Car, Ship, Ticket, FileText, Users, ChevronsDown, ChevronsUp, TramFront, ParkingSquare } from 'lucide-react'
 
-const RES_TYPE_ICONS = { flight: Plane, hotel: Hotel, restaurant: Utensils, train: Train, car: Car, cruise: Ship, transit: TramFront, event: Ticket, tour: Users, other: FileText }
-const RES_TYPE_COLORS = { flight: '#3b82f6', hotel: '#8b5cf6', restaurant: '#ef4444', train: '#06b6d4', car: '#6b7280', cruise: '#0ea5e9', transit: '#7c3aed', event: '#f59e0b', tour: '#10b981', other: '#6b7280' }
+const RES_TYPE_ICONS = { flight: Plane, hotel: Hotel, restaurant: Utensils, train: Train, car: Car, cruise: Ship, transit: TramFront, event: Ticket, tour: Users, parking: ParkingSquare, other: FileText }
+const RES_TYPE_COLORS = { flight: '#3b82f6', hotel: '#8b5cf6', restaurant: '#ef4444', train: '#06b6d4', car: '#6b7280', cruise: '#0ea5e9', transit: '#7c3aed', event: '#f59e0b', tour: '#10b981', parking: '#2563eb', other: '#6b7280' }
 import { weatherApi, accommodationsApi } from '../../api/client'
 import { usePluginViewContributions, PluginCardFooter } from '../Plugins/PluginContributions'
 import { usePluginStore } from '../../store/pluginStore'
 import PluginFrame from '../Plugins/PluginFrame'
 import { useCanDo } from '../../store/permissionsStore'
 import { useTripStore } from '../../store/tripStore'
+import { applyStayStops } from '../../store/stayStops'
 import CustomSelect from '../shared/CustomSelect'
 import CustomTimePicker from '../shared/CustomTimePicker'
 import { useSettingsStore } from '../../store/settingsStore'
+import { useToast } from '../shared/Toast'
 import { getLocaleForLanguage, useTranslation } from '../../i18n'
 import type { Day, Place, Category, Reservation, AssignmentsMap } from '../../types'
 import { isDayInAccommodationRange } from '../../utils/dayOrder'
-import { splitReservationDateTime } from '../../utils/formatters'
+import { formatClockTime, splitReservationDateTime } from '../../utils/formatters'
 import { useDayDetail } from './useDayDetail'
 
 const WEATHER_ICON_MAP = {
@@ -35,16 +37,6 @@ function WIcon({ main, size = 14 }: WIconProps) {
 }
 
 function cTemp(c, f) { return Math.round(f ? c * 9 / 5 + 32 : c) }
-
-function formatTime12(val, is12h) {
-  if (!val) return val
-  const [h, m] = val.split(':').map(Number)
-  if (isNaN(h) || isNaN(m)) return val
-  if (!is12h) return val
-  const period = h >= 12 ? 'PM' : 'AM'
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`
-}
 
 interface DayDetailPanelProps {
   day: Day
@@ -65,9 +57,11 @@ interface DayDetailPanelProps {
   mobile?: boolean
   /** Rename the day from here — the sidebar pencil moved to the transit search (#1065). */
   onUpdateDayTitle?: (dayId: number, title: string) => void
+  /** Name of the place the day's weather is anchored to — captioned above the forecast (#2167). */
+  weatherPlaceName?: string | null
 }
 
-export default function DayDetailPanel({ day, days, places, categories = [], tripId, assignments, reservations = [], lat, lng, onClose, onAccommodationChange, leftWidth = 0, rightWidth = 0, collapsed: collapsedProp = false, onToggleCollapse, mobile = false, onUpdateDayTitle }: DayDetailPanelProps) {
+export default function DayDetailPanel({ day, days, places, categories = [], tripId, assignments, reservations = [], lat, lng, onClose, onAccommodationChange, leftWidth = 0, rightWidth = 0, collapsed: collapsedProp = false, onToggleCollapse, mobile = false, onUpdateDayTitle, weatherPlaceName = null }: DayDetailPanelProps) {
   const { t, language, locale } = useTranslation()
   const can = useCanDo()
   const tripObj = useTripStore((s) => s.trip)
@@ -78,7 +72,7 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
   const fmtTime = (v) => {
     if (!v) return v
     if (v.includes('T')) return new Date(v).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: is12h })
-    return formatTime12(v, is12h)
+    return formatClockTime(v, is12h)
   }
   const unit = isFahrenheit ? '°F' : '°C'
   const collapsed = collapsedProp
@@ -153,8 +147,12 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
         boxShadow: '0 8px 40px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)',
         overflow: 'hidden', maxHeight: collapsed ? 'none' : '60vh', display: 'flex', flexDirection: 'column',
       }}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: collapsed ? '12px 16px 12px 20px' : '18px 16px 14px 20px', borderBottom: collapsed ? 'none' : '1px solid var(--border-faint)', cursor: 'pointer' }}
+        {/* Header. Clicking the bar collapses the panel, but that is a mouse
+            shortcut for the chevron button below, a real button with a title that
+            does the same thing. So the bar declares itself presentational instead
+            of becoming a second, unlabelled tab stop wrapped around the rename
+            input and the two icon buttons. */}
+        <div role="presentation" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: collapsed ? '12px 16px 12px 20px' : '18px 16px 14px 20px', borderBottom: collapsed ? 'none' : '1px solid var(--border-faint)', cursor: 'pointer' }}
           onClick={() => toggleCollapse()}>
           <div className="bg-surface-secondary" style={{ width: collapsed ? 36 : 44, height: collapsed ? 36 : 44, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s ease' }}>
             <Calendar size={collapsed ? 16 : 20} className="text-content" />
@@ -183,7 +181,7 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
                   {day.title || t('planner.dayN', { n: (days.indexOf(day) + 1) || '?' })}
                 </span>
                 {canEditDays && onUpdateDayTitle && (
-                  <button onClick={startRename} aria-label={t('common.edit')} title={t('common.edit')} className="text-content-faint" style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', display: 'flex', flexShrink: 0 }}>
+                  <button type="button" onClick={startRename} aria-label={t('common.edit')} title={t('common.edit')} className="text-content-faint" style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', display: 'flex', flexShrink: 0 }}>
                     <Pencil size={12} strokeWidth={1.8} />
                   </button>
                 )}
@@ -191,14 +189,14 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
             )}
             {!collapsed && formattedDate && <div className="text-content-muted" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', marginTop: 1 }}>{formattedDate}</div>}
           </div>
-          <button onClick={(e) => { e.stopPropagation(); toggleCollapse() }} title={collapsed ? t('common.expand') : t('common.collapse')}
+          <button type="button" onClick={(e) => { e.stopPropagation(); toggleCollapse() }} title={collapsed ? t('common.expand') : t('common.collapse')}
             className="bg-surface-secondary"
             style={{ border: 'none', borderRadius: 10, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s ease' }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
             onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-secondary)'}>
             {collapsed ? <ChevronsUp size={14} className="text-content-muted" /> : <ChevronsDown size={14} className="text-content-muted" />}
           </button>
-          <button onClick={(e) => { e.stopPropagation(); onClose() }} className="bg-surface-secondary" style={{ border: 'none', borderRadius: 10, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+          <button type="button" onClick={(e) => { e.stopPropagation(); onClose() }} className="bg-surface-secondary" style={{ border: 'none', borderRadius: 10, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
             onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-secondary)'}>
             <X size={14} className="text-content-muted" />
@@ -209,13 +207,20 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
         <div style={{ overflowY: 'auto', padding: '14px 20px 18px', display: collapsed ? 'none' : 'block' }}>
 
           {/* ── Weather ── */}
-          {day.date && lat && lng && (
+          {!!(day.date && lat && lng) && (
             loading ? (
               <div style={{ textAlign: 'center', padding: 16, color: 'var(--text-faint)', fontSize: 'calc(12px * var(--fs-scale-body, 1))' }}>
                 <div style={{ width: 18, height: 18, border: '2px solid var(--border-primary)', borderTopColor: 'var(--text-primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 6px' }} />
               </div>
             ) : weather ? (
               <div>
+                {/* Which place the forecast is for — on a roadtrip "the day's weather"
+                    is ambiguous without it (#2167). */}
+                {weatherPlaceName && (
+                  <div className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                    {t('day.weatherFor', { name: weatherPlaceName })}
+                  </div>
+                )}
                 {/* Summary row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                   <div style={{ width: 40, height: 40, borderRadius: 12, background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -294,7 +299,7 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
             if (dayReservations.length === 0) return null
             return (
               <div style={{ marginBottom: 0 }}>
-                {day.date && lat && lng && <div style={{ height: 1, background: 'var(--border-faint)', margin: '12px 0' }} />}
+                {!!(day.date && lat && lng) && <div style={{ height: 1, background: 'var(--border-faint)', margin: '12px 0' }} />}
                 <div className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{t('day.reservations')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {dayReservations.map(r => {
@@ -313,8 +318,8 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
                           if (!startTime && !endTime) return null
                           return (
                             <span style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                              {startTime ? formatTime12(startTime, is12h) : ''}
-                              {endTime ? ` – ${formatTime12(endTime, is12h)}` : ''}
+                              {startTime ? formatClockTime(startTime, is12h) : ''}
+                              {endTime ? ` – ${formatClockTime(endTime, is12h)}` : ''}
                             </span>
                           )
                         })()}
@@ -352,7 +357,7 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
               {dayDetailPlugins.map((p) => (
                 <div key={p.id} className="bg-surface-hover" style={{ borderRadius: 10, overflow: 'hidden' }}>
-                  <PluginFrame pluginId={p.id} tripId={String(tripId)} dayId={String(day.id)} title={p.name} />
+                  <PluginFrame pluginId={p.id} tripId={String(tripId)} dayId={String(day.id)} title={p.name} surface="detail-slot" />
                 </div>
               ))}
             </div>
@@ -377,66 +382,6 @@ function Chip({ icon: Icon, value }: ChipProps) {
     </div>
   )
 }
-
-interface InfoChipProps {
-  icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>
-  label: string
-  value: string
-  placeholder: string
-  onEdit: (value: string) => void
-  type: 'text' | 'time'
-}
-
-function InfoChip({ icon: Icon, label, value, placeholder, onEdit, type }: InfoChipProps) {
-  const [editing, setEditing] = React.useState(false)
-  const [val, setVal] = React.useState(value || '')
-  const inputRef = React.useRef(null)
-
-  React.useEffect(() => { setVal(value || '') }, [value])
-  React.useEffect(() => { if (editing && inputRef.current) inputRef.current.focus() }, [editing])
-
-  const save = () => {
-    setEditing(false)
-    if (val !== (value || '')) onEdit(val)
-  }
-
-  return (
-    <div
-      onClick={() => setEditing(true)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 5, padding: '5px 9px', borderRadius: 8,
-        background: 'var(--bg-card)', border: '1px solid var(--border-faint)',
-        cursor: 'pointer', minWidth: 0, flex: type === 'text' ? 1 : undefined,
-      }}
-    >
-      <Icon size={11} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1 }}>{label}</div>
-        {editing ? (
-          <input
-            ref={inputRef}
-            type={type}
-            value={val}
-            onChange={e => setVal(e.target.value)}
-            onBlur={save}
-            onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setVal(value || ''); setEditing(false) } }}
-            onClick={e => e.stopPropagation()}
-            style={{
-              border: 'none', outline: 'none', background: 'none', padding: 0, margin: 0,
-              fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'inherit',
-              width: type === 'time' ? 50 : '100%', lineHeight: 1.3,
-            }}
-          />
-        ) : (
-          <div style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, color: value ? 'var(--text-primary)' : 'var(--text-faint)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {value || placeholder}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 
 function AccommodationList({ dayAccommodations, day, reservations, canEditDays, fmtTime, blurCodes, t,
   setAccommodation, setHotelForm, setHotelDayRange, setShowHotelPicker, handleRemoveAccommodation }: any) {
@@ -469,7 +414,7 @@ function AccommodationList({ dayAccommodations, day, reservations, canEditDays, 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
                         <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           {acc.place_image ? (
-                            <img src={acc.place_image} style={{ width: '100%', height: '100%', borderRadius: 10, objectFit: 'cover' }} />
+                            <img src={acc.place_image} alt="" style={{ width: '100%', height: '100%', borderRadius: 10, objectFit: 'cover' }} />
                           ) : (
                             <Hotel size={16} style={{ color: 'var(--text-muted)' }} />
                           )}
@@ -478,11 +423,11 @@ function AccommodationList({ dayAccommodations, day, reservations, canEditDays, 
                           <div style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.place_name}</div>
                           {acc.place_address && <div style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.place_address}</div>}
                         </div>
-                        {canEditDays && <button onClick={() => { setAccommodation(acc); setHotelForm({ check_in: acc.check_in || '', check_in_end: acc.check_in_end || '', check_out: acc.check_out || '', confirmation: acc.confirmation || '', place_id: acc.place_id }); setHotelDayRange({ start: acc.start_day_id, end: acc.end_day_id }); setShowHotelPicker('edit') }}
+                        {canEditDays && <button type="button" onClick={() => { setAccommodation(acc); setHotelForm({ check_in: acc.check_in || '', check_in_end: acc.check_in_end || '', check_out: acc.check_out || '', confirmation: acc.confirmation || '', place_id: acc.place_id }); setHotelDayRange({ start: acc.start_day_id, end: acc.end_day_id }); setShowHotelPicker('edit') }}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, flexShrink: 0 }}>
                           <Pencil size={12} style={{ color: 'var(--text-faint)' }} />
                         </button>}
-                        {canEditDays && <button onClick={() => { setAccommodation(acc); handleRemoveAccommodation() }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, flexShrink: 0 }}>
+                        {canEditDays && <button type="button" onClick={() => { setAccommodation(acc); handleRemoveAccommodation() }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, flexShrink: 0 }}>
                           <X size={12} style={{ color: 'var(--text-faint)' }} />
                         </button>}
                       </div>
@@ -523,12 +468,17 @@ function AccommodationList({ dayAccommodations, day, reservations, canEditDays, 
                             <div style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{linked.title}</div>
                             <div style={{ fontSize: 'calc(9px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', display: 'flex', gap: 6, marginTop: 1 }}>
                               <span>{confirmed ? t('reservations.confirmed') : t('reservations.pending')}</span>
-                              {linked.confirmation_number && <span
+                              {/* Reveal toggle for a blurred code: a real button, so it can
+                                  be reached by keyboard. With blurring off there is nothing
+                                  to toggle, and it stays out of the tab order. */}
+                              {linked.confirmation_number && <button
+                                type="button"
+                                disabled={!blurCodes}
                                 onMouseEnter={e => { if (blurCodes) e.currentTarget.style.filter = 'none' }}
                                 onMouseLeave={e => { if (blurCodes) e.currentTarget.style.filter = 'blur(4px)' }}
                                 onClick={e => { if (blurCodes) { const el = e.currentTarget; el.style.filter = el.style.filter === 'none' ? 'blur(4px)' : 'none' } }}
-                                style={{ filter: blurCodes ? 'blur(4px)' : 'none', transition: 'filter 0.2s', cursor: blurCodes ? 'pointer' : 'default' }}
-                              >#{linked.confirmation_number}</span>}
+                                style={{ filter: blurCodes ? 'blur(4px)' : 'none', transition: 'filter 0.2s', cursor: blurCodes ? 'pointer' : 'default', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }}
+                              >#{linked.confirmation_number}</button>}
                             </div>
                           </div>
                         </div>
@@ -537,7 +487,7 @@ function AccommodationList({ dayAccommodations, day, reservations, canEditDays, 
                   )
                 })}
                 {/* Add another hotel */}
-                {canEditDays && <button onClick={() => setShowHotelPicker(true)} style={{
+                {canEditDays && <button type="button" onClick={() => setShowHotelPicker(true)} style={{
                   width: '100%', padding: 8, border: '1.5px dashed var(--border-primary)', borderRadius: 10,
                   background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                   fontSize: 'calc(10px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', fontFamily: 'inherit',
@@ -546,7 +496,7 @@ function AccommodationList({ dayAccommodations, day, reservations, canEditDays, 
                 </button>}
               </div>
             ) : (
-              canEditDays ? <button onClick={() => setShowHotelPicker(true)} style={{
+              canEditDays ? <button type="button" onClick={() => setShowHotelPicker(true)} style={{
                 width: '100%', padding: 10, border: '1.5px dashed var(--border-primary)', borderRadius: 10,
                 background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                 fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', fontFamily: 'inherit',
@@ -562,13 +512,54 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
   days, locale, hotelForm, setHotelForm, categories, hotelCategoryFilter, setHotelCategoryFilter, places,
   handleSelectPlace, accommodation, tripId, day, setAccommodations, setDayAccommodations, setAccommodation,
   handleSaveAccommodation, onAccommodationChange }: any) {
+  const toast = useToast()
+  // Saving the picker. The edit branch stays here rather than in useDayDetail
+  // because it also refreshes the panel's own accommodation state; it has to say
+  // what went wrong when the write fails, otherwise the picker just sits there
+  // with the Save button doing nothing.
+  const saveHotelPicker = async () => {
+    if (showHotelPicker !== 'edit' || !accommodation) {
+      await handleSaveAccommodation()
+      return
+    }
+    try {
+      applyStayStops(await accommodationsApi.update(tripId, accommodation.id, {
+        place_id: hotelForm.place_id,
+        start_day_id: hotelDayRange.start,
+        end_day_id: hotelDayRange.end,
+        check_in: hotelForm.check_in || null,
+        check_in_end: hotelForm.check_in_end || null,
+        check_out: hotelForm.check_out || null,
+        confirmation: hotelForm.confirmation || null,
+      }))
+      setShowHotelPicker(false)
+      setHotelForm({ check_in: '', check_in_end: '', check_out: '', confirmation: '', place_id: null })
+      // Reload
+      const d = await accommodationsApi.list(tripId)
+      const all = d.accommodations || []
+      setAccommodations(all)
+      setDayAccommodations(all.filter(a =>
+        day ? isDayInAccommodationRange(day, a.start_day_id, a.end_day_id, days) : false
+      ))
+      const acc = all.find(a => day ? isDayInAccommodationRange(day, a.start_day_id, a.end_day_id, days) : false)
+      setAccommodation(acc || null)
+      onAccommodationChange?.()
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || t('common.unknownError'))
+    }
+  }
+
   return (
     <>
             {/* Hotel Picker Popup — portal to body to escape transform stacking context */}
-            {showHotelPicker && ReactDOM.createPortal(
-              <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+            {showHotelPicker && createPortal(
+              // Click screen and the card that stops the click from reaching it:
+              // neither is a control, and the popup has its own X and Cancel
+              // buttons, so both stay presentational.
+              <div role="presentation" style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
                 onClick={() => setShowHotelPicker(false)}>
-                <div onClick={e => e.stopPropagation()} style={{
+                <div role="presentation" onClick={e => e.stopPropagation()} style={{
                   width: '100%', maxWidth: 900, borderRadius: 16, overflow: 'hidden',
                   background: 'var(--bg-card)', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
                   ...font,
@@ -577,7 +568,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
                   <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid var(--border-faint)', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Hotel size={16} style={{ color: 'var(--text-primary)' }} />
                     <span style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{showHotelPicker === 'edit' ? t('day.editAccommodation') : t('day.addAccommodation')}</span>
-                    <button onClick={() => setShowHotelPicker(false)} style={{ background: 'var(--bg-secondary)', border: 'none', borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                    <button type="button" onClick={() => setShowHotelPicker(false)} style={{ background: 'var(--bg-secondary)', border: 'none', borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                       <X size={12} style={{ color: 'var(--text-muted)' }} />
                     </button>
                   </div>
@@ -615,7 +606,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
                           size="sm"
                         />
                       </div>
-                      <button onClick={() => setHotelDayRange({ start: days[0]?.id, end: days[days.length - 1]?.id })} style={{
+                      <button type="button" onClick={() => setHotelDayRange({ start: days[0]?.id, end: days[days.length - 1]?.id })} style={{
                         padding: '6px 14px', borderRadius: 8, border: 'none', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, cursor: 'pointer', flexShrink: 0,
                         background: hotelDayRange.start === days[0]?.id && hotelDayRange.end === days[days.length - 1]?.id ? 'var(--text-primary)' : 'var(--bg-card)',
                         color: hotelDayRange.start === days[0]?.id && hotelDayRange.end === days[days.length - 1]?.id ? 'var(--bg-card)' : 'var(--text-muted)',
@@ -649,14 +640,14 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
                   {/* Category Filter */}
                   {categories.length > 0 && (
                     <div style={{ padding: '8px 18px', borderBottom: '1px solid var(--border-faint)', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      <button onClick={() => setHotelCategoryFilter('')} style={{
+                      <button type="button" onClick={() => setHotelCategoryFilter('')} style={{
                         padding: '3px 10px', borderRadius: 6, border: 'none', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 600, cursor: 'pointer',
                         background: !hotelCategoryFilter ? 'var(--text-primary)' : 'var(--bg-secondary)',
                         color: !hotelCategoryFilter ? 'var(--bg-card)' : 'var(--text-muted)',
                       }}>{t('day.allDays')}</button>
 
                       {categories.map(c => (
-                        <button key={c.id} onClick={() => setHotelCategoryFilter(c.id)} style={{
+                        <button type="button" key={c.id} onClick={() => setHotelCategoryFilter(c.id)} style={{
                           padding: '3px 10px', borderRadius: 6, border: 'none', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 600, cursor: 'pointer',
                           background: hotelCategoryFilter === c.id ? c.color || 'var(--text-primary)' : 'var(--bg-secondary)',
                           color: hotelCategoryFilter === c.id ? '#fff' : 'var(--text-muted)',
@@ -672,7 +663,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
                       return filtered.length === 0 ? (
                         <div style={{ padding: 20, textAlign: 'center', fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: 'var(--text-faint)' }}>{t('day.noPlacesForHotel')}</div>
                       ) : filtered.map(p => (
-                      <button key={p.id} onClick={() => handleSelectPlace(p.id)} style={{
+                      <button type="button" key={p.id} onClick={() => handleSelectPlace(p.id)} style={{
                         display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 18px',
                         border: 'none', borderBottom: '1px solid var(--border-faint)',
                         background: hotelForm.place_id === p.id ? 'var(--bg-hover)' : 'none',
@@ -686,7 +677,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
                       >
                         <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           {p.image_url ? (
-                            <img src={p.image_url} style={{ width: '100%', height: '100%', borderRadius: 8, objectFit: 'cover' }} />
+                            <img src={p.image_url} alt="" style={{ width: '100%', height: '100%', borderRadius: 8, objectFit: 'cover' }} />
                           ) : (
                             <MapPin size={13} style={{ color: 'var(--text-faint)' }} />
                           )}
@@ -702,38 +693,10 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
 
                 {/* Save / Cancel */}
                 <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border-faint)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button onClick={() => setShowHotelPicker(false)} style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-muted)' }}>
+                  <button type="button" onClick={() => setShowHotelPicker(false)} style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-muted)' }}>
                     {t('common.cancel')}
                   </button>
-                  <button onClick={async () => {
-                    if (showHotelPicker === 'edit' && accommodation) {
-                      // Update existing
-                      await accommodationsApi.update(tripId, accommodation.id, {
-                        place_id: hotelForm.place_id,
-                        start_day_id: hotelDayRange.start,
-                        end_day_id: hotelDayRange.end,
-                        check_in: hotelForm.check_in || null,
-                        check_in_end: hotelForm.check_in_end || null,
-                        check_out: hotelForm.check_out || null,
-                        confirmation: hotelForm.confirmation || null,
-                      })
-                      setShowHotelPicker(false)
-                      setHotelForm({ check_in: '', check_in_end: '', check_out: '', confirmation: '', place_id: null })
-                      // Reload
-                      accommodationsApi.list(tripId).then(d => {
-                        const all = d.accommodations || []
-                        setAccommodations(all)
-                        setDayAccommodations(all.filter(a =>
-                          day ? isDayInAccommodationRange(day, a.start_day_id, a.end_day_id, days) : false
-                        ))
-                        const acc = all.find(a => day ? isDayInAccommodationRange(day, a.start_day_id, a.end_day_id, days) : false)
-                        setAccommodation(acc || null)
-                      })
-                      onAccommodationChange?.()
-                    } else {
-                      await handleSaveAccommodation()
-                    }
-                  }} disabled={!hotelForm.place_id} style={{
+                  <button type="button" onClick={() => { void saveHotelPicker() }} disabled={!hotelForm.place_id} style={{
                     padding: '7px 20px', borderRadius: 8, border: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                     background: hotelForm.place_id ? 'var(--text-primary)' : 'var(--bg-tertiary)',
                     color: hotelForm.place_id ? 'var(--bg-card)' : 'var(--text-faint)',

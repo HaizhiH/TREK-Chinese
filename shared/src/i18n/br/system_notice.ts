@@ -54,5 +54,38 @@ const system_notice: TranslationStrings = {
   'system_notice.v3014_whitespace_collision.title': 'Ação necessária: conflito de conta de usuário',
   'system_notice.v3014_whitespace_collision.body':
     'A atualização 3.0.14 detectou um ou mais conflitos de nome de usuário ou e-mail causados por espaços em branco no início ou fim dos valores armazenados. As contas afetadas foram renomeadas automaticamente. Verifique os logs do servidor por linhas começando com **[migration] WHITESPACE COLLISION** para identificar quais contas precisam de revisão.',
+  // The release modal. One stable set of keys: each big release swaps the copy in place.
+  'system_notice.release_notes.eyebrow': 'Atualização instalada',
+  'system_notice.release_notes.headline': 'Quatro coisas que o TREK agora faz sozinho.',
+  'system_notice.release_notes.intro': 'A sua própria API de locais, road trips planeadas do início ao fim, o seu histórico de localização nas suas mãos, e os seus documentos sincronizados.',
+  'system_notice.release_notes.features_label': 'Os destaques',
+  'system_notice.release_notes.features_aside': 'E não é só isso',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'O primeiro planeador de viagens open source com API de locais própria. 73,6 milhões de locais, sem chave, sem quota.',
+  'system_notice.release_notes.feature_roadtrip_title': 'Addon Viagem de carro',
+  'system_notice.release_notes.feature_roadtrip_body': 'Planeia a viagem sozinho: rota, distância, horas e paragens. Desligado até um admin o ativar.',
+  'system_notice.release_notes.feature_dawarich_title': 'Integração Dawarich',
+  'system_notice.release_notes.feature_dawarich_body': 'A alternativa self-hosted ao Google Timeline, agora visível dentro do TREK. O TREK lê, e apenas lê.',
+  'system_notice.release_notes.footnote': 'E ainda uma longa lista de mudanças menores em todo o resto do TREK.',
+  'system_notice.release_notes.notes_label': 'Notas da versão',
+  'system_notice.release_notes.note_eyebrow': 'Uma nota do mantenedor',
+  'system_notice.release_notes.note_title': 'Vocês são a razão de eu continuar construindo o TREK.',
+  'system_notice.release_notes.note_body':
+    'O TREK começou como uma ferramentinha para as minhas próprias viagens, escrita depois do trabalho porque eu queria um jeito melhor de planejá-las. E nunca parou de crescer de verdade. Quase tudo o que vocês usam foi construído tarde da noite, nos fins de semana, em trens, ao lado de um trabalho em tempo integral, e foram muitas as noites em que me perguntei, em silêncio, se alguém lá fora algum dia chegaria a abri-lo.',
+  'system_notice.release_notes.promise_label': 'A promessa',
+  'system_notice.release_notes.promise_lead': 'O TREK continua gratuito, para sempre.',
+  'system_notice.release_notes.promise_text':
+    'Cada recurso, cada atualização, para todo mundo. Sem planos pagos, sem assinaturas, sem pegadinhas.',
+  'system_notice.release_notes.note_body_after':
+    'E aí vocês abriram. Em poucos meses eram milhares: estrelas, relatos de bugs, traduções para idiomas que eu não falo, pull requests de pessoas que nunca conheci. Até hoje a primeira coisa que faço toda manhã é olhar o repositório, e ainda não parece totalmente real.',
+  'system_notice.release_notes.note_closing': 'Obrigado por estarem aqui. Um abraço, Maurice.',
+  'system_notice.release_notes.support_lead':
+    'O TREK é gratuito e sempre vai ser, mas servidores, domínios e muitas noites em claro não são.',
+  'system_notice.release_notes.support_text':
+    'Se o TREK ganhou um lugar nas suas viagens, me pague um café e ajude a fazer a próxima versão acontecer.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'Apoiar no Ko-fi',
+  'system_notice.release_notes.feature_docsync_title': 'Sincronização de documentos',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud e Synology Drive. Os documentos de uma viagem fluem nos dois sentidos com o serviço que já usa.',
 };
 export default system_notice;

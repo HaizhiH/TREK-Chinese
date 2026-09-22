@@ -14,6 +14,8 @@ const inspector: TranslationStrings = {
   'inspector.confirmedRes': '확정된 예약',
   'inspector.pendingRes': '대기 중인 예약',
   'inspector.google': 'Google Maps',
+  'inspector.navigation': '내비게이션',
+  'inspector.openWith': '다음으로 열기',
   'inspector.openStreetMap': 'OpenStreetMap',
   'inspector.website': '웹사이트 열기',
   'inspector.saveToCollection': '컬렉션에 저장',
@@ -22,5 +24,8 @@ const inspector: TranslationStrings = {
   'inspector.editRes': '예약 편집',
   'inspector.participants': '참가자',
   'inspector.trackStats': '트랙 통계',
+  'inspector.trackColor': '트랙 색상',
+  'inspector.trackColorAuto': '자동 색상',
+  'inspector.trackColorCustom': '사용자 지정 색상 선택',
 };
 export default inspector;

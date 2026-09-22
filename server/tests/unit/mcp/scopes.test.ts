@@ -45,6 +45,40 @@ describe('ALL_SCOPES', () => {
     expect(Array.isArray(ALL_SCOPES)).toBe(true);
     expect(ALL_SCOPES.length).toBeGreaterThan(0);
   });
+
+  it('derives exactly the 17 known scope groups (ScopeGroup lockstep)', () => {
+    // The runtime half of the ScopeGroup lockstep — the type half is
+    // MCP_ACCESS_GROUPS_MATCH_SCOPE_GROUPS in src/mcp/nest-mcp-policy.ts,
+    // covered by `npm run typecheck`. If this list changes, the MCP
+    // access-group union and boot gate change with it — update deliberately.
+    const groups = [...new Set(ALL_SCOPES.map((s) => s.split(':')[0]))].sort();
+    expect(groups).toEqual([
+      'atlas',
+      'budget',
+      'collab',
+      'collections',
+      'files',
+      'geo',
+      'journey',
+      'notifications',
+      'packing',
+      'places',
+      'plugins',
+      'reservations',
+      'settings',
+      'todos',
+      'trips',
+      'vacay',
+      'weather',
+    ]);
+  });
+
+  it('has no :write scope for the read-only geo and weather groups', () => {
+    expect(ALL_SCOPES).not.toContain('geo:write');
+    expect(ALL_SCOPES).not.toContain('weather:write');
+    expect(ALL_SCOPES).toContain('geo:read');
+    expect(ALL_SCOPES).toContain('weather:read');
+  });
 });
 
 // ---------------------------------------------------------------------------

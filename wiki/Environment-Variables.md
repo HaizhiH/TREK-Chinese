@@ -6,9 +6,36 @@ Complete reference for all environment variables TREK reads.
 
 - **Docker Compose** — use the `environment:` block or a `.env` file alongside `docker-compose.yml`
 - **Docker run** — pass each variable with `-e VARIABLE=value`
-- **Helm** — use `env:` for plain values and `secretEnv:` for sensitive values in `values.yaml`
+- **Helm** — use `env:` for plain values and `secretEnv:` for sensitive values in `values.yaml`. The chart only
+  passes through the keys it declares (31 in `templates/configmap.yaml`, the credentials in `templates/secret.yaml`), so a variable
+  that is not one of them is dropped silently — patch it onto the Deployment or add it to the chart
 - **Unraid** — set in the container template editor
 - **Proxmox Community Script** — set in `/opt/trek/server/.env`
+
+---
+
+## Startup Validation
+
+TREK checks almost all of this surface once at boot. A variable that is **unset or blank** falls back to its documented
+default; a variable that is **present but malformed** aborts startup, with an aggregated report naming every
+offending value:
+
+```
+Invalid environment configuration:
+  - PORT="not-a-port": must be a port number (1-65535)
+  - SESSION_DURATION="bogus": must be a duration like "1h", "7d" or "30d"
+```
+
+In Docker this crash-loops the container until the value is corrected or removed. Boolean switches accept
+`true`/`false`, `1`/`0`, `on`/`off`, `yes`/`no` in any casing — anything else counts as malformed. Variables TREK
+does not know are passed through untouched.
+
+`TREK_DB_JOURNAL_MODE` and `TREK_DB_SYNCHRONOUS` are exceptions: they log a warning and fall back instead of
+aborting, because `reset-admin.js` — the way back into a locked-out instance — reads the same two variables and has
+to keep working. The three plugin caps `TREK_PLUGIN_AI_PER_DAY`, `TREK_PLUGIN_NOTIFY_PER_DAY` and
+`TREK_PLUGIN_AUDIT_MAX_ROWS` are read by the plugin host rather than by the boot schema, so a malformed value there
+falls back to the default without a warning. `NODE_ENV` and `TZ` are not validated at all, so a non-standard value
+like `NODE_ENV=staging` still boots.
 
 ---
 
@@ -23,12 +50,13 @@ Complete reference for all environment variables TREK reads.
 | `TZ`                        | Timezone for logs, reminders, and cron jobs (e.g. `Europe/Berlin`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `UTC`                           |
 | `LOG_LEVEL`                 | `info` = concise user actions; `debug` = verbose details                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `info`                          |
 | `DEFAULT_LANGUAGE`          | Default language on the login page — see supported codes below                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `en`                            |
-| `SESSION_DURATION`          | How long a login session stays valid before re-login is required. Used when **"Remember me" is unchecked** on the login form (the default): applies to the `trek_session` JWT `exp` claim, and the cookie is issued as a **browser-session cookie** (no `maxAge`, cleared when the browser closes). Accepts `ms`-style strings: `1h`, `12h`, `7d`, `30d`, `90d`. Invalid values warn at startup and fall back to the default. Does not affect the short-lived MFA challenge token or MCP OAuth tokens (those keep their own TTL). | `24h`                           |
-| `SESSION_DURATION_REMEMBER` | Session length used when the user **ticks "Remember me"** on login: a longer-lived JWT `exp` claim plus a **persistent** `trek_session` cookie whose `maxAge` matches, so the session survives browser restarts. Same `ms`-style format and startup-fallback behaviour as `SESSION_DURATION`.                                                                                                                                                                                                                                     | `30d`                           |
+| `SESSION_DURATION`          | How long a login session stays valid before re-login is required. Used when **"Remember me" is unchecked** on the login form (the default): applies to the `trek_session` JWT `exp` claim, and the cookie is issued as a **browser-session cookie** (no `maxAge`, cleared when the browser closes). Accepts `ms`-style strings: `1h`, `12h`, `7d`, `30d`, `90d`. Invalid values abort startup — see Startup Validation above. Does not affect the short-lived MFA challenge token or MCP OAuth tokens (those keep their own TTL). | `24h`                           |
+| `SESSION_DURATION_REMEMBER` | Session length used when the user **ticks "Remember me"** on login: a longer-lived JWT `exp` claim plus a **persistent** `trek_session` cookie whose `maxAge` matches, so the session survives browser restarts. Same `ms`-style format and the same startup validation as `SESSION_DURATION`. Also the lifetime of every SSO session when `OIDC_ONLY=true`, where the login page has no such switch.                                                                                                                                                                                                                                     | `30d`                           |
 | `ALLOWED_ORIGINS`           | Comma-separated origins for CORS and email notification links                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | same-origin                     |
-| `ALLOW_INTERNAL_NETWORK`    | Allow outbound requests to private/RFC-1918 IPs. Set `true` if Immich or other integrated services are on your local network. Loopback (`127.x`) and link-local (`169.254.x`) addresses remain blocked regardless.                                                                                                                                                                                                                                                                                                                | `false`                         |
+| `ALLOW_INTERNAL_NETWORK`    | Allow outbound requests to private/RFC-1918 IPs. Set `true` if Immich, a document store bound through [Document-Sync](Document-Sync) or other integrated services are on your local network. Loopback (`127.x`) and link-local (`169.254.x`) addresses remain blocked regardless, apart from a link-local address listed in `ALLOW_LINK_LOCAL_IPS`.                                                                                                                                                                                                                                                 | `false`                         |
+| `ALLOW_LINK_LOCAL_IPS`      | Single link-local addresses (`169.254.x.x`) TREK may reach after all, comma-separated. Meant for the host gateway of a rootless Podman container, `169.254.1.2`, with an identity provider or another service behind it. OIDC, AI Parsing, plugin OAuth and your own routing engines reach a listed address directly; the other integrations treat it as internal, so they also need `ALLOW_INTERNAL_NETWORK=true`. `169.254.169.x` and `169.254.170.x`, where cloud providers serve metadata and credentials, cannot be listed, and an entry that is not a single link-local IPv4 aborts startup. See [Internal-Network-Access](Internal-Network-Access#a-link-local-address-you-need). | unset |
 | `APP_URL`                   | Public base URL (e.g. `https://trek.example.com`). Required when OIDC is enabled — must match the redirect URI registered with your IdP. Also used as the base URL for email notification links and subscribable calendar feed URLs (the `webcal://`/`https://` links the Subscribe dialog hands to Google/Apple/Outlook).                                                                                                                                                                                                          | —                               |
-| `TREK_WIKI_DIR`             | Where the in-app Help pages (`/help`) read their content from. TREK ships this wiki and serves it from disk, so the docs always match the version you are running. You should not need to set this — it is an escape hatch for unusual layouts. If the directory cannot be found, Help falls back to fetching the public GitHub wiki (which tracks the latest release and needs outbound network access).                                                                                                                            | the bundled `wiki/` directory   |
+| `TREK_WIKI_DIR`             | Where the in-app Help pages (`/help`) read their content from. TREK ships this wiki and serves it from disk, so the docs always match the version you are running. You should not need to set this — it is an escape hatch for unusual layouts. If the directory cannot be found, Help falls back to fetching the repository's `wiki/` folder from the `main` branch on GitHub (which can be ahead of the release you are running, and needs outbound network access).                                                               | the bundled `wiki/` directory   |
 
 ### `HOST` — Source and Proxmox installs only
 
@@ -65,7 +93,7 @@ Setting `ENCRYPTION_KEY` explicitly is recommended so you can back it up indepen
 
 ### `DEFAULT_LANGUAGE` — Supported Codes
 
-You can set `DEFAULT_LANGUAGE` to any of the 22 languages TREK ships. The currently supported codes are:
+You can set `DEFAULT_LANGUAGE` to any of the 23 languages TREK ships. The currently supported codes are:
 
 | Code    | Language           |
 |---------|--------------------|
@@ -91,25 +119,56 @@ You can set `DEFAULT_LANGUAGE` to any of the 22 languages TREK ships. The curren
 | `gr`    | Ελληνικά           |
 | `sv`    | Svenska            |
 | `vi`    | Tiếng Việt         |
+| `ca`    | Català             |
 
-If you set a code that isn't supported, TREK falls back to English (`en`). This list grows as new
+If you set a code that isn't on this list, TREK refuses to start and prints
+`DEFAULT_LANGUAGE="…": must be one of: …`. Leave the variable unset to use English (`en`). This list grows as new
 translations are added to TREK.
 
 ---
 
-## HTTPS / Proxy
+## Outbound HTTP(S) Proxy
+
+TREK can route supported outbound HTTP(S) requests through a proxy by setting the standard variables below. Outbound
+proxying is disabled by default.
+
+| Variable      | Description                                                   | Default |
+|---------------|---------------------------------------------------------------|---------|
+| `HTTP_PROXY`  | Proxy URL for outbound HTTP requests                          | —       |
+| `HTTPS_PROXY` | Proxy URL for outbound HTTPS requests                         | —       |
+| `NO_PROXY`    | Comma-separated hosts or domains that should bypass the proxy | —       |
+
+> **Note:** Proxy environment variables apply to requests made through Node.js's default HTTP dispatcher. Requests
+> handled by TREK's SSRF protection use a dedicated dispatcher and do not use the environment proxy.
+
+> **Container only.** Node ignores these variables unless it is started with `NODE_USE_ENV_PROXY=1`, and the official
+> image sets that for you. On a source or Proxmox install, set `NODE_USE_ENV_PROXY=1` alongside them or nothing will
+> change. On Helm the image already has it, but the chart's ConfigMap does not declare `HTTP_PROXY`, `HTTPS_PROXY` or
+> `NO_PROXY`, so a value under `env:` is dropped; patch the three onto the Deployment instead.
+
+> **Set `NO_PROXY`.** Without it every request goes to the proxy, including the ones TREK makes to itself, such as the
+> container health check. `localhost,127.0.0.1` is a sensible minimum; add your own hosts as needed.
+
+---
+
+## HTTPS / Reverse Proxy
 
 These three variables work together behind a TLS-terminating reverse proxy. See [Reverse-Proxy](Reverse-Proxy) for the
 full explanation.
 
 | Variable                  | Description                                                                                                                                                                                                                                                                             | Default          |
 |---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
-| `FORCE_HTTPS`             | When `true`: 301-redirects HTTP→HTTPS, sends HSTS (`max-age=31536000`), adds CSP `upgrade-insecure-requests`, forces cookie `secure` flag. Only useful behind a TLS proxy. Requires `TRUST_PROXY`.                                                                                      | `false`          |
+| `FORCE_HTTPS`             | When `true`: 301-redirects HTTP→HTTPS, sends HSTS (`max-age=31536000`), adds CSP `upgrade-insecure-requests`, forces cookie `secure` flag. Only useful behind a TLS proxy. Your proxy must send `X-Forwarded-Proto: https`.                                                             | `false`          |
 | `HSTS_INCLUDE_SUBDOMAINS` | When `true`: adds the `includeSubDomains` directive to the HSTS header, extending HTTPS enforcement to all subdomains. Only effective when HSTS is active (`FORCE_HTTPS=true` or `NODE_ENV=production`). Leave `false` if you run other services on sibling subdomains over plain HTTP. | `false`          |
-| `TRUST_PROXY`             | Number of trusted proxy hops. Tells Express to read the real client IP from `X-Forwarded-For` and protocol from `X-Forwarded-Proto`. Defaults to `1` automatically in production. Required for `FORCE_HTTPS` to detect the forwarded protocol.                                          | `1` (production) |
-| `COOKIE_SECURE`           | Controls the `secure` flag on the `trek_session` cookie. Auto-derived as `true` when `NODE_ENV=production` or `FORCE_HTTPS=true`. Set to `false` only as an escape hatch for LAN testing without TLS — not recommended in production.                                                   | auto             |
+| `TRUST_PROXY`             | Number of trusted proxy hops. Tells Express how far into `X-Forwarded-For` to look for the real client IP, and where to read `X-Forwarded-Proto`. Count your hops: with two proxies in front of TREK and `TRUST_PROXY=1`, the IP on every audit row is the inner proxy's. `0` trusts nothing and always uses the socket address. Not required for the `FORCE_HTTPS` redirect, which reads the `X-Forwarded-Proto` header directly — set it for correct client IPs in the audit log, and for the `COOKIE_SECURE` auto-derivation, which goes through `req.secure`. | `1` (production) |
+| `COOKIE_SECURE`           | Controls the `secure` flag on the `trek_session` cookie. Auto-derived as `true` when `NODE_ENV=production`, when `FORCE_HTTPS=true`, or when the request itself arrived over TLS on the outermost hop (`X-Forwarded-Proto: https` with `TRUST_PROXY` set). Set to `false` only as an escape hatch for LAN testing without TLS — not recommended in production.                                                   | auto             |
 
-> **Warning:** `FORCE_HTTPS=true` without `TRUST_PROXY` set causes a redirect loop.
+> **Warning:** `FORCE_HTTPS=true` behind a proxy that does not forward `X-Forwarded-Proto: https` causes a
+> redirect loop — every request looks like plain HTTP to TREK and gets 301'd again. Fix the proxy to send the
+> header. Setting `TRUST_PROXY` does not help: the redirect accepts the raw `X-Forwarded-Proto: https` header on
+> its own, whatever `trust proxy` is set to. (`TRUST_PROXY` only feeds the second half of the check, `req.secure`,
+> which additionally covers a proxy chain that sends a comma-joined `X-Forwarded-Proto` — and production already
+> trusts one hop by default.)
 
 ---
 
@@ -123,8 +182,8 @@ For setup instructions, see [OIDC-SSO](OIDC-SSO).
 | `OIDC_CLIENT_ID`     | OIDC client ID                                                                                                                                                                         | —                      |
 | `OIDC_CLIENT_SECRET` | OIDC client secret                                                                                                                                                                     | —                      |
 | `OIDC_DISPLAY_NAME`  | Label shown on the SSO login button                                                                                                                                                    | `SSO`                  |
-| `OIDC_ONLY`          | Force SSO-only mode: disables password login and registration, overrides Admin > Settings toggles, cannot be changed at runtime. First SSO login becomes admin on a fresh instance.    | `false`                |
-| `OIDC_ADMIN_CLAIM`   | OIDC claim used to identify admin users (e.g. `groups`)                                                                                                                                | —                      |
+| `OIDC_ONLY`          | Force SSO-only mode: disables password login and registration, overrides Admin > Settings toggles, cannot be changed at runtime. First SSO login becomes admin on a fresh instance. Since the login page then has no "Remember me" switch, every SSO session gets the `SESSION_DURATION_REMEMBER` lifetime; shorten that variable for shorter sessions, `SESSION_DURATION` does not apply here.    | `false`                |
+| `OIDC_ADMIN_CLAIM`   | OIDC claim inspected for the admin role. Only takes effect once `OIDC_ADMIN_VALUE` is set.                                                                                             | `groups`               |
 | `OIDC_ADMIN_VALUE`   | Value of the OIDC claim that grants admin role (e.g. `app-trek-admins`)                                                                                                                | —                      |
 | `OIDC_SCOPE`         | Space-separated OIDC scopes to request. **Fully replaces** the default — always include `openid email profile` plus any extra scopes (e.g. add `groups` when using `OIDC_ADMIN_CLAIM`) | `openid email profile` |
 | `OIDC_DISCOVERY_URL` | Override the auto-constructed OIDC discovery endpoint. Required for providers with a non-standard path (e.g. Authentik)                                                                | —                      |
@@ -184,7 +243,7 @@ For setup instructions, see [MCP-Overview](MCP-Overview).
 
 | Variable                   | Description                                                                                             | Default |
 |----------------------------|---------------------------------------------------------------------------------------------------------|---------|
-| `MCP_RATE_LIMIT`           | Max MCP API requests per user per minute                                                                 | `300`   |
+| `MCP_RATE_LIMIT`           | Max MCP API requests per minute, counted **per user and per OAuth client** — a user connected from two MCP clients gets this budget twice. Requests made with a static `trek_` token or a session JWT carry no client and share one further bucket per user. | `300`   |
 | `MCP_MAX_SESSION_PER_USER` | Max concurrent MCP sessions per user. At the cap the user's least-recently-active session is closed to make room — requests are not rejected. | `20`    |
 | `MCP_SESSION_TTL`          | Session idle timeout in seconds (max 86400)                                                              | `3600`  |
 | `MCP_SSE_KEEPALIVE`        | SSE keep-alive ping interval in seconds — keeps the stream alive through reverse proxies. `0` disables the pings; an open stream still refreshes the session's idle timeout. | `25`    |
@@ -209,19 +268,28 @@ Request bodies validated with Zod are documented automatically from the same sch
 |-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
 | `KITINERARY_EXTRACTOR_PATH` | Full path to the `kitinerary-extractor` binary. When unset, TREK searches `/usr/lib/*/libexec/kf6/kitinerary-extractor` and then `PATH`. Set this if you install the binary to a non-standard location. | auto-detected |
 
-The official TREK Docker image bundles the binary automatically: on amd64 it downloads the static release from
-`https://cdn.kde.org/ci-builds/pim/kitinerary/`; on arm64 it installs `libkitinerary-bin` via apt (Debian trixie). When
-running TREK from source, install `libkitinerary-bin` (Debian trixie / Ubuntu 25.04+) or download the static binary
-directly and place it anywhere on `PATH`. The `GET /api/health/features` endpoint returns `{ "bookingImport": true }`
-when the binary is found, and the Import button in the Reservations panel is hidden when it is not.
+The official TREK Docker image bundles the binary automatically: on both amd64 and arm64 it installs
+`libkitinerary-bin` via apt (Debian trixie) and symlinks it to `/usr/local/bin/kitinerary-extractor`, which the image
+also pins via `KITINERARY_EXTRACTOR_PATH`. When running TREK from source, install `libkitinerary-bin` (Debian trixie /
+Ubuntu 25.04+). There is no static binary to download; to run a newer extractor than your distribution
+packages, build one and point `KITINERARY_EXTRACTOR_PATH` at it, or derive an image from the official one with your own
+apt sources. The extractor's version is in the startup log and in `GET /api/admin/system-info` (admin only) — worth
+checking before reporting that a provider is unsupported, since a missing vendor script and an unsupported provider
+both come back empty. `LOG_LEVEL=debug` additionally passes the extractor's raw stderr through, including the
+`JS ERROR` lines that name a failing script; it is read once at startup, so it needs a restart. The
+`GET /api/health/features` endpoint returns `{ "bookingImport": true }` when the binary is found. The Import button in
+the Reservations panel is hidden only when **neither** extractor is available — an instance running the AI Parsing
+addon still offers it with `bookingImport: false`.
 
-Booking import can also fall back to an AI model for documents KDE Itinerary can't read. That feature (the **AI Parsing** addon) is configured entirely in the UI and needs no environment variables — see [AI-Booking-Import](AI-Booking-Import).
+Booking import can also fall back to an AI model for documents KDE Itinerary can't read. That feature (the **AI Parsing** addon) is configured in the UI; the only environment variable it reads is `LLM_TIMEOUT_MS` below. See [AI-Booking-Import](AI-Booking-Import).
 
 ---
 
 ## Public Transit (Transitous)
 
 Public-transit routing in the planner is powered by [Transitous](https://transitous.org/), a free community MOTIS service — no API key is required. See [Transport: Flights, Trains, Cars](Transport-Flights-Trains-Cars) for the feature itself.
+
+An admin can switch the backend under **Admin → Settings → API Keys → Transit Provider**: **Transitous (free)** is the default and the fallback, **Google** answers with the Google API key set on the same card and is billed per search. While no Google key is set, searches keep going to Transitous. `TRANSIT_API_URL` below only applies to the Transitous path.
 
 | Variable          | Description                                                                                                                                                                                                                             | Default                     |
 |-------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------|
@@ -250,12 +318,93 @@ To get a key: create a free account at [unsplash.com/developers](https://unsplas
 
 ---
 
+## Place Search (TREK Places API)
+
+TREK's own place index, the [TREK Places API](TREK-Places-API), answers the suggestions and, together with OpenStreetMap, the full search in the place form, the category buttons on the trip map, the Road trip search along the drive, import geocoding and the offline download of a trip's surroundings. It needs no key, it is on by default, and there is no switch for it in the admin panel: whether searches leave the instance is set here.
+
+| Variable              | Description | Default |
+|-----------------------|-------------|---------|
+| `TREK_PLACES_ENABLED` | Set to `false` to stop asking the index. Search then works as it did before 4.3.0: OpenStreetMap on an install without a key, the keyed provider (Google or Amap) when one is set, the Overpass mirrors for the category buttons, and no places downloaded for offline search. It is a boolean switch like the others on this page: `false`, `0`, `off` and `no` in any casing switch it off, a value that is not boolean-like aborts startup, and unset or blank leaves the index on. | on |
+| `TREK_PLACES_URL`     | Base URL of a copy of the service you run yourself; it has to answer the same `/v1` API. Unset or blank uses the public service. A trailing slash is stripped, and a value that is not a full URL aborts startup. It is configuration rather than user input and is not run through the SSRF guard, so an address on your LAN or Docker network works without `ALLOW_INTERNAL_NETWORK`. | `https://places.liketrek.com` |
+
+On Helm both go under `env:` in `values.yaml`. The chart passes `TREK_PLACES_ENABLED` through whenever it is set at all, so an unquoted `false` or `--set env.TREK_PLACES_ENABLED=false` reaches the container as well.
+
+---
+
+## Place Search (Amap / 高德地图)
+
+Google Places is unreachable from most networks inside mainland China, and OpenStreetMap's coverage of Chinese POIs
+(restaurants, shops, the things a trip is actually made of) is thin and rarely in Chinese. TREK can put
+[Amap (高德地图)](https://lbs.amap.com/) in the slot Google otherwise holds: the TREK Places index and OpenStreetMap
+still answer first, Amap answers when they have nothing, and autocomplete, place details and reverse geocoding go
+through it. There is an Amap basemap to match (see [[Map Settings|Map-Settings]]).
+
+| Variable          | Description                                                                                                                                                                                            | Default                     |
+|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------|
+| `AMAP_API_KEY`    | Amap **Web 服务** (web service) key. When set, it takes priority over any key configured in **Admin → Settings → API Keys**.                                | unset                       |
+| `AMAP_API_SECRET` | The private secret (数字签名) of that key. Required exactly when the key was created with signing enabled: such a key rejects every unsigned request. Leave unset otherwise.                                | unset                       |
+| `AMAP_API_BASE`   | Send the calls somewhere other than `https://restapi.amap.com`: an egress proxy, a cache, a gateway that holds the credential. The replacement has to speak the same API.      | `https://restapi.amap.com`  |
+
+**Get a key** at [console.amap.com](https://console.amap.com/dev/key/app): create an application, then add a key of
+type **Web 服务**. A **Web 端 (JS API)** key is a different kind of credential and will be rejected with
+`INVALID_USER_KEY`. This is the single most common misconfiguration.
+
+**Two ways to configure it**, pick one; the env var wins if both are present:
+
+1. **Environment variable** (this page): instance-wide, ideal for Docker/Helm where you already manage config as env. In the chart the key and the secret are credentials and go under `secretEnv:`, not `env:`; only `AMAP_API_BASE` is a plain `env:` value.
+2. **Admin → Settings → API Keys**: paste it into the **Amap (高德地图) API Key** field. Stored encrypted at rest.
+
+Setting a key is not enough on its own: **Admin → Settings → API Keys → Place search provider** decides which keyed
+provider answers. `Automatic`, the default, keeps Google when a Google key is configured, then takes Amap, then
+nobody, so adding an Amap key never silently moves an existing install off Google. Choose **Amap** explicitly to make
+it the provider.
+
+### Coordinates
+
+Amap speaks **GCJ-02**, the offset datum Chinese law requires published maps to use; everything TREK stores is
+**WGS-84**. The conversion happens at the boundary, in both directions, so what lands in the database, in a GPX export
+or on a map is always WGS-84: a place added through Amap and opened in OpenStreetMap later is in the right spot. The
+place also keeps the Amap id it was found by, so it keeps opening against Amap whichever provider is selected later.
+You do not need to configure anything for this, but it is worth knowing if you compare raw coordinates against Amap's
+own website, which will differ by a few hundred metres.
+
+---
+
 ## Storage & Paths
 
-| Variable                 | Description                                                                                                                                                                                                                                            | Default                 |
-|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| `TREK_PLACE_PHOTO_DIR`   | Directory where cached Google place photos are stored. Created recursively on boot. Set this to point photo storage at a dedicated mounted volume.                                                                                                     | `uploads/photos/google` |
-| `BACKUP_UPLOAD_LIMIT_MB` | Maximum **compressed** size (in MB) of a restore-backup archive that may be uploaded. Raise it if your backups (which include the `uploads/` directory) exceed the default. Non-positive or invalid values log a warning and fall back to the default. | `500`                   |
+Storage backends and category assignment are configured in
+[[Admin: Storage|Admin-Storage]] (or a seed-once `storage-config.json`), not
+through environment variables. `TREK_PLACE_PHOTO_DIR` below is unaffected.
+
+| Variable                     | Description                                                                                                                                                                                                                                            | Default                 |
+|------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
+| `TREK_PLACE_PHOTO_DIR`       | Directory where cached Google place photos are stored. Created recursively on boot. Set this to point photo storage at a dedicated mounted volume.                                                                                                     | `uploads/photos/google` |
+| `BACKUP_UPLOAD_LIMIT_MB`     | Maximum **compressed** size (in MB) of a restore-backup archive that may be uploaded. Raise it if your backups (which include the `uploads/` directory) exceed the default. Non-positive or invalid values abort startup. | `500`                   |
+| `BACKUP_MAX_DECOMPRESSED_MB` | Maximum **decompressed** size (in MB) of a restore-backup archive — the zip-bomb guard. Independent of `BACKUP_UPLOAD_LIMIT_MB` and enforced on both restore paths, so a restore that fits the upload cap can still be refused with `Backup exceeds the maximum decompressed size.` Raise both when restoring a very large instance. | `5120` (5 GB)          |
+| `TREK_DB_JOURNAL_MODE`       | SQLite [journal mode](https://sqlite.org/pragma.html#pragma_journal_mode): `DELETE`, `TRUNCATE`, `PERSIST`, `MEMORY`, `WAL` or `OFF`. Set `DELETE` when the data directory lives on network storage — see below. Values SQLite doesn't know log a warning and fall back. | `WAL`                   |
+| `TREK_DB_SYNCHRONOUS`        | SQLite [synchronous](https://sqlite.org/pragma.html#pragma_synchronous) level: `OFF`, `NORMAL`, `FULL` or `EXTRA`. The default follows the journal mode — `NORMAL` under WAL (what SQLite itself uses there), `FULL` otherwise, because a rollback journal at `NORMAL` can lose committed transactions on a power cut. | `NORMAL` / `FULL`       |
+
+### Running the database on network storage
+
+WAL is the right mode on a local disk and stays the default. It coordinates readers and writers through a shared-memory
+file (`travel.db-shm`) and memory mapping, and [SQLite's own documentation](https://sqlite.org/wal.html#noshm) says that
+combination is not safe on filesystems that don't implement those primitives properly. In practice that means Azure App
+Service (Linux), and SMB/NFS volumes mounted from a NAS or a PaaS host. If your `data/` directory is one of those, set:
+
+```
+TREK_DB_JOURNAL_MODE=DELETE
+```
+
+The journal mode is written into the database file header, not held per connection, so it survives restarts and applies
+from the next boot onward. The startup log prints what is actually in effect:
+
+```
+[DB] journal_mode=DELETE, synchronous=FULL
+```
+
+The maintenance tools that open the same file — `reset-admin.js` and `scripts/migrate-encryption.ts` — read the same two
+variables, so run them with the same environment (`docker exec` into the container does this for you). Otherwise the
+next key rotation or admin reset would quietly switch the file back to WAL.
 
 ---
 
@@ -263,9 +412,13 @@ To get a key: create a free account at [unsplash.com/developers](https://unsplas
 
 | Variable                  | Description                                                                                                                                                                                                                                                                                                                | Default             |
 |---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------|
-| `IDEMPOTENCY_TTL_SECONDS` | How long (in seconds) stored idempotency keys are kept before garbage collection. The offline client replays queued mutations with their `X-Idempotency-Key` on reconnect, so this must exceed the longest expected offline window or a replay could create a duplicate. Invalid values silently fall back to the default. | `2592000` (30 days) |
-| `OVERPASS_URL`            | Custom [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) endpoint(s) used by the map's POI "explore" search, comma-separated. When set it **replaces** the bundled public mirrors — point it at an internal or self-hosted Overpass instance when the public mirrors are unreachable from your network (e.g. firewalled/locked-down egress in a Kubernetes cluster). Entries that aren't valid `http(s)` URLs are ignored. If you don't run your own Overpass but the public mirrors throttle TREK, first make sure `APP_URL` (or `ALLOWED_ORIGINS`) is set: that alone gives outbound Overpass/Nominatim requests a unique User-Agent, which the public mirrors rate-limit far less. | bundled public mirrors |
-| `OVERPASS_TIMEOUT_MS`     | Per-endpoint timeout (in milliseconds) for Overpass POI requests. Endpoints race in parallel and one that hasn't answered within this window is abandoned so a faster mirror can win. Raise it if you run a slow self-hosted Overpass instance. Invalid values fall back to the default. | `12000` |
+| `IDEMPOTENCY_TTL_SECONDS` | How long (in seconds) stored idempotency keys are kept before garbage collection. The offline client replays queued mutations with their `X-Idempotency-Key` on reconnect, so this must exceed the longest expected offline window or a replay could create a duplicate. Invalid values abort startup. | `2592000` (30 days) |
+| `NOMINATIM_URL`           | Custom HTTP(S) Nominatim base URL for every geocoding call the server makes: place search, reverse lookup, place details and the Atlas region fill. When set it **replaces** the public OpenStreetMap service for all of them, with no fallback, so point it at an instance whose import covers the places your users plan and that speaks the Nominatim API (`/search`, `/reverse`, `/lookup`). Photon, Geoapify and LocationIQ are not drop-in replacements. TREK keeps its client-side spacing of roughly one request a second whichever instance answers, so this changes where the requests go, not how fast they are sent. Unset or blank uses the default. With the TREK Places API on, suggestions while typing come from the TREK API's own OpenStreetMap layer and reach Nominatim only when the TREK API has nothing. | `https://nominatim.openstreetmap.org` |
+| `OVERPASS_URL`            | Custom [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) endpoint(s), comma-separated, for the map's category buttons, the Road trip search along the drive and the `search_pois` MCP tool whenever the TREK Places API has no answer or is switched off. When set it **replaces** the bundled public mirrors: point it at an internal or self-hosted Overpass instance when the public mirrors are unreachable from your network (e.g. firewalled/locked-down egress in a Kubernetes cluster). Entries that aren't valid `http(s)` URLs are ignored. If you don't run your own Overpass but the public mirrors throttle TREK, first make sure `APP_URL` (or `ALLOWED_ORIGINS`) is set: that alone gives outbound Overpass/Nominatim requests a unique User-Agent, which the public mirrors rate-limit far less. One request is not covered: the tag lookup behind an OpenStreetMap place's details (website, phone, Wikidata) still goes to `overpass-api.de` whatever this is set to, and where that host is unreachable those details fall back to the tags Nominatim returns. | bundled public mirrors |
+| `OVERPASS_TIMEOUT_MS`     | Per-endpoint timeout (in milliseconds) for Overpass POI requests. Endpoints race in parallel and one that hasn't answered within this window is abandoned so a faster mirror can win. The query itself gives Overpass 20 seconds of work, so a lower value hangs up on answers that were still coming; that is why the default rose from `12000` in 4.3.0. Drop any lower value you set by hand, and raise it only for a slow self-hosted Overpass instance. Invalid values abort startup. | `25000` |
+| `LLM_TIMEOUT_MS`          | How long (in milliseconds) one AI-parsing call may take before it is abandoned. One ceiling for every provider, applied to the abort signal and to the underlying HTTP client alike. The default is generous so heavier parsing work fits without a code change; lower it if you use a cloud provider and would rather fail fast. Invalid values abort startup. | `900000` (15 min) |
+
+> **Routing is not set here.** The routing engines behind the planner and the [Road-Trip](Road-Trip) addon (OSRM for routes, Valhalla for avoiding toll roads, motorways and ferries) have no environment variable. An admin sets them under **Admin → User Defaults** as **Own routing engine** and **Own Valhalla instance**, and they take effect after a restart. `OVERPASS_URL` and `OVERPASS_TIMEOUT_MS` above also apply to the road trip's search along the route.
 
 ---
 
@@ -296,15 +449,18 @@ The plugin system is **on by default**. The runtime and the Admin → Plugins pa
 | `TREK_PLUGINS_DATA_DIR`           | Directory for each plugin's own **data** (its private SQLite file). Kept separate from the code tree; persist it as a volume too.                                                                                     | `<data>/plugins-data`                                                               |
 | `TREK_PLUGIN_REGISTRY_URL`        | Override the plugin registry index the *Discover* tab browses. Point it at your own fork or mirror of the registry.                                                                                                  | `https://raw.githubusercontent.com/liketrek/TREK-Plugins/main/dist/index.json` |
 | `TREK_PLUGIN_MAX_RSS_MB`          | Per-plugin memory ceiling in MB. A plugin process that exceeds it is stopped.                                                                                                                                         | `300`                                                                               |
-| `TREK_PLUGIN_PERMISSIONS`         | Set to `off` to opt **out** of the Node.js OS-level permission sandbox for plugin child processes (not recommended). Any other value keeps the sandbox on.                                                            | `on`                                                                                |
+| `TREK_PLUGIN_PERMISSIONS`         | Set to any falsy value (`off`, `false`, `0`, `no` — any casing) to opt **out** of the Node.js OS-level permission sandbox for plugin child processes (not recommended). A truthy value, or leaving it unset, keeps the sandbox on; anything outside that set is rejected at boot.                                                            | `on`                                                                                |
 | `TREK_PLUGIN_ALLOW_PRIVATE_EGRESS`| Set to `on` to let a plugin's declared outbound hosts resolve to private/internal addresses (e.g. a service on your LAN). By default connections to private, loopback, link-local and metadata addresses are refused. | off (private egress blocked)                                                        |
-| `TREK_PLUGINS_DEV_LINK`           | **Development only.** Set to exactly `1` to enable *dev-link*: registering a plugin from a local build directory and hot-reloading it against a live instance's data. Dev-linked code bypasses the install-time signature/integrity checks and (under `npm run dev`) runs with the OS permission jail off, so it must never be reachable in production — any value other than `1` (including absent) keeps it off. Data access is still fully gated by the capability host. | off (disabled)                                                                      |
+| `TREK_PLUGINS_DEV_LINK`           | **Development only.** Set to any truthy value (`1`, `true`, `on`, `yes` — any casing) to enable *dev-link*: registering a plugin from a local build directory and hot-reloading it against a live instance's data. Dev-linked code bypasses the install-time signature/integrity checks and (under `npm run dev`) runs with the OS permission jail off, so it must never be reachable in production — absent, blank or an explicitly falsy value (`0`, `false`, `off`, `no`) keeps it off. Data access is still fully gated by the capability host. | off (disabled)                                                                      |
+| `TREK_PLUGINS_IGNORE_TREK_RANGE` | Set to any truthy value (`1`, `true`, `on`, `yes` — any casing) to turn the plugin **TREK-version gate** into a warning. A plugin whose `trek` range does not admit the running TREK — or that declares no range at all — can then be installed (registry, sideload, dev-link), updated and activated, and "install latest" takes the newest published version rather than the newest compatible one. Every bypass is logged, the install response carries a `trekRangeBypassed` marker, and the admin panel shows a *Version checks off* pill, a warning dialog before/after each such install, and a persistent chip on the row. Use it only when a plugin author has not yet updated their range for your TREK: nothing guarantees the plugin works, and in rare cases a mismatched plugin can corrupt TREK data. The plugin-API version gate is **not** lifted. Absent, blank or falsy keeps the gate hard. | off (gate enforced) |
 | `TREK_PLUGIN_AI_PER_DAY`          | Per-plugin **daily** cap on shared-LLM broker calls (`ai.complete` / `ai.extract`). Bounds how much a single plugin can spend on the admin's LLM quota per UTC day, independent of its granted permissions. Counts persist across restarts within the same day; set to `0` to disable the AI broker entirely. Generous by design — only bites a runaway plugin. | `200`                                                                               |
 | `TREK_PLUGIN_NOTIFY_PER_DAY`      | Per-plugin **daily** cap on user-notification broker calls (`notify.send`), so one plugin can't spam a user. Same UTC-day window and restart-safe counting as `TREK_PLUGIN_AI_PER_DAY`; set to `0` to disable the notify broker. | `100`                                                                               |
 | `TREK_PLUGIN_RPC_PER_SEC`         | Sustained rate limit (calls **per second**) for a plugin's host RPC calls (`ctx.*`) once its burst allowance is spent. Prevents a tight-loop plugin from starving the single-threaded host. | `20`                                                                                |
 | `TREK_PLUGIN_RPC_BURST`           | Burst allowance — how many host RPC calls a plugin may fire back-to-back before the per-second limit applies. | `60`                                                                                |
 | `TREK_PLUGIN_RPC_INFLIGHT`        | Max concurrent host→plugin RPC dispatches allowed for a single plugin at once (concurrency cap). | `16`                                                                                |
-| `TREK_PLUGIN_AUDIT_MAX_ROWS`      | Per-plugin retention cap for the capability audit log (kept in the shared `trek.db`). The newest N rows per plugin are retained and older ones pruned; the retained window stays tamper-evident. Set to `0` to disable pruning. | `20000`                                                                             |
+| `TREK_PLUGIN_LOG_PER_SEC`         | Sustained rate limit (log lines **per second**) for a plugin's log output — `ctx.log.*`, the child process's stdout/stderr, and unknown plugin event topics — once its burst allowance is spent. This path is **not** covered by the RPC limiter above, and `warn`/`error` lines land in a synchronous `plugin_error_log` INSERT + prune on the host thread, so this is what stops a `while (true) ctx.log.error(...)` loop from pinning the instance. Excess lines are dropped; when logging resumes, one `warn` line reports how many were dropped, so the throttling is visible to an operator. | `10`                                                                                |
+| `TREK_PLUGIN_LOG_BURST`           | Burst allowance — how many log lines a plugin may emit back-to-back before the per-second limit applies. | `50`                                                                                |
+| `TREK_PLUGIN_AUDIT_MAX_ROWS`      | Per-plugin retention cap for the capability audit log (kept in the shared `data/travel.db`). The newest N rows per plugin are retained and older ones pruned; the retained window stays tamper-evident. Set to `0` to disable pruning. | `20000`                                                                             |
 
 All of these are optional — the defaults are safe. Set `TREK_PLUGINS_ENABLED=false` if you want to switch the plugin system off entirely.
 

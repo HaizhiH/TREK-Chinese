@@ -17,10 +17,16 @@ export interface GeoPosition {
 
 export type TrackingMode = 'off' | 'show' | 'follow'
 
+// Typed counterpart to the raw error string. The string is whatever the
+// browser produced (raw WebKit English on iOS), so the UI keys off this
+// code to show a localized, actionable message instead.
+export type GeoWatchErrorCode = 'permission-denied' | 'unavailable' | 'timeout' | 'unsupported' | 'insecure-context'
+
 export interface UseGeolocationReturn {
   position: GeoPosition | null
   mode: TrackingMode
   error: string | null
+  errorCode: GeoWatchErrorCode | null
   /** Toggle through off → show → follow → off. Also triggers iOS orientation permission on first call. */
   cycleMode: () => Promise<void>
   /** Force-set mode. Accepts a function for derived updates like `prev => prev === 'follow' ? 'show' : prev`. */
@@ -40,15 +46,81 @@ function smoothAngle(prev: number | null, next: number, alpha = 0.25): number {
   return (prev + delta * alpha + 360) % 360
 }
 
+export type GeoOnceErrorCode = 'unsupported' | 'insecure-context' | 'permission-denied' | 'unavailable' | 'timeout'
+
+export class GeoOnceError extends Error {
+  code: GeoOnceErrorCode
+
+  constructor(code: GeoOnceErrorCode, message?: string) {
+    super(message || code)
+    this.name = 'GeoOnceError'
+    this.code = code
+  }
+}
+
+// One-shot position fix for form fields (e.g. journal entry location).
+// Unlike the watch below, a cached fix up to a minute old is fine here —
+// the user is standing where they're journaling — so maximumAge is
+// generous to make the button feel instant when the OS already has a fix.
+const ONCE_OPTIONS: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+
+export function getCurrentPositionOnce(
+  options: PositionOptions = ONCE_OPTIONS,
+): Promise<GeoPosition> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) {
+      reject(new GeoOnceError('unsupported'))
+      return
+    }
+    // Browsers hard-block geolocation outside secure contexts; surface that
+    // explicitly since self-hosted instances served over plain HTTP hit it.
+    if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      reject(new GeoOnceError('insecure-context'))
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        heading: pos.coords.heading ?? null,
+        speed: pos.coords.speed ?? null,
+        timestamp: pos.timestamp,
+      }),
+      (err) => reject(new GeoOnceError(
+        err.code === err.PERMISSION_DENIED ? 'permission-denied'
+          : err.code === err.TIMEOUT ? 'timeout'
+          : 'unavailable',
+        err.message,
+      )),
+      options,
+    )
+  })
+}
+
 export function useGeolocation(): UseGeolocationReturn {
   const [position, setPosition] = useState<GeoPosition | null>(null)
   const [mode, setModeState] = useState<TrackingMode>('off')
+  // What setMode's updater form reads instead of a state updater's argument:
+  // React may run an updater more than once per commit, and subscribing from
+  // inside one would leak a watch (see setMode below).
+  const modeRef = useRef<TrackingMode>(mode)
+  modeRef.current = mode
   const [error, setError] = useState<string | null>(null)
+  const [errorCode, setErrorCode] = useState<GeoWatchErrorCode | null>(null)
   const watchIdRef = useRef<number | null>(null)
+  // True between the start of startWatch and the watchPosition call it awaits.
+  const startingRef = useRef(false)
+  // Bumped by every start and by every stop, so a run parked on the iOS prompt can
+  // tell it has been superseded — clearing startingRef alone can't, a start that came
+  // after the stop has set it again by then.
+  const startRunRef = useRef(0)
   const orientationHandlerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null)
   const headingRef = useRef<number | null>(null)
 
   const stopWatch = useCallback(() => {
+    startingRef.current = false
+    startRunRef.current++
     if (watchIdRef.current !== null) {
       try { navigator.geolocation.clearWatch(watchIdRef.current) } catch { /* noop */ }
       watchIdRef.current = null
@@ -64,9 +136,25 @@ export function useGeolocation(): UseGeolocationReturn {
   const startWatch = useCallback(async () => {
     if (!('geolocation' in navigator)) {
       setError('Geolocation is not supported in this browser')
+      setErrorCode('unsupported')
       return false
     }
+    // Same block getCurrentPositionOnce guards against: on a plain-HTTP origin
+    // the browser answers PERMISSION_DENIED, which would otherwise read as a
+    // revoked device permission and send the user into their OS settings.
+    if (window.isSecureContext === false) {
+      setError('Location requires a secure (HTTPS) connection')
+      setErrorCode('insecure-context')
+      return false
+    }
+    // Already watching, or still waiting on the iOS prompt below: a second
+    // subscription would overwrite watchIdRef and leave the first one running
+    // with nobody left holding its id.
+    if (startingRef.current || watchIdRef.current !== null) return true
+    startingRef.current = true
+    const run = ++startRunRef.current
     setError(null)
+    setErrorCode(null)
 
     // iOS: ask for orientation permission up front; on Android and desktop
     // no prompt is needed and the method is undefined.
@@ -79,6 +167,9 @@ export function useGeolocation(): UseGeolocationReturn {
         }
       } catch { /* older webkit throws — ignore and proceed */ }
     }
+    // Stopped (or restarted) while the prompt was open: subscribing now would leave a
+    // watch running that nobody holds the id of any more.
+    if (startRunRef.current !== run) return false
 
     // Device orientation → compass heading. `alpha` is rotation around the
     // Z-axis (0 = facing magnetic north on most devices). The webkit-only
@@ -107,8 +198,13 @@ export function useGeolocation(): UseGeolocationReturn {
     window.addEventListener('deviceorientationabsolute', onOrientation as EventListener)
     window.addEventListener('deviceorientation', onOrientation as EventListener)
 
+    startingRef.current = false
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
+        // A fix arriving means any earlier failure (timeout, no signal)
+        // has recovered, so clear the error state alongside it.
+        setError(null)
+        setErrorCode(null)
         setPosition({
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
@@ -122,6 +218,12 @@ export function useGeolocation(): UseGeolocationReturn {
       },
       (err) => {
         setError(err.message || 'Location unavailable')
+        setErrorCode(
+          err.code === err.PERMISSION_DENIED ? 'permission-denied'
+            : err.code === err.POSITION_UNAVAILABLE ? 'unavailable'
+            : err.code === err.TIMEOUT ? 'timeout'
+            : null,
+        )
         // Stay subscribed so a later fix can still recover (e.g. GPS
         // lock takes a while indoors). Only fully stop on permission denial.
         if (err.code === err.PERMISSION_DENIED) {
@@ -139,17 +241,18 @@ export function useGeolocation(): UseGeolocationReturn {
   }, [stopWatch])
 
   const setMode = useCallback((m: TrackingMode | ((prev: TrackingMode) => TrackingMode)) => {
-    setModeState(prev => {
-      const next = typeof m === 'function' ? m(prev) : m
-      if (next === 'off') {
-        stopWatch()
-        setPosition(null)
-      } else if (watchIdRef.current === null) {
-        // started externally but no watch yet — start it
-        startWatch()
-      }
-      return next
-    })
+    const next = typeof m === 'function' ? m(modeRef.current) : m
+    // Kept in step here as well, so two setMode calls batched into one commit
+    // still see each other's result.
+    modeRef.current = next
+    setModeState(next)
+    if (next === 'off') {
+      stopWatch()
+      setPosition(null)
+    } else if (watchIdRef.current === null) {
+      // started externally but no watch yet — start it
+      void startWatch()
+    }
   }, [startWatch, stopWatch])
 
   const cycleMode = useCallback(async () => {
@@ -167,5 +270,5 @@ export function useGeolocation(): UseGeolocationReturn {
 
   useEffect(() => stopWatch, [stopWatch])
 
-  return { position, mode, error, cycleMode, setMode }
+  return { position, mode, error, errorCode, cycleMode, setMode }
 }

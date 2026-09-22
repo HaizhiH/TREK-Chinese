@@ -29,6 +29,8 @@ function mockAmap() {
     addControl: vi.fn(),
     destroy: vi.fn(),
     on: vi.fn(),
+    off: vi.fn(),
+    getZoom: () => 14,
     remove: vi.fn(),
     setFitView: vi.fn(),
     setMapStyle: vi.fn(),
@@ -39,6 +41,9 @@ function mockAmap() {
     this.setContent = vi.fn((content) => {
       this.options.content = content;
     });
+    this.show = vi.fn();
+    this.hide = vi.fn();
+    this.setPosition = vi.fn();
     this.setAnchor = vi.fn();
     this.setOffset = vi.fn();
     this.setzIndex = vi.fn();
@@ -75,6 +80,60 @@ function mockAmap() {
 }
 
 describe('MapViewAmap', () => {
+  it('refits explicit focus points independently of the day fit key', async () => {
+    const { map, AMap } = mockAmap();
+    const props = { jsKey: 'key', securityCode: 'code', fitKey: 0 };
+    const { rerender } = render(
+      <MapViewAmap
+        {...props}
+        focusPoints={[
+          [39, 116],
+          [40, 117],
+        ]}
+      />
+    );
+    sdk.resolve(AMap);
+    await waitFor(() => expect(map.setFitView).toHaveBeenCalledTimes(1));
+    rerender(
+      <MapViewAmap
+        {...props}
+        focusPoints={[
+          [39, 116],
+          [40, 117],
+        ]}
+      />
+    );
+    expect(map.setFitView).toHaveBeenCalledTimes(1);
+    rerender(
+      <MapViewAmap
+        {...props}
+        focusPoints={[
+          [38, 115],
+          [39, 116],
+        ]}
+        fitPadding={{ top: 10, right: 20, bottom: 30, left: 40 }}
+      />
+    );
+    await waitFor(() => expect(map.setFitView).toHaveBeenCalledTimes(2));
+    expect(map.setFitView.mock.calls[1][2]).toEqual([10, 20, 30, 40]);
+  });
+
+  it('keeps via handles alive when route data or callback identities change', async () => {
+    const { map, AMap } = mockAmap();
+    const via = { id: 7, day_id: 3, lat: 39.9, lng: 116.4 } as any;
+    const props = { jsKey: 'key', securityCode: 'code' };
+    const { rerender } = render(<MapViewAmap {...props} roadtripVias={{ 3: [via] }} onMoveVia={vi.fn()} />);
+    sdk.resolve(AMap);
+    await waitFor(() => expect(AMap.Marker).toHaveBeenCalledTimes(1));
+    const move = vi.fn();
+    rerender(<MapViewAmap {...props} roadtripVias={{ 3: [{ ...via }] }} onMoveVia={move} accessLines={[]} />);
+    expect(AMap.Marker).toHaveBeenCalledTimes(1);
+    const handle = AMap.Marker.mock.results[0].value;
+    handle.on.mock.calls.find(([event]) => event === 'dragend')?.[1]({ lnglat: { getLat: () => 0, getLng: () => 0 } });
+    expect(move).toHaveBeenCalledWith(3, 7, 0, 0);
+    expect(map.off).not.toHaveBeenCalledWith('zoomend', expect.any(Function));
+  });
+
   it('renders initial overlays and fits them after the asynchronous SDK is ready', async () => {
     const onReservationClick = vi.fn();
     const { map, AMap } = mockAmap();

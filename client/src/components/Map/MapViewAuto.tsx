@@ -1,6 +1,6 @@
 import type { GeoPoint, MapsProviderConfigResult } from '@trek/shared';
 import { isInChinaMainland } from '@trek/shared';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { mapsApi } from '../../api/client';
 import { useSettingsStore } from '../../store/settingsStore';
 import { MapView } from './MapView';
@@ -8,9 +8,9 @@ import { MapViewAmap } from './MapViewAmap';
 import { isAmapSessionLocked, wgs84ToAmap } from './amapLoader';
 import type { MapController, MapRendererProvider } from './mapController';
 
-// MapLibre/Mapbox pull in a ~230 KB (gzip) GL engine. Lazy-load the GL renderer so
-// Leaflet-only installs never download it — it ships only once a GL provider is picked.
-const MapViewGL = lazy(() => import('./MapViewGL').then((m) => ({ default: m.MapViewGL })));
+import ErrorBoundary from '../shared/ErrorBoundary';
+import { MapViewGLMapbox, MapViewGLMaplibre } from './glLazy';
+import { useRoadtripHazards } from './useRoadtripHazards';
 
 type Bbox = { south: number; west: number; north: number; east: number };
 
@@ -28,6 +28,7 @@ function initialPoint(props: any): GeoPoint | null {
 
 /** Automatically swaps only the normal trip/collection map; Atlas imports Leaflet directly. */
 export function MapViewAuto(props: any) {
+  const hazards = useRoadtripHazards(props.tripId, !!props.clusterLoosely);
   const provider = useSettingsStore((s) => s.settings.map_provider);
   const token = useSettingsStore((s) => s.settings.mapbox_access_token);
   const darkMode = useSettingsStore((s) => s.settings.dark_mode);
@@ -95,7 +96,7 @@ export function MapViewAuto(props: any) {
   const activeProvider: MapRendererProvider = renderer === 'amap' ? 'amap' : glProvider || 'leaflet';
 
   const handleReady = useCallback(
-    (map: any | null) => {
+    (map: any | null, readyProvider: MapRendererProvider = activeProvider) => {
       mapRef.current = map;
       if (!map) {
         props.onMapReady?.(null);
@@ -103,7 +104,7 @@ export function MapViewAuto(props: any) {
       }
 
       const getView = () => {
-        if (activeProvider === 'amap') {
+        if (readyProvider === 'amap') {
           return {
             center: savedCenterRef.current || initialPoint(props) || { lat: 20, lng: 0 },
             zoom: Number(map.getZoom?.()) || savedZoomRef.current || 3,
@@ -117,15 +118,15 @@ export function MapViewAuto(props: any) {
       };
 
       const controller: MapController = {
-        provider: activeProvider,
+        provider: readyProvider,
         getView,
         setView: async ({ center, zoom }) => {
           savedCenterRef.current = center;
           savedZoomRef.current = zoom;
-          if (activeProvider === 'amap') {
+          if (readyProvider === 'amap') {
             const [converted] = await wgs84ToAmap(window.AMap, [center]);
             map.setZoomAndCenter(zoom, converted);
-          } else if (activeProvider === 'leaflet') {
+          } else if (readyProvider === 'leaflet') {
             map.setView([center.lat, center.lng], zoom);
           } else {
             map.jumpTo({ center: [center.lng, center.lat], zoom });
@@ -133,7 +134,7 @@ export function MapViewAuto(props: any) {
         },
         fit: async (points) => {
           if (!points.length) return;
-          if (activeProvider === 'amap') {
+          if (readyProvider === 'amap') {
             const converted = await wgs84ToAmap(window.AMap, points);
             const lngs = converted.map((point) => Number(point.getLng?.() ?? point[0]));
             const lats = converted.map((point) => Number(point.getLat?.() ?? point[1]));
@@ -144,7 +145,7 @@ export function MapViewAuto(props: any) {
             map.setBounds(bounds, false, [48, 48, 48, 48]);
             return;
           }
-          if (activeProvider === 'leaflet') map.fitBounds(points.map((point) => [point.lat, point.lng]));
+          if (readyProvider === 'leaflet') map.fitBounds(points.map((point) => [point.lat, point.lng]));
           else {
             const lngs = points.map((point) => point.lng);
             const lats = points.map((point) => point.lat);
@@ -154,13 +155,15 @@ export function MapViewAuto(props: any) {
             ]);
           }
         },
-        resize: () => (activeProvider === 'leaflet' ? map.invalidateSize() : map.resize?.()),
-        compass: activeProvider === 'mapbox-gl' || activeProvider === 'maplibre-gl' ? map : null,
+        resize: () => (readyProvider === 'leaflet' ? map.invalidateSize() : map.resize?.()),
+        compass: readyProvider === 'mapbox-gl' || readyProvider === 'maplibre-gl' ? map : null,
       };
       props.onMapReady?.(controller);
     },
     [activeProvider, props.onMapReady]
   );
+
+  const handleFallbackReady = useCallback((map: any | null) => handleReady(map, 'leaflet'), [handleReady]);
 
   const handleViewport = useCallback(
     (bbox: Bbox) => {
@@ -196,6 +199,7 @@ export function MapViewAuto(props: any) {
 
   const common = {
     ...props,
+    hazards: props.hazards ?? hazards.feed?.hazards,
     ...(savedCenter ? { center: savedCenter } : {}),
     ...(savedZoomRef.current != null ? { zoom: savedZoomRef.current } : {}),
     onViewportChange: handleViewport,
@@ -221,10 +225,17 @@ export function MapViewAuto(props: any) {
   }
 
   if (glProvider) {
+    const MapViewGL = glProvider === 'maplibre-gl' ? MapViewGLMaplibre : MapViewGLMapbox;
     return (
-      <Suspense fallback={<MapView {...common} />}>
-        <MapViewGL {...common} glProvider={glProvider} />
-      </Suspense>
+      <ErrorBoundary
+        boundaryId="map:gl"
+        resetKeys={[glProvider]}
+        fallback={<MapView {...common} _onProviderReady={handleFallbackReady} />}
+      >
+        <Suspense fallback={<MapView {...common} _onProviderReady={handleFallbackReady} />}>
+          <MapViewGL {...common} glProvider={glProvider} />
+        </Suspense>
+      </ErrorBoundary>
     );
   }
   return <MapView {...common} />;

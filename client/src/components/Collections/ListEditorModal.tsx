@@ -4,7 +4,7 @@ import Modal from '../shared/Modal'
 import { useCollectionStore } from '../../store/collectionStore'
 import { useToast } from '../shared/Toast'
 import { tripsApi } from '../../api/client'
-import { getApiErrorMessage } from '../../types'
+import { getApiErrorMessage } from '../../utils/apiError'
 import { normalizeLinkUrl } from '../../pages/collections/collectionsModel'
 import type { TranslationFn } from '../../types'
 import type { Collection, CollectionLink } from '@trek/shared'
@@ -122,7 +122,9 @@ export default function ListEditorModal({ target, onClose, onCreated, onRequestD
 
   const save = async () => {
     const trimmed = name.trim()
-    if (!trimmed) return
+    // Enter fires while the create is still in flight, and `createdId` is only
+    // set once it comes back — without this the second one creates a second list.
+    if (!trimmed || saving) return
     // Normalise + keep only links with a url; drop blank rows.
     const cleanLinks = links
       .map(l => ({ label: l.label?.trim() || undefined, url: normalizeLinkUrl(l.url) }))

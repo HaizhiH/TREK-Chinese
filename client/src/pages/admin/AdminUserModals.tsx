@@ -58,13 +58,13 @@ export default function AdminUserModals({ admin, t }: AdminUserModalsProps): Rea
         size="sm"
         footer={
           <div className="flex justify-end gap-3">
-            <button
+            <button type="button"
               onClick={() => setShowCreateUser(false)}
               className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
             >
               {t('common.cancel')}
             </button>
-            <button
+            <button type="button"
               onClick={handleCreateUser}
               className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-700"
             >
@@ -137,13 +137,13 @@ export default function AdminUserModals({ admin, t }: AdminUserModalsProps): Rea
         size="sm"
         footer={
           <div className="flex justify-end gap-3">
-            <button
+            <button type="button"
               onClick={() => setEditingUser(null)}
               className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
             >
               {t('common.cancel')}
             </button>
-            <button
+            <button type="button"
               onClick={handleSaveUser}
               className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-700"
             >
@@ -244,9 +244,11 @@ export default function AdminUserModals({ admin, t }: AdminUserModalsProps): Rea
             justifyContent: 'center',
             padding: 16,
           }}
+          role="presentation"
           onClick={() => setShowUpdateModal(false)}
         >
           <div
+            role="presentation"
             onClick={(e) => e.stopPropagation()}
             style={{ width: '100%', maxWidth: 440, borderRadius: 16, overflow: 'hidden' }}
             className="border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
@@ -392,7 +394,7 @@ docker run -d --name trek \\
             </div>
 
             <div style={{ padding: '0 24px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-              <button
+              <button type="button"
                 onClick={() => setShowUpdateModal(false)}
                 className="bg-slate-900 text-white hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-gray-200"
                 style={{
@@ -420,14 +422,14 @@ docker run -d --name trek \\
         size="sm"
         footer={
           <div className="flex justify-end gap-3">
-            <button
+            <button type="button"
               onClick={() => setShowRotateJwtModal(false)}
               disabled={rotatingJwt}
               className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
             >
               {t('common.cancel')}
             </button>
-            <button
+            <button type="button"
               onClick={async () => {
                 setRotatingJwt(true);
                 try {

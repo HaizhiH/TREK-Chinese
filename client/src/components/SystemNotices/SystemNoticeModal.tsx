@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { Info, AlertTriangle, AlertOctagon, X, ChevronLeft, ChevronRight, Coffee } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,8 @@ import { useSystemNoticeStore } from '../../store/systemNoticeStore.js';
 import type { SystemNoticeDTO } from '../../store/systemNoticeStore.js';
 import { useTranslation, isRtlLanguage } from '../../i18n/index.js';
 import { runNoticeAction } from './noticeActions.js';
+import { ReleaseNoticeModal } from './ReleaseNoticeModal.js';
+import { lockBodyScroll } from '../../utils/bodyScrollLock.js';
 
 const ReactMarkdown = React.lazy(() =>
   import('react-markdown').then(m => ({ default: m.default }))
@@ -77,7 +79,6 @@ interface ContentProps {
   titleId: string;
   bodyId: string;
   isDark: boolean;
-  onDismiss: () => void;
   onDismissAll: () => void;
   onCTA: () => void;
   onSecondaryCTA: () => void;
@@ -90,7 +91,7 @@ interface ContentProps {
   onGoto: (i: number) => void;
 }
 
-function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, titleId, bodyId, isDark, onDismiss, onDismissAll, onCTA, onSecondaryCTA, total, currentPage, canPage, onPrev, onNext, onGoto }: ContentProps) {
+function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, titleId, bodyId, isDark, onDismissAll, onCTA, onSecondaryCTA, total, currentPage, canPage, onPrev, onNext, onGoto }: ContentProps) {
   const { t } = useTranslation();
   const isLastPage = total <= 1 || currentPage === total - 1;
 
@@ -107,7 +108,7 @@ function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, title
     <div className="flex flex-col relative" style={{ flex: '1 1 0', minHeight: '100%' }}>
       {/* Dismiss X button — only on last page so users read all notices */}
       {notice.dismissible && isLastPage && (
-        <button
+        <button type="button"
           onClick={onDismissAll}
           className="absolute top-4 right-4 z-10 p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           aria-label="Dismiss"
@@ -256,7 +257,7 @@ function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, title
         {total > 1 && (
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-2">
-              <button
+              <button type="button"
                 onClick={onPrev}
                 disabled={!canPage || currentPage === 0}
                 aria-label={t('system_notice.pager.prev')}
@@ -266,7 +267,7 @@ function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, title
               </button>
 
               {Array.from({ length: total }, (_, i) => (
-                <button
+                <button type="button"
                   key={i}
                   onClick={() => { if (canPage) onGoto(i); }}
                   aria-label={t('system_notice.pager.goto').replace('{n}', String(i + 1))}
@@ -280,7 +281,7 @@ function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, title
                 />
               ))}
 
-              <button
+              <button type="button"
                 onClick={onNext}
                 disabled={!canPage || currentPage === total - 1}
                 aria-label={t('system_notice.pager.next')}
@@ -302,7 +303,7 @@ function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, title
         <div className="flex flex-col items-center gap-3">
           {ctaLabel && isLastPage ? (
             <div className="flex w-full flex-col sm:flex-row gap-2.5">
-              <button
+              <button type="button"
                 id={`notice-cta-${notice.id}`}
                 onClick={onCTA}
                 className={`flex-1 h-11 inline-flex items-center justify-center gap-2 rounded-lg font-semibold shadow-sm transition active:scale-[0.98] ${
@@ -315,7 +316,7 @@ function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, title
                 {ctaLabel}
               </button>
               {secondaryCtaLabel && (
-                <button
+                <button type="button"
                   id={`notice-cta2-${notice.id}`}
                   onClick={onSecondaryCTA}
                   className={`flex-1 h-11 inline-flex items-center justify-center gap-2 rounded-lg font-semibold shadow-sm transition active:scale-[0.98] ${
@@ -330,7 +331,7 @@ function NoticeContent({ notice, title, body, ctaLabel, secondaryCtaLabel, title
               )}
             </div>
           ) : (notice.dismissible || isLastPage) && (
-            <button
+            <button type="button"
               id={`notice-cta-${notice.id}`}
               onClick={isLastPage ? onDismissAll : onNext}
               className="w-full h-11 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
@@ -383,9 +384,6 @@ function useSystemNoticeModal(notices: SystemNoticeDTO[]) {
   // Sheet scroll offset at the moment the touch began — used to suppress dismiss-drag
   // when the user is scrolled into content and pans down to scroll back up.
   const scrollTopAtTouchStart = useRef(0);
-  // Keep a ref to the current notice id so dismiss/CTA handlers see the latest value
-  const noticeIdRef = useRef<string | null>(null);
-  noticeIdRef.current = notice?.id ?? null;
 
   // Page-slide animation refs.
   // isPageNavRef: set to true just before a user-initiated page change so the
@@ -508,15 +506,14 @@ function useSystemNoticeModal(notices: SystemNoticeDTO[]) {
     return () => document.removeEventListener('keydown', handler);
   }, [visible, idx, notices.length, canPage, language]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Body scroll lock
+  // Body scroll lock. Ref-counted and keyed on a boolean, not on the notice
+  // object: the old version cleared body.overflow on every run of this effect,
+  // which since #1809 would let the page scroll away behind an open sheet.
+  const locksScroll = visible && !!notice;
   useEffect(() => {
-    if (visible && notice) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => { document.body.style.overflow = ''; };
-  }, [visible, notice]);
+    if (!locksScroll) return;
+    return lockBodyScroll();
+  }, [locksScroll]);
 
   // Reset center slot scroll to top on navigation (keyboard / pager buttons).
   useEffect(() => {
@@ -532,27 +529,13 @@ function useSystemNoticeModal(notices: SystemNoticeDTO[]) {
     );
   }
 
-  // Dismiss current notice. The store removes it from the array, and the next
-  // notice naturally shifts into notices[idx]. The clamp effect handles the
-  // edge case where idx was pointing at the last item.
-  function handleDismissById(id: string) {
-    setVisible(false);
-    dismiss(id);
-  }
-
-  function handleDismiss() {
-    const id = noticeIdRef.current;
-    if (id) handleDismissById(id);
-  }
-
   // Dismiss every notice in the current modal list — used by the X button and ESC.
   function handleDismissAll() {
     setVisible(false);
     notices.forEach(n => dismiss(n.id));
   }
 
-  function runCta(cta: SystemNoticeDTO['cta']) {
-    if (!cta) { handleDismissAll(); return; }
+  function runCta(cta: NonNullable<SystemNoticeDTO['cta']>) {
     if (cta.kind === 'nav') {
       navigate(cta.href);
       if (notice?.dismissible !== false) handleDismissAll();
@@ -565,8 +548,9 @@ function useSystemNoticeModal(notices: SystemNoticeDTO[]) {
       if (cta.dismissOnAction !== false) handleDismissAll();
     }
   }
-  function handleCTA() { runCta(notice?.cta); }
-  function handleSecondaryCTA() { runCta(notice?.secondaryCta); }
+  // Both buttons only render when the notice carries the matching cta.
+  function handleCTA() { runCta(notice!.cta!); }
+  function handleSecondaryCTA() { runCta(notice!.secondaryCta!); }
 
   function animatedDismissAll() {
     const sheet = sheetRef.current;
@@ -626,20 +610,24 @@ function useSystemNoticeModal(notices: SystemNoticeDTO[]) {
     notice, canPage, isLastPage, language, t, dur, ease,
     touchStartX, touchStartY, dragLockRef, scrollTopAtTouchStart, isPageNavRef,
     stripRef, sheetRef, prevSlotRef, contentWrapperRef, nextSlotRef,
-    announceIndex, handleDismiss, handleDismissAll, handleCTA, handleSecondaryCTA, animatedDismissAll,
+    announceIndex, handleDismissAll, handleCTA, handleSecondaryCTA, animatedDismissAll,
     handlePrev, handleNext, handleGoto,
   };
 }
 
 type NoticeState = ReturnType<typeof useSystemNoticeModal>;
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Build the NoticeContent props for a given notice + pager slot index.
 function makeContentProps(S: NoticeState, n: SystemNoticeDTO, slotIdx: number): ContentProps {
-  const { t, isDark, canPage, notices, handleDismiss, handleDismissAll, handleCTA, handleSecondaryCTA, handlePrev, handleNext, handleGoto } = S;
+  const { t, isDark, canPage, notices, handleDismissAll, handleCTA, handleSecondaryCTA, handlePrev, handleNext, handleGoto } = S;
   const rawBody = t(n.bodyKey);
+  // The key is escaped into the pattern and the value goes in through a function, so a
+  // value carrying $&, $1 or $` is inserted as typed instead of being expanded.
   const body = n.bodyParams
     ? Object.entries(n.bodyParams).reduce(
-        (s, [k, v]) => s.replace(new RegExp(`\\{${k}\\}`, 'g'), v),
+        (s, [k, v]) => s.replace(new RegExp(`\\{${escapeRe(k)}\\}`, 'g'), () => v),
         rawBody
       )
     : rawBody;
@@ -652,7 +640,6 @@ function makeContentProps(S: NoticeState, n: SystemNoticeDTO, slotIdx: number): 
     titleId: `notice-title-${n.id}`,
     bodyId: `notice-body-${n.id}`,
     isDark,
-    onDismiss: handleDismiss,
     onDismissAll: handleDismissAll,
     onCTA: handleCTA,
     onSecondaryCTA: handleSecondaryCTA,
@@ -683,12 +670,13 @@ function MobileNoticeSheet(S: NoticeState) {
   const nextNotice = notices[idx + 1] ?? null;
 
   return (
-    <div className="fixed inset-0 z-50" role="presentation">
+    <div className="fixed inset-0 z-[var(--z-notice)]" role="presentation">
       {/* Screen-reader page announcements */}
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{pageAnnouncement}</span>
       {/* Backdrop */}
       <div
         className={`absolute inset-0 bg-slate-950/40 backdrop-blur-[2px] transition-opacity ${dur} ${ease} ${visible ? 'opacity-100' : 'opacity-0'}`}
+        role="presentation"
         onClick={notice.dismissible ? animatedDismissAll : undefined}
       />
       {/* Bottom sheet */}
@@ -823,13 +811,16 @@ function MobileNoticeSheet(S: NoticeState) {
             ref={stripRef}
             style={{ display: 'flex', width: '300%', height: '100%', alignItems: 'stretch', transform: 'translateX(-33.333%)' }}
           >
-            <div ref={prevSlotRef} style={{ width: '33.333%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            {/* The side slots are drag previews only: their pager and CTA are a
+                second copy of the centre ones, so they stay out of the a11y tree
+                and the tab order until they become the centre slot. */}
+            <div ref={prevSlotRef} inert aria-hidden="true" style={{ width: '33.333%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
               {prevNotice && <NoticeContent {...makeContentProps(S, prevNotice, idx - 1)} />}
             </div>
             <div ref={contentWrapperRef} style={{ width: '33.333%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
               <NoticeContent {...makeContentProps(S, notice, idx)} />
             </div>
-            <div ref={nextSlotRef} style={{ width: '33.333%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div ref={nextSlotRef} inert aria-hidden="true" style={{ width: '33.333%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
               {nextNotice && <NoticeContent {...makeContentProps(S, nextNotice, idx + 1)} />}
             </div>
           </div>
@@ -851,20 +842,24 @@ function DesktopNoticeModal(S: NoticeState) {
 
   return (
     <div
-      className={`fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-[2px] transition-opacity ${dur} ${ease} ${visible ? 'opacity-100' : 'opacity-0'}`}
+      className={`fixed inset-0 z-[var(--z-notice)] bg-slate-950/40 backdrop-blur-[2px] transition-opacity ${dur} ${ease} ${visible ? 'opacity-100' : 'opacity-0'}`}
       role="presentation"
-      onClick={notice.dismissible && isLastPage ? handleDismissAll : undefined}
     >
       {/* Screen-reader page announcements */}
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{pageAnnouncement}</span>
-      <div className="absolute inset-0 flex items-center justify-center p-4">
+      {/* The dismiss lives on this layer: it covers the backdrop, and the
+          target check keeps a click inside the panel from closing the notice. */}
+      <div
+        className="absolute inset-0 flex items-center justify-center p-4"
+        role="presentation"
+        onClick={notice.dismissible && isLastPage ? (e => { if (e.target === e.currentTarget) handleDismissAll() }) : undefined}
+      >
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
           aria-describedby={bodyId}
           className={`w-full ${maxWidth} rounded-2xl overflow-hidden overflow-y-auto max-h-[90vh] shadow-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all ${dur} ${ease} ${desktopMotion}`}
-          onClick={e => e.stopPropagation()}
         >
           <div ref={contentWrapperRef}>
             <NoticeContent {...makeContentProps(S, notice, idx)} />
@@ -879,5 +874,18 @@ export function ModalRenderer({ notices }: Props) {
   const S = useSystemNoticeModal(notices);
   // No notice to show
   if (!S.notice) return null;
+  // A notice carrying `release` draws its own two-column panel, but keeps this
+  // hook's ESC handling, scroll lock and dismissal.
+  if (S.notice.release && !S.isMobile) {
+    return (
+      <ReleaseNoticeModal
+        notice={S.notice}
+        visible={S.visible}
+        onDismiss={S.handleDismissAll}
+        onCTA={S.handleCTA}
+        onSecondaryCTA={S.handleSecondaryCTA}
+      />
+    );
+  }
   return S.isMobile ? <MobileNoticeSheet {...S} /> : <DesktopNoticeModal {...S} />;
 }

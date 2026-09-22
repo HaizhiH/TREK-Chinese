@@ -1,11 +1,19 @@
+import ChargingInfo from '../Roadtrip/ChargingInfo'
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { avatarSrc } from '../../utils/avatarSrc'
+import { safeHttpUrl } from '../../utils/safeUrl'
 import { openFile } from '../../utils/fileDownload'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { X, Clock, MapPin, ExternalLink, Phone, Banknote, Edit2, Trash2, Plus, Minus, ChevronDown, ChevronUp, FileText, Upload, File, FileImage, Star, Navigation, Map as MapIcon, Users, Mountain, TrendingUp, Bookmark, BookmarkCheck, Copy } from 'lucide-react'
+import { markdownLinkComponents } from '../shared/markdownLink'
+import { X, Clock, MapPin, ExternalLink, Phone, Banknote, Edit2, Trash2, Plus, Minus, ChevronDown, ChevronUp, FileText, Upload, File, FileImage, Star, Navigation, Map as MapIcon, Users, Mountain, TrendingUp, Bookmark, BookmarkCheck, Copy, Route, StickyNote } from 'lucide-react'
 import PlaceAvatar from '../shared/PlaceAvatar'
+import PlaceAvatarUpload from '../shared/PlaceAvatarUpload'
+import PlaceRating from '../shared/StarRating'
+import TrackColorPicker from '../shared/TrackColorPicker'
+import { resolveTrackColor, inheritedTrackColor } from '../Map/trackColors'
+import { filesForPlace } from '../../utils/placeFiles'
 import GuestBadge from '../shared/GuestBadge'
 import StatusBadge from '../Collections/StatusBadge'
 import { generateAmapPlaceUrl } from '../Map/RouteCalculator'
@@ -15,6 +23,8 @@ import { useSettingsStore } from '../../store/settingsStore'
 import { useAddonStore } from '../../store/addonStore'
 import { useSaveToCollectionStore } from '../../store/saveToCollectionStore'
 import { getCategoryIcon } from '../shared/categoryIcons'
+import DawarichIcon from '../shared/DawarichIcon'
+import { Tooltip } from '../shared/Tooltip'
 import { useToast } from '../shared/Toast'
 import { useTranslation, translateApiError } from '../../i18n'
 import { usePluginStore } from '../../store/pluginStore'
@@ -24,8 +34,13 @@ import type { CollectionStatus } from '@trek/shared'
 import { splitReservationDateTime, formatTime, formatMoney } from '../../utils/formatters'
 import { useTripStore } from '../../store/tripStore'
 import { formatDistance, formatElevation } from '../../utils/units'
-import { getGoogleMapsUrlForPlace } from './placeGoogleMaps'
-import { getOpenStreetMapUrlForPlace } from './placeOpenStreetMap'
+import { getNavigationTargets, openNavigationTarget } from './placeNavigation'
+import { TRANSPORT_TYPES, getAssignmentReservations } from '../../utils/dayMerge'
+import { NavigationMenu } from '../shared/NavigationMenu'
+import { resolveOpenNow, resolvePlaceTimeZone, placeWeekdayIndex } from './placeOpenState'
+import { convertHoursLine } from './placeHoursFormat'
+import type { EndDayControlProps } from '../Roadtrip/EndDayControl'
+import VisitControls, { type RoadtripStayControl } from '../Roadtrip/VisitControls'
 
 const detailsCache = new Map()
 
@@ -38,6 +53,49 @@ function getSessionCache(key) {
 
 function setSessionCache(key, value) {
   try { sessionStorage.setItem(key, JSON.stringify(value)) } catch {}
+}
+
+const creditCache = new Map()
+
+/**
+ * Names whoever made the picture shown in the avatar.
+ *
+ * Only cached provider photos carry a credit, and their proxy URL embeds the
+ * cache key. Anything else (an uploaded image, a legacy remote URL) renders
+ * nothing. Commons pictures are largely CC BY-SA, so this is an obligation
+ * rather than a nicety — the picker credits them while choosing, this keeps the
+ * credit visible afterwards.
+ */
+function PhotoCredit({ imageUrl }) {
+  const [credit, setCredit] = useState(null)
+  const key = useMemo(() => {
+    const match = /^\/api\/maps\/place-photo\/(.+)\/bytes$/.exec(imageUrl || '')
+    return match ? decodeURIComponent(match[1]) : null
+  }, [imageUrl])
+
+  useEffect(() => {
+    if (!key) { setCredit(null); return }
+    if (creditCache.has(key)) { setCredit(creditCache.get(key)); return }
+    let alive = true
+    mapsApi.placePhotoCredit(key).then(data => {
+      creditCache.set(key, data.credit)
+      if (alive) setCredit(data.credit)
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [key])
+
+  if (!credit) return null
+  return (
+    <span
+      className="text-content-faint"
+      title={credit}
+      style={{
+        display: 'block', marginTop: 4, maxWidth: 72,
+        fontSize: 'calc(9px * var(--fs-scale-caption, 1))', lineHeight: 1.2,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center',
+      }}
+    >{credit}</span>
+  )
 }
 
 function usePlaceDetails(googlePlaceId, osmId, geoProvider, providerPlaceId, language) {
@@ -59,37 +117,11 @@ function usePlaceDetails(googlePlaceId, osmId, geoProvider, providerPlaceId, lan
   return details
 }
 
-function getWeekdayIndex(dateStr) {
+function getWeekdayIndex(dateStr, timeZone) {
   // weekdayDescriptions[0] = Monday … [6] = Sunday
-  const d = dateStr ? new Date(dateStr + 'T12:00:00') : new Date()
-  const jsDay = d.getDay()
+  if (!dateStr) return placeWeekdayIndex(new Date(), timeZone)
+  const jsDay = new Date(dateStr + 'T12:00:00').getDay()
   return jsDay === 0 ? 6 : jsDay - 1
-}
-
-function convertHoursLine(line, timeFormat) {
-  if (!line) return ''
-  const hasAmPm = /\d{1,2}:\d{2}\s*(AM|PM)/i.test(line)
-
-  if (timeFormat === '12h' && !hasAmPm) {
-    // 24h → 12h: "10:00" → "10:00 AM", "21:00" → "9:00 PM", "Uhr" entfernen
-    return line.replace(/\s*Uhr/g, '').replace(/(\d{1,2}):(\d{2})/g, (match, h, m) => {
-      const hour = parseInt(h)
-      if (isNaN(hour)) return match
-      const period = hour >= 12 ? 'PM' : 'AM'
-      const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
-      return `${h12}:${m} ${period}`
-    })
-  }
-  if (timeFormat !== '12h' && hasAmPm) {
-    // 12h → 24h: "10:00 AM" → "10:00", "9:00 PM" → "21:00"
-    return line.replace(/(\d{1,2}):(\d{2})\s*(AM|PM)/gi, (_, h, m, p) => {
-      let hour = parseInt(h)
-      if (p.toUpperCase() === 'PM' && hour !== 12) hour += 12
-      if (p.toUpperCase() === 'AM' && hour === 12) hour = 0
-      return `${String(hour).padStart(2, '0')}:${m}`
-    })
-  }
-  return line
 }
 
 function formatFileSize(bytes) {
@@ -108,6 +140,9 @@ interface TripMember {
 }
 
 interface PlaceInspectorProps {
+  roadtripActive?: boolean
+  roadtripEndDay?: EndDayControlProps
+  roadtripStay?: RoadtripStayControl
   place: Place | null
   categories: Category[]
   /** 'trip' (default) keeps every existing trip-planner behaviour byte-identical;
@@ -120,6 +155,11 @@ interface PlaceInspectorProps {
   selectedAssignmentId?: number | null
   assignments?: AssignmentsMap
   reservations?: Reservation[]
+  /** Editors for the linked booking, each omitted when the user lacks that right —
+   *  a transport needs day_edit, anything else reservation_edit. Both absent leaves
+   *  the strip the read-only summary it has always been (#2012). */
+  onEditTransport?: (reservation: Reservation) => void
+  onEditReservation?: (reservation: Reservation) => void
   onClose: () => void
   onEdit?: () => void
   onDelete?: () => void
@@ -130,6 +170,10 @@ interface PlaceInspectorProps {
   tripMembers?: TripMember[]
   onSetParticipants?: (assignmentId: number, dayId: number, participantIds: number[]) => void
   onUpdatePlace?: (placeId: number, data: Partial<Place>) => void
+  /** Upload a custom thumbnail (#1136); enables the click-to-change avatar in trip mode. */
+  onUploadImage?: (placeId: number, file: File) => Promise<void>
+  /** Cast/clear the current user's star vote (#1435); enables the rating row. */
+  onRate?: (placeId: number, rating: number | null) => Promise<void> | void
   leftWidth?: number
   rightWidth?: number
   // ── Collection-mode props ──
@@ -141,11 +185,11 @@ interface PlaceInspectorProps {
 
 export default function PlaceInspector({
   place, categories, mode = 'trip', days = [], selectedDayId = null, selectedAssignmentId = null,
-  assignments = {}, reservations = [],
+  assignments = {}, reservations = [], onEditTransport, onEditReservation,
   onClose, onEdit, onDelete, onAssignToDay, onRemoveAssignment,
-  files = [], onFileUpload, tripMembers = [], onSetParticipants, onUpdatePlace,
+  files = [], onFileUpload, tripMembers = [], onSetParticipants, onUpdatePlace, onUploadImage, onRate,
   leftWidth = 0, rightWidth = 0,
-  collectionStatus, onCopyToTrip, onSetStatus, onRemoveFromList,
+  collectionStatus, onCopyToTrip, onSetStatus, onRemoveFromList, roadtripEndDay, roadtripStay, roadtripActive,
 }: PlaceInspectorProps) {
   // Plugins that declared a place-detail slot mount at the bottom of this panel,
   // scoped to the open place (trip mode only). Inline-filter like the other sites.
@@ -153,6 +197,8 @@ export default function PlaceInspector({
   // Extra native rows contributed by placeDetailProvider plugins (#1429). Fail-safe:
   // any provider error/timeout is dropped server-side, so this only ever adds rows.
   const [providerDetails, setProviderDetails] = useState<Array<{ pluginId: string; items: Array<{ label: string; value?: string; url?: string }> }>>([])
+  const [navOpen, setNavOpen] = useState(false)
+  const navBtnRef = useRef<HTMLButtonElement>(null)
   const placeIdForDetails = mode === 'trip' ? place?.id : undefined
   useEffect(() => {
     if (placeIdForDetails == null) { setProviderDetails([]); return }
@@ -165,6 +211,12 @@ export default function PlaceInspector({
   const { t, locale, language } = useTranslation()
   // Currency-less prices mean "the trip's currency"; null in collection mode (EUR fallback below).
   const tripCurrency = useTripStore(s => s.trip?.currency)
+  // The day list handed in is the one the planner shows, and in the day view that
+  // list leaves out the stop a booking wrote. The store still holds it, so the
+  // booked-night check below reads the day from there as well: on the list alone
+  // the hotel of a booked night looked unassigned and could be put on the day a
+  // second time, which is the duplicate that check exists to prevent.
+  const storedDayAssignments = useTripStore(s => (selectedDayId ? s.assignments[String(selectedDayId)] : undefined))
   const toast = useToast()
   const timeFormat = useSettingsStore(s => s.settings.time_format) || '24h'
   const distanceUnit = useSettingsStore(s => s.settings.distance_unit) || 'metric'
@@ -230,6 +282,31 @@ export default function PlaceInspector({
     })
   }, [place, openSavePicker])
 
+  // Sits above the `if (!place)` bail-out below: a hook after an early return is
+  // only reached while a place is selected, so deselecting one mid-session
+  // changes the hook count and React tears the tree down.
+  const placeId = place?.id
+  const handleFileUpload = useCallback(async (e) => {
+    const selectedFiles = Array.from((e.target as HTMLInputElement).files || [])
+    if (!selectedFiles.length || !onFileUpload || !placeId) return
+    setIsUploading(true)
+    try {
+      for (const file of selectedFiles) {
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('place_id', String(placeId))
+        await onFileUpload(fd)
+      }
+      setFilesExpanded(true)
+    } catch (err: unknown) {
+      console.error('Upload failed', err)
+      toast.error(translateApiError(t, err, 'files.uploadError'))
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }, [onFileUpload, placeId, toast, t])
+
   const startNameEdit = () => {
     if (!onUpdatePlace) return
     setNameValue(place.name || '')
@@ -258,43 +335,41 @@ export default function PlaceInspector({
     ? ((selectedAssignmentId ? dayAssignments.find(a => a.id === selectedAssignmentId) : null)
       ?? dayAssignments.find(a => a.place?.id === place.id))
     : null
+  /** This stop belongs to a booked night rather than to the traveller. */
+  const bookedNight = assignmentInDay
+    ? assignmentInDay.accommodation_id != null
+    : !!storedDayAssignments?.some(a => a.place?.id === place.id && a.accommodation_id != null)
 
+  // The weekday lines are display text; the ring is computed from the structured
+  // periods next to them, in the place's own timezone. open_now stays the fallback.
   const openingHours = googleDetails?.opening_hours || null
-  const openNow = googleDetails?.open_now ?? null
+  const detailLat = place.lat ?? googleDetails?.lat
+  const detailLng = place.lng ?? googleDetails?.lng
+  const placeTimeZone = resolvePlaceTimeZone(detailLat, detailLng)
+  const openNow = resolveOpenNow(
+    { periods: googleDetails?.opening_periods, specialDays: googleDetails?.opening_special_days },
+    detailLat,
+    detailLng,
+    googleDetails?.open_now,
+  )
+  // Allow-listed rather than passed straight through: window.open runs a
+  // javascript: URL in this origin, and the stored value predates the check the
+  // server does on the way in now.
+  const websiteUrl = safeHttpUrl(place.website) ?? safeHttpUrl(googleDetails?.website)
   // Prefer the place's stored ftid; if it has none yet, use the one just fetched from Google.
-  const googleMapsUrl = getGoogleMapsUrlForPlace(
+  const navigationTargets = getNavigationTargets(
     place ? { ...place, google_ftid: place.google_ftid || googleDetails?.google_ftid || null } : null,
     googleDetails?.google_maps_url,
   )
-  const openStreetMapUrl = getOpenStreetMapUrlForPlace(place)
+  const openStreetMapUrl = (place.lat != null && place.lng != null ? `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}#map=16/${place.lat}/${place.lng}` : null)
   const amapUrl = place.lat != null && place.lng != null
     ? generateAmapPlaceUrl({ lat: place.lat, lng: place.lng, name: place.name })
     : null
   const selectedDay = days?.find(d => d.id === selectedDayId)
-  const weekdayIndex = getWeekdayIndex(selectedDay?.date)
+  const weekdayIndex = getWeekdayIndex(selectedDay?.date, placeTimeZone)
 
-  const placeFiles = (files || []).filter(f => String(f.place_id) === String(place.id) || (f.linked_place_ids || []).includes(place.id))
-
-  const handleFileUpload = useCallback(async (e) => {
-    const selectedFiles = Array.from((e.target as HTMLInputElement).files || [])
-    if (!selectedFiles.length || !onFileUpload) return
-    setIsUploading(true)
-    try {
-      for (const file of selectedFiles) {
-        const fd = new FormData()
-        fd.append('file', file)
-        fd.append('place_id', String(place.id))
-        await onFileUpload(fd)
-      }
-      setFilesExpanded(true)
-    } catch (err: unknown) {
-      console.error('Upload failed', err)
-      toast.error(translateApiError(t, err, 'files.uploadError'))
-    } finally {
-      setIsUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }, [onFileUpload, place.id, toast, t])
+  // Its own files plus the ones on the bookings that hang on it (#2217).
+  const placeFiles = filesForPlace(files, place.id, reservations, selectedAssignmentId != null ? [selectedAssignmentId] : [])
 
   return (
     <div
@@ -322,6 +397,7 @@ export default function PlaceInspector({
         <PlaceInspectorHeader openNow={openNow} place={place} category={category} t={t} editingName={editingName}
           nameInputRef={nameInputRef} nameValue={nameValue} setNameValue={setNameValue} commitNameEdit={commitNameEdit}
           handleNameKeyDown={handleNameKeyDown} startNameEdit={startNameEdit} onUpdatePlace={onUpdatePlace}
+          onUploadImage={mode === 'trip' && onUpdatePlace ? onUploadImage : undefined}
           locale={locale} timeFormat={timeFormat} onClose={onClose} />
 
         {/* Content — scrollable */}
@@ -348,6 +424,17 @@ export default function PlaceInspector({
             )}
           </div>
 
+          {/* Collaborative rating (#1435) — every member's own vote, shown as the average. */}
+          {mode === 'trip' && onRate && (
+            <div className="bg-surface-hover" style={{ borderRadius: 10, padding: '8px 12px' }}>
+              <PlaceRating
+                ratings={place.ratings ?? []}
+                ratingAvg={place.rating_avg}
+                onRate={rating => onRate(place.id, rating)}
+              />
+            </div>
+          )}
+
           {/* Telefon */}
           {(place.phone || googleDetails?.phone) && (
             <div style={{ display: 'flex', gap: 12 }}>
@@ -360,16 +447,32 @@ export default function PlaceInspector({
           )}
 
           {/* Description / Summary */}
+          {roadtripActive && place.stop_type === 'charging' && <ChargingInfo placeId={place.id} />}
+          {(roadtripEndDay || roadtripStay) && <VisitControls endDay={roadtripEndDay} stay={roadtripStay} />}
           {(place.description || googleDetails?.summary) && (
             <div className="collab-note-md bg-surface-hover text-content-muted" style={{ borderRadius: 10, overflow: 'hidden', flexShrink: 0, fontSize: 'calc(12px * var(--fs-scale-body, 1))', lineHeight: '1.5', padding: '8px 12px', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{place.description || googleDetails?.summary || ''}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{place.description || googleDetails?.summary || ''}</Markdown>
             </div>
           )}
 
           {/* Notes */}
           {place.notes && (
             <div className="collab-note-md bg-surface-hover text-content-muted" style={{ borderRadius: 10, overflow: 'hidden', flexShrink: 0, fontSize: 'calc(12px * var(--fs-scale-body, 1))', lineHeight: '1.5', padding: '8px 12px', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{place.notes}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{place.notes}</Markdown>
+            </div>
+          )}
+
+          {/* Day-specific assignment note (#2163) — written via MCP/API or the
+              edit form; distinct from the pool-wide place.notes above, so it
+              carries an eyebrow saying which day-scope it belongs to. */}
+          {assignmentInDay?.notes && (
+            <div className="bg-surface-hover" style={{ borderRadius: 10, overflow: 'hidden', flexShrink: 0, padding: '8px 12px' }}>
+              <div className="text-content-faint" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'calc(9px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 }}>
+                <StickyNote size={10} /> {t('places.assignmentNotes')}
+              </div>
+              <div className="collab-note-md text-content-muted" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', lineHeight: '1.5', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{assignmentInDay.notes}</Markdown>
+              </div>
             </div>
           )}
 
@@ -377,7 +480,8 @@ export default function PlaceInspector({
           {mode === 'trip' && (
             <PlaceReservationParticipants selectedAssignmentId={selectedAssignmentId} reservations={reservations}
               assignments={assignments} selectedDayId={selectedDayId} tripMembers={tripMembers} locale={locale}
-              timeFormat={timeFormat} t={t} onSetParticipants={onSetParticipants} />
+              timeFormat={timeFormat} t={t} onSetParticipants={onSetParticipants}
+              onEditTransport={onEditTransport} onEditReservation={onEditReservation} />
           )}
 
           {/* Opening hours + Files — side by side on desktop only if both exist */}
@@ -385,7 +489,7 @@ export default function PlaceInspector({
             setHoursExpanded={setHoursExpanded} timeFormat={timeFormat} t={t} place={place} placeFiles={placeFiles}
             onFileUpload={onFileUpload} filesExpanded={filesExpanded} setFilesExpanded={setFilesExpanded}
             fileInputRef={fileInputRef} handleFileUpload={handleFileUpload} isUploading={isUploading}
-            distanceUnit={distanceUnit} />
+            distanceUnit={distanceUnit} onUpdatePlace={onUpdatePlace} />
 
           {/* Extra native rows from placeDetailProvider plugins (#1429). */}
           {mode === 'trip' && providerDetails.length > 0 && (
@@ -408,7 +512,7 @@ export default function PlaceInspector({
                 const tid = (place as { trip_id?: number | string }).trip_id
                 return (
                   <div key={p.id} className="bg-surface-hover" style={{ borderRadius: 10, overflow: 'hidden' }}>
-                    <PluginFrame pluginId={p.id} tripId={tid != null ? String(tid) : null} placeId={String(place.id)} title={p.name} />
+                    <PluginFrame pluginId={p.id} tripId={tid != null ? String(tid) : null} placeId={String(place.id)} title={p.name} surface="detail-slot" />
                   </div>
                 )
               })}
@@ -427,8 +531,14 @@ export default function PlaceInspector({
           {mode === 'collection' && collectionStatus && onSetStatus && (
             <StatusBadge status={collectionStatus} onChange={onSetStatus} t={t} />
           )}
-          {/* Trip mode — day assignment */}
-          {mode === 'trip' && selectedDayId && (
+          {/* Trip mode — day assignment.
+              A stop a lodging booking put there is not offered either way. Taking it off
+              the day would leave the booking behind with nothing on the drive and no way
+              back short of saving it again, and putting a second one beside it is the
+              duplicate the stop exists to prevent. The booking is removed where it is
+              made: in the day's overnight block, or by turning the night back into a
+              pause in road trip mode. */}
+          {mode === 'trip' && !!selectedDayId && !bookedNight && (
             assignmentInDay ? (
               <ActionButton onClick={() => onRemoveAssignment?.(selectedDayId, assignmentInDay.id)} variant="ghost" icon={<Minus size={13} />}
                 label={<span className="hidden sm:inline">{t('inspector.removeFromDay')}</span>} />
@@ -442,9 +552,32 @@ export default function PlaceInspector({
               icon={savedInCollection ? <BookmarkCheck size={13} /> : <Bookmark size={13} />}
               label={<span className="hidden sm:inline">{savedInCollection ? t('inspector.savedToCollection') : t('inspector.saveToCollection')}</span>} />
           )}
-          {googleMapsUrl && (
-            <ActionButton onClick={() => window.open(googleMapsUrl, '_blank')} variant="ghost" icon={<Navigation size={13} />}
-              label={<span className="hidden sm:inline">{t('inspector.google')}</span>} />
+          {navigationTargets.length > 0 && (
+            <>
+              {/* One target left (a place without coordinates) opens straight
+                  away, exactly as this button always did. */}
+              <ActionButton
+                ref={navBtnRef}
+                onClick={() => {
+                  if (navigationTargets.length === 1) openNavigationTarget(navigationTargets[0])
+                  else setNavOpen(o => !o)
+                }}
+                variant="ghost"
+                icon={<Navigation size={13} />}
+                label={
+                  <span className="hidden sm:inline">
+                    {navigationTargets.length === 1 ? navigationTargets[0].label : t('inspector.navigation')}
+                  </span>
+                }
+              />
+              {navOpen && (
+                <NavigationMenu
+                  targets={navigationTargets}
+                  anchor={navBtnRef.current}
+                  onClose={() => setNavOpen(false)}
+                />
+              )}
+            </>
           )}
           {openStreetMapUrl && (
             <ActionButton onClick={() => window.open(openStreetMapUrl, '_blank')} variant="ghost" icon={<MapIcon size={13} />}
@@ -458,8 +591,8 @@ export default function PlaceInspector({
               label={<span className="hidden sm:inline">{t('inspector.amap')}</span>}
             />
           )}
-          {(place.website || googleDetails?.website) && (
-            <ActionButton onClick={() => window.open(place.website || googleDetails?.website, '_blank')} variant="ghost" icon={<ExternalLink size={13} />}
+          {websiteUrl && (
+            <ActionButton onClick={() => window.open(websiteUrl, '_blank', 'noopener,noreferrer')} variant="ghost" icon={<ExternalLink size={13} />}
               label={<span className="hidden sm:inline">{t('inspector.website')}</span>} />
           )}
           <div style={{ flex: 1 }} />
@@ -496,28 +629,16 @@ function Chip({ icon, text, color = 'var(--text-secondary)', bg = 'var(--bg-hove
   )
 }
 
-interface RowProps {
-  icon: React.ReactNode
-  children: React.ReactNode
-}
-
-function Row({ icon, children }: RowProps) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ flexShrink: 0 }}>{icon}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
-    </div>
-  )
-}
-
 interface ActionButtonProps {
   onClick: () => void
   variant: 'primary' | 'ghost' | 'danger'
   icon: React.ReactNode
   label: React.ReactNode
+  /** For callers that anchor a popup to the button. React 19 passes it through. */
+  ref?: React.Ref<HTMLButtonElement>
 }
 
-export function ActionButton({ onClick, variant, icon, label }: ActionButtonProps) {
+export function ActionButton({ onClick, variant, icon, label, ref }: ActionButtonProps) {
   const base = {
     primary: { background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', hoverBg: 'var(--text-secondary)' },
     ghost: { background: 'var(--bg-hover)', color: 'var(--text-secondary)', border: 'none', hoverBg: 'var(--bg-tertiary)' },
@@ -525,7 +646,8 @@ export function ActionButton({ onClick, variant, icon, label }: ActionButtonProp
   }
   const s = base[variant] || base.ghost
   return (
-    <button
+    <button type="button"
+      ref={ref}
       onClick={onClick}
       style={{
         display: 'flex', alignItems: 'center', gap: 5,
@@ -593,7 +715,7 @@ function ParticipantsBox({ tripMembers, participantIds, allJoined, onSetParticip
           const isHovered = hoveredId === member.id
           const canRemove = activeMembers.length > 1
           return (
-            <div key={member.id}
+            <button type="button" key={member.id} disabled={!canRemove}
               onMouseEnter={() => setHoveredId(member.id)}
               onMouseLeave={() => setHoveredId(null)}
               onClick={() => { if (canRemove) handleRemove(member.id) }}
@@ -605,22 +727,22 @@ function ParticipantsBox({ tripMembers, participantIds, allJoined, onSetParticip
                 cursor: canRemove ? 'pointer' : 'default',
                 transition: 'all 0.15s',
               }}>
-              <div className="bg-surface-tertiary text-content-muted" style={{
+              <span className="bg-surface-tertiary text-content-muted" style={{
                 width: 16, height: 16, borderRadius: '50%',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'calc(7px * var(--fs-scale-caption, 1))', fontWeight: 700,
                 overflow: 'hidden', flexShrink: 0,
               }}>
-                {(member.avatar_url || member.avatar) ? <img src={member.avatar_url || avatarSrc(member.avatar)!} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : member.username?.[0]?.toUpperCase()}
-              </div>
+                {(member.avatar_url || member.avatar) ? <img src={member.avatar_url || avatarSrc(member.avatar)!} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : member.username?.[0]?.toUpperCase()}
+              </span>
               <span style={{ textDecoration: isHovered && canRemove ? 'line-through' : 'none' }}>{member.username}</span>
-            </div>
+            </button>
           )
         })}
 
         {/* Add button */}
         {availableToAdd.length > 0 && (
           <div style={{ position: 'relative' }}>
-            <button onClick={() => setShowAdd(!showAdd)} className="text-content-faint" style={{
+            <button type="button" onClick={() => setShowAdd(!showAdd)} className="text-content-faint" style={{
               width: 22, height: 22, borderRadius: '50%', border: '1.5px dashed var(--border-primary)',
               background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 'calc(12px * var(--fs-scale-body, 1))', transition: 'all 0.12s',
@@ -636,7 +758,7 @@ function ParticipantsBox({ tripMembers, participantIds, allJoined, onSetParticip
                 boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 4, minWidth: 140,
               }}>
                 {availableToAdd.map(member => (
-                  <button key={member.id} onClick={() => handleAdd(member.id)} className="text-content" style={{
+                  <button type="button" key={member.id} onClick={() => handleAdd(member.id)} className="text-content" style={{
                     display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '5px 8px',
                     borderRadius: 6, border: 'none', background: 'none', cursor: 'pointer',
                     fontFamily: 'inherit', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', textAlign: 'left',
@@ -650,7 +772,7 @@ function ParticipantsBox({ tripMembers, participantIds, allJoined, onSetParticip
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 700,
                       overflow: 'hidden', flexShrink: 0,
                     }}>
-                      {(member.avatar_url || member.avatar) ? <img src={member.avatar_url || avatarSrc(member.avatar)!} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : member.username?.[0]?.toUpperCase()}
+                      {(member.avatar_url || member.avatar) ? <img src={member.avatar_url || avatarSrc(member.avatar)!} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : member.username?.[0]?.toUpperCase()}
                     </div>
                     <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{member.username}</span>
                     {member.is_guest && <GuestBadge size="xs" />}
@@ -667,7 +789,7 @@ function ParticipantsBox({ tripMembers, participantIds, allJoined, onSetParticip
 
 
 function PlaceInspectorHeader({ openNow, place, category, t, editingName, nameInputRef, nameValue, setNameValue,
-  commitNameEdit, handleNameKeyDown, startNameEdit, onUpdatePlace, locale, timeFormat, onClose }: any) {
+  commitNameEdit, handleNameKeyDown, startNameEdit, onUpdatePlace, onUploadImage, locale, timeFormat, onClose }: any) {
   return (
         <div style={{ display: 'flex', alignItems: 'center', gap: openNow !== null ? 26 : 14, padding: openNow !== null ? '18px 16px 14px 28px' : '18px 16px 14px', borderBottom: '1px solid var(--border-faint)', flexShrink: 0 }}>
           {/* Avatar with open/closed ring + tag */}
@@ -676,8 +798,13 @@ function PlaceInspectorHeader({ openNow, place, category, t, editingName, nameIn
               borderRadius: '50%', padding: 2.5,
               background: openNow === true ? '#22c55e' : openNow === false ? '#ef4444' : 'transparent',
             }}>
-              <PlaceAvatar place={place} category={category} size={52} />
+              {onUploadImage
+                ? <PlaceAvatarUpload place={place} category={category} size={52}
+                    onUpload={(file: File) => onUploadImage(place.id, file)}
+                    onRemove={() => onUpdatePlace(place.id, { image_url: null })} />
+                : <PlaceAvatar place={place} category={category} size={52} />}
             </div>
+            {openNow === null && <PhotoCredit imageUrl={place.image_url} />}
             {openNow !== null && (
               <span style={{
                 position: 'absolute', bottom: -7, left: '50%', transform: 'translateX(-50%)',
@@ -710,6 +837,17 @@ function PlaceInspectorHeader({ openNow, place, category, t, editingName, nameIn
                   className="text-content"
                   style={{ fontWeight: 600, fontSize: 'calc(15px * var(--fs-scale-subtitle, 1))', lineHeight: '1.3', cursor: onUpdatePlace ? 'text' : 'default' }}
                 >{place.name}</span>
+              )}
+              {/* Where the place came from, when it did not come from somebody
+                  typing it: a stay accepted out of their own recordings. The
+                  mark alone — the name beside it is already the place's name,
+                  and a word here would only repeat the tooltip. */}
+              {place.source === 'dawarich' && (
+                <Tooltip label={t('dawarich.place.fromDawarich')} placement="top">
+                  <span style={{ display: 'inline-flex', flexShrink: 0, overflow: 'hidden', borderRadius: 5 }}>
+                    <DawarichIcon size={16} />
+                  </span>
+                </Tooltip>
               )}
               {category && (() => {
                 const CatIcon = getCategoryIcon(category.icon)
@@ -746,7 +884,7 @@ function PlaceInspectorHeader({ openNow, place, category, t, editingName, nameIn
               </div>
             )}
           </div>
-          <button
+          <button type="button"
             onClick={onClose}
             className="bg-surface-hover"
             style={{ width: 28, height: 28, borderRadius: '50%', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, alignSelf: 'flex-start', transition: 'background 0.15s' }}
@@ -760,79 +898,105 @@ function PlaceInspectorHeader({ openNow, place, category, t, editingName, nameIn
 }
 
 function PlaceReservationParticipants({ selectedAssignmentId, reservations, assignments, selectedDayId,
-  tripMembers, locale, timeFormat, t, onSetParticipants }: any) {
+  tripMembers, locale, timeFormat, t, onSetParticipants, onEditTransport, onEditReservation }: any) {
   return (
     <>
           {(() => {
-            const res = selectedAssignmentId ? reservations.find(r => r.assignment_id === selectedAssignmentId) : null
+            const linked = getAssignmentReservations<Reservation>(reservations, selectedAssignmentId)
             const assignment = selectedAssignmentId ? (assignments[String(selectedDayId)] || []).find(a => a.id === selectedAssignmentId) : null
             const currentParticipants = assignment?.participants || []
             const participantIds = currentParticipants.map(p => p.user_id)
             const allJoined = currentParticipants.length === 0
             const showParticipants = selectedAssignmentId && tripMembers.length > 1
-            if (!res && !showParticipants) return null
+            if (linked.length === 0 && !showParticipants) return null
             return (
-              <div className={`grid ${res && showParticipants ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'} gap-2`}>
-                {/* Reservation */}
-                {res && (() => {
-                  const confirmed = res.status === 'confirmed'
-                  return (
-                    <div style={{ borderRadius: 12, overflow: 'hidden', border: `1px solid ${confirmed ? 'rgba(22,163,74,0.2)' : 'rgba(217,119,6,0.2)'}` }}>
-                      <div className={confirmed ? 'bg-[rgba(22,163,74,0.08)]' : 'bg-[rgba(217,119,6,0.08)]'} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px' }}>
-                        <div className={confirmed ? 'bg-[#16a34a]' : 'bg-[#d97706]'} style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0 }} />
-                        <span className={confirmed ? 'text-[#16a34a]' : 'text-[#d97706]'} style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 700 }}>{confirmed ? t('reservations.confirmed') : t('reservations.pending')}</span>
-                        <span style={{ flex: 1 }} />
-                        <span className="text-content" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{res.title}</span>
-                      </div>
-                      <div style={{ padding: '6px 10px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                        {(() => {
-                          const { date, time: startTime } = splitReservationDateTime(res.reservation_time)
-                          const { time: endTime } = splitReservationDateTime(res.reservation_end_time)
-                          return (
-                            <>
-                              {date && (
-                                <div>
-                                  <div className="text-content-faint" style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase' }}>{t('reservations.date')}</div>
-                                  <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}>{new Date(date + 'T00:00:00Z').toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}</div>
-                                </div>
-                              )}
-                              {(startTime || endTime) && (
-                                <div>
-                                  <div className="text-content-faint" style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase' }}>{t('reservations.time')}</div>
-                                  <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}>
-                                    {startTime ? formatTime(startTime, locale, timeFormat) : ''}
-                                    {endTime ? ` – ${formatTime(endTime, locale, timeFormat)}` : ''}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          )
-                        })()}
-                        {res.confirmation_number && (
-                          <div>
-                            <div className="text-content-faint" style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase' }}>{t('reservations.confirmationCode')}</div>
-                            <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}>{res.confirmation_number}</div>
+              <div className={`grid ${linked.length > 0 && showParticipants ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'} gap-2`}>
+                {/* Bookings pinned to this stop; several can share one (#2201) */}
+                {linked.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {linked.map(res => {
+                      const confirmed = res.status === 'confirmed'
+                      // The strip summarised the booking but went nowhere, so its
+                      // attachments and fields had no route from the map (#2012).
+                      // A transport has its own form; picking by type is what the day
+                      // sidebar does, and an absent handler means this user may not
+                      // open this one, so the strip stays inert rather than lying.
+                      const editor = TRANSPORT_TYPES.has(res.type) ? onEditTransport : onEditReservation
+                      const open = editor ? () => editor(res) : undefined
+                      return (
+                        <div
+                          key={res.id}
+                          role={open ? 'button' : undefined}
+                          // No press-scale on the composite strip: shrinking it
+                          // mid-click slides the links inside out from under the
+                          // pointer (#2158).
+                          data-no-press
+                          aria-label={open ? t('inspector.editRes') : undefined}
+                          tabIndex={open ? 0 : undefined}
+                          onClick={open}
+                          onKeyDown={open ? (e: React.KeyboardEvent) => {
+                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() }
+                          } : undefined}
+                          title={open ? t('inspector.editRes') : undefined}
+                          style={{ borderRadius: 12, overflow: 'hidden', border: `1px solid ${confirmed ? 'rgba(22,163,74,0.2)' : 'rgba(217,119,6,0.2)'}`, cursor: open ? 'pointer' : undefined, textAlign: 'left' }}
+                        >
+                          <div className={confirmed ? 'bg-[rgba(22,163,74,0.08)]' : 'bg-[rgba(217,119,6,0.08)]'} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px' }}>
+                            <div className={confirmed ? 'bg-[#16a34a]' : 'bg-[#d97706]'} style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0 }} />
+                            <span className={confirmed ? 'text-[#16a34a]' : 'text-[#d97706]'} style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 700 }}>{confirmed ? t('reservations.confirmed') : t('reservations.pending')}</span>
+                            <span style={{ flex: 1 }} />
+                            <span className="text-content" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{res.title}</span>
                           </div>
-                        )}
-                      </div>
-                      {res.notes && <div className="collab-note-md text-content-faint" style={{ padding: '0 10px 6px', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', lineHeight: 1.4, wordBreak: 'break-word', overflowWrap: 'anywhere' }}><Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{res.notes}</Markdown></div>}
-                      {(() => {
-                        const meta = typeof res.metadata === 'string' ? JSON.parse(res.metadata || '{}') : (res.metadata || {})
-                        if (!meta || Object.keys(meta).length === 0) return null
-                        const parts: string[] = []
-                        if (meta.airline && meta.flight_number) parts.push(`${meta.airline} ${meta.flight_number}`)
-                        else if (meta.flight_number) parts.push(meta.flight_number)
-                        if (meta.departure_airport && meta.arrival_airport) parts.push(`${meta.departure_airport} → ${meta.arrival_airport}`)
-                        if (meta.train_number) parts.push(meta.train_number)
-                        if (meta.platform) parts.push(`Gl. ${meta.platform}`)
-                        if (meta.check_in_time) parts.push(`Check-in ${meta.check_in_time}`)
-                        if (meta.check_out_time) parts.push(`Check-out ${meta.check_out_time}`)
-                        if (parts.length === 0) return null
-                        return <div className="text-content-muted" style={{ padding: '0 10px 6px', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500 }}>{parts.join(' · ')}</div>
-                      })()}
-                    </div>
-                  )
-                })()}
+                          <div style={{ padding: '6px 10px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                            {(() => {
+                              const { date, time: startTime } = splitReservationDateTime(res.reservation_time)
+                              const { time: endTime } = splitReservationDateTime(res.reservation_end_time)
+                              return (
+                                <>
+                                  {date && (
+                                    <div>
+                                      <div className="text-content-faint" style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase' }}>{t('reservations.date')}</div>
+                                      <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}>{new Date(date + 'T00:00:00Z').toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}</div>
+                                    </div>
+                                  )}
+                                  {(startTime || endTime) && (
+                                    <div>
+                                      <div className="text-content-faint" style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase' }}>{t('reservations.time')}</div>
+                                      <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}>
+                                        {startTime ? formatTime(startTime, locale, timeFormat) : ''}
+                                        {endTime ? ` – ${formatTime(endTime, locale, timeFormat)}` : ''}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                            {res.confirmation_number && (
+                              <div>
+                                <div className="text-content-faint" style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase' }}>{t('reservations.confirmationCode')}</div>
+                                <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}>{res.confirmation_number}</div>
+                              </div>
+                            )}
+                          </div>
+                          {res.notes && <div className="collab-note-md text-content-faint" style={{ padding: '0 10px 6px', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', lineHeight: 1.4, wordBreak: 'break-word', overflowWrap: 'anywhere' }}><Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{res.notes}</Markdown></div>}
+                          {(() => {
+                            const meta = typeof res.metadata === 'string' ? JSON.parse(res.metadata || '{}') : (res.metadata || {})
+                            if (!meta || Object.keys(meta).length === 0) return null
+                            const parts: string[] = []
+                            if (meta.airline && meta.flight_number) parts.push(`${meta.airline} ${meta.flight_number}`)
+                            else if (meta.flight_number) parts.push(meta.flight_number)
+                            if (meta.departure_airport && meta.arrival_airport) parts.push(`${meta.departure_airport} → ${meta.arrival_airport}`)
+                            if (meta.train_number) parts.push(meta.train_number)
+                            if (meta.platform) parts.push(`Gl. ${meta.platform}`)
+                            if (meta.check_in_time) parts.push(`Check-in ${meta.check_in_time}`)
+                            if (meta.check_out_time) parts.push(`Check-out ${meta.check_out_time}`)
+                            if (parts.length === 0) return null
+                            return <div className="text-content-muted" style={{ padding: '0 10px 6px', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500 }}>{parts.join(' · ')}</div>
+                          })()}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
                 {/* Participants */}
                 {showParticipants && (
@@ -853,13 +1017,56 @@ function PlaceReservationParticipants({ selectedAssignmentId, reservations, assi
   )
 }
 
+/**
+ * Track colour row (#776) — only for places that carry GPX geometry. Sits next
+ * to the stats block rather than inside it: that block bails out on unparsable
+ * geometry, and the colour control has no business disappearing with it.
+ */
+function TrackColorRow({ place, trackColor, onUpdatePlace, t }: any) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="bg-surface-hover" style={{ borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <button type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Route size={13} color="#9ca3af" />
+          <span className="text-content-secondary" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 500 }}>
+            {t('inspector.trackColor')}
+          </span>
+        </div>
+        <span
+          className="ring-1 ring-inset ring-black/10 dark:ring-white/15"
+          style={{ width: 20, height: 20, borderRadius: 999, backgroundColor: trackColor, flexShrink: 0 }}
+        />
+      </button>
+      {open && (
+        <div className="border-edge" style={{ borderTopWidth: 1, paddingTop: 8 }}>
+          <TrackColorPicker
+            value={place.route_color ?? null}
+            inheritedColor={inheritedTrackColor(place)}
+            onChange={color => onUpdatePlace?.(place.id, { route_color: color })}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PlaceExtras({ openingHours, weekdayIndex, hoursExpanded, setHoursExpanded, timeFormat, t, place,
-  placeFiles, onFileUpload, filesExpanded, setFilesExpanded, fileInputRef, handleFileUpload, isUploading, distanceUnit }: any) {
+  placeFiles, onFileUpload, filesExpanded, setFilesExpanded, fileInputRef, handleFileUpload, isUploading, distanceUnit,
+  onUpdatePlace }: any) {
+  const trackColor = resolveTrackColor(place)
   return (
           <div className={`grid grid-cols-1 ${openingHours?.length > 0 ? 'sm:grid-cols-2' : ''} gap-2`}>
           {openingHours && openingHours.length > 0 && (
             <div className="bg-surface-hover" style={{ borderRadius: 10, overflow: 'hidden' }}>
-              <button
+              <button type="button"
                 onClick={() => setHoursExpanded(h => !h)}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -889,6 +1096,10 @@ function PlaceExtras({ openingHours, weekdayIndex, hoursExpanded, setHoursExpand
             </div>
           )}
 
+
+          {place.route_geometry && (
+            <TrackColorRow place={place} trackColor={trackColor} onUpdatePlace={onUpdatePlace} t={t} />
+          )}
 
           {/* GPX Track stats */}
           {place.route_geometry && (() => {
@@ -946,7 +1157,7 @@ function PlaceExtras({ openingHours, weekdayIndex, hoursExpanded, setHoursExpand
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     <div className="text-content" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600 }}>
-                      <MapPin size={12} color="#3b82f6" />
+                      <MapPin size={12} color={trackColor} />
                       {formatDistance(distKm, distanceUnit)}
                     </div>
                     {hasEle && (
@@ -969,12 +1180,12 @@ function PlaceExtras({ openingHours, weekdayIndex, hoursExpanded, setHoursExpand
                     <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} preserveAspectRatio="none" className="bg-surface-tertiary" style={{ display: 'block', borderRadius: 6 }}>
                       <defs>
                         <linearGradient id={`ele-grad-${place.id}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
-                          <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.02" />
+                          <stop offset="0%" stopColor={trackColor} stopOpacity="0.25" />
+                          <stop offset="100%" stopColor={trackColor} stopOpacity="0.02" />
                         </linearGradient>
                       </defs>
                       <path d={`${pathD} L${chartW},${chartH} L0,${chartH} Z`} fill={`url(#ele-grad-${place.id})`} />
-                      <path d={pathD} fill="none" stroke="#3b82f6" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                      <path d={pathD} fill="none" stroke={trackColor} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
                     </svg>
                   )}
                 </div>
@@ -986,7 +1197,7 @@ function PlaceExtras({ openingHours, weekdayIndex, hoursExpanded, setHoursExpand
           {(placeFiles.length > 0 || onFileUpload) && (
             <div className="bg-surface-hover" style={{ borderRadius: 10, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', gap: 6 }}>
-                <button
+                <button type="button"
                   onClick={() => setFilesExpanded(f => !f)}
                   style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', textAlign: 'left' }}
                 >
@@ -1010,7 +1221,7 @@ function PlaceExtras({ openingHours, weekdayIndex, hoursExpanded, setHoursExpand
               {filesExpanded && placeFiles.length > 0 && (
                 <div style={{ padding: '0 12px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {placeFiles.map(f => (
-                    <button key={f.id} onClick={() => openFile(f.url).catch(() => {})} style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left' }}>
+                    <button type="button" key={f.id} onClick={() => openFile(f.url).catch(() => {})} style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left' }}>
                       {(f.mime_type || '').startsWith('image/') ? <FileImage size={12} color="#6b7280" /> : <File size={12} color="#6b7280" />}
                       <span className="text-content-secondary" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_name}</span>
                       {f.file_size && <span className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', flexShrink: 0 }}>{formatFileSize(f.file_size)}</span>}

@@ -15,10 +15,12 @@ const trip: TranslationStrings = {
   'trip.mobilePlan': 'Tervezés',
   'trip.mobilePlaces': 'Helyek',
   'trip.toast.placeUpdated': 'Hely frissítve',
+  'trip.toast.tripUpdated': 'Utazás frissítve',
   'trip.toast.placeAdded': 'Hely hozzáadva',
   'trip.toast.placeDeleted': 'Hely törölve',
   'trip.toast.selectDay': 'Kérjük, először válassz egy napot',
   'trip.toast.assignedToDay': 'Hely hozzárendelve a naphoz',
+  'trip.toast.loadError': 'Az utazást nem sikerült betölteni',
   'trip.toast.reorderError': 'Nem sikerült átrendezni',
   'trip.toast.reservationUpdated': 'Foglalás frissítve',
   'trip.toast.reservationAdded': 'Foglalás hozzáadva',
@@ -27,6 +29,9 @@ const trip: TranslationStrings = {
   'trip.confirm.deletePlaces': '{count} helyet töröl?',
   'trip.toast.placesDeleted': '{count} hely törölve',
   'trip.loadingPhotos': 'Helyek fotóinak betöltése...',
+  'trip.loadingSteps.pack': 'Pakoljuk a bőröndöt...',
+  'trip.loadingSteps.road': 'Útnak indulunk...',
+  'trip.loadingSteps.arrive': 'Mindjárt ott vagyunk...',
   'trip.invite.linkTitle': 'Meghívó link az utazáshoz',
   'trip.invite.linkHint':
     'Bárki, akinek van TREK-fiókja és megnyitja ezt a linket, tagként csatlakozik az utazáshoz. A régi link érvénytelenítéséhez hozz létre újat.',
@@ -59,6 +64,7 @@ const trip: TranslationStrings = {
   'transit.search': 'Keresés',
   'transit.searching': 'Keresés…',
   'transit.searchError': 'Az útvonalkeresés nem sikerült. Kérjük, próbáld újra.',
+  'transit.noResultsVia': 'Nem található összeköttetés a következőn keresztül: {provider}. Próbálj más időpontot vagy szűrőket.',
   'transit.noResults': 'Nem található kapcsolat. Próbálj másik időpontot vagy szűrőket.',
   'transit.direct': 'Közvetlen',
   'transit.transfers': '{count} átszállás',
@@ -70,10 +76,11 @@ const trip: TranslationStrings = {
   'transit.addToDay': 'Hozzáadás a naphoz',
   'transit.itinerary': 'Útiterv',
   'transit.attribution': 'Útvonaladatok innen:',
-  'transport.modeManual': 'Kézi közlekedés',
-  'transport.modeAutomated': 'Automatikus közlekedés',
+  'transport.modeManual': 'Kézi',
+  'transport.modeAutomated': 'Automatikus',
   'transit.sectionTitle': 'Automatikus tömegközlekedés',
   'transit.changeRoute': 'Útvonal módosítása',
+  'transit.editDetails': 'Részletek szerkesztése',
   'transit.journey': 'Tömegközlekedési útvonal',
   'transit.pickDay': 'Válassz egy napot a kapcsolatok kereséséhez.',
   'transit.noItinerary':
@@ -83,5 +90,7 @@ const trip: TranslationStrings = {
   'transit.walkLabel': 'Gyaloglás',
   'transit.searchHint':
     'Keress valós összeköttetéseket, és add hozzá őket közvetlenül a naphoz – adatok a Transitous révén.',
+  'trip.confirm.deletePlaceNight': 'A(z) „{name}” helyre foglalt éjszaka a hellyel együtt törlődik.',
+  'trip.confirm.deletePlaceBooked': 'A(z) „{name}” helyre foglalt éjszaka a hellyel együtt törlődik, a(z) „{booking}” foglalással és a hozzá kapcsolt kiadásokkal.',
 };
 export default trip;

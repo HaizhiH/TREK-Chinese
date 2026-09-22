@@ -1,4 +1,6 @@
 import admin from './admin';
+import dawarich from './dawarich';
+import docsync from './docsync';
 import airport from './airport';
 import atlas from './atlas';
 import backup from './backup';
@@ -18,6 +20,14 @@ import login from './login';
 import map from './map';
 import members from './members';
 import memories from './memories';
+import mobileAdmin from './mobileAdmin';
+import mobileAtlas from './mobileAtlas';
+import mobileCollections from './mobileCollections';
+import mobileJourney from './mobileJourney';
+import mobileNav from './mobileNav';
+import mobileSettings from './mobileSettings';
+import mobileTrip from './mobileTrip';
+import mobileVacay from './mobileVacay';
 import nav from './nav';
 import notif from './notif';
 import notifications from './notifications';
@@ -29,11 +39,13 @@ import photos from './photos';
 import places from './places';
 import planner from './planner';
 import register from './register';
+import roadtrip from './roadtrip';
 import reservations from './reservations';
 import settings from './settings';
 import share from './share';
 import shared from './shared';
 import stats from './stats';
+import storage from './storage';
 import system_notice from './system_notice';
 import todo from './todo';
 import transport from './transport';
@@ -47,6 +59,7 @@ const locale = {
   ...trips,
   ...nav,
   ...dashboard,
+  ...roadtrip,
   ...settings,
   ...admin,
   ...dayplan,
@@ -86,5 +99,16 @@ const locale = {
   ...oauth,
   ...system_notice,
   ...transport,
+  ...mobileTrip,
+  ...mobileJourney,
+  ...mobileVacay,
+  ...mobileAtlas,
+  ...mobileNav,
+  ...mobileAdmin,
+  ...mobileSettings,
+  ...mobileCollections,
+  ...storage,
+  ...dawarich,
+  ...docsync,
 };
 export default locale;

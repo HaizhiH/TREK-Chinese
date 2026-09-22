@@ -28,6 +28,10 @@ const zhTW: NotificationLocale = {
       title: 'Vacay 融合邀請',
       body: `${p.actor} 邀請您合併假期計畫。開啟 TREK 以接受或拒絕。`,
     }),
+    vacay_share: (p) => ({
+      title: 'Vacay 日曆已共享',
+      body: `${p.actor} 與您共享了假期日曆。開啟 TREK 以檢視。`,
+    }),
     collection_invite: (p) => ({
       title: '收藏邀請',
       body: `${p.actor} 邀請您共享收藏。開啟 TREK 以接受或拒絕。`,
@@ -47,6 +51,12 @@ const zhTW: NotificationLocale = {
     version_available: (p) => ({
       title: '新版 TREK 可用',
       body: `TREK ${p.version} 現已可用。請前往管理面板進行更新。`,
+    }),
+    replica_failure: (p) => ({
+      title: '儲存複本故障',
+      body:
+        `寫入複本 '${p.backend}' 失敗：${p.op} / ${p.key} — ${p.error}。` +
+        (p.suppressed !== '0' ? `自上次通知以來，還有 ${p.suppressed} 個失敗已被抑制。` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Synology 工作階段已清除',

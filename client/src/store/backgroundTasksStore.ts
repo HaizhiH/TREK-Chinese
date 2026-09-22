@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { BookingImportPreviewItem } from '@trek/shared'
+import type { BookingImportPreviewItem, BookingImportMode } from '@trek/shared'
 
 /**
  * Tracks booking-import parses that run in the BACKGROUND (the async endpoint).
@@ -30,11 +30,21 @@ export interface BackgroundImportTask {
   /** The uploaded files this parse ran on — kept in memory so the review can attach the
    *  source document to each created booking. Not persisted (a File can't survive a reload). */
   sourceFiles?: File[]
+  /** Mode this run used — the widget only offers an AI retry if it wasn't already one. Not persisted. */
+  mode?: BookingImportMode
+  /**
+   * Which tab the import was started from. It decides which form an item opens
+   * when its type is guessed (#2076), and unlike the other transient flags it IS
+   * persisted: the parse deliberately outlives navigation and reload, and the
+   * review is triggered by the global widget on any page, so a component-local
+   * value is gone by the time it is needed.
+   */
+  kind?: 'transports' | 'bookings'
 }
 
 interface BackgroundTasksState {
   tasks: BackgroundImportTask[]
-  addTask: (task: { id: string; tripId: string; label: string; total: number; files?: File[] }) => void
+  addTask: (task: { id: string; tripId: string; label: string; total: number; files?: File[]; mode?: BookingImportMode; kind?: 'transports' | 'bookings' }) => void
   setProgress: (id: string, tripId: string, done: number, total: number) => void
   setDone: (id: string, tripId: string, items: BookingImportPreviewItem[], warnings: string[]) => void
   setError: (id: string, tripId: string, error: string) => void
@@ -61,7 +71,7 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>()(
 
       return {
         tasks: [],
-        addTask: ({ id, tripId, label, total, files }) => upsert(id, tripId, { label, total, status: 'running', done: 0, sourceFiles: files }),
+        addTask: ({ id, tripId, label, total, files, mode, kind }) => upsert(id, tripId, { label, total, status: 'running', done: 0, sourceFiles: files, mode, kind }),
         setProgress: (id, tripId, done, total) => upsert(id, tripId, { done, total, status: 'running' }),
         setDone: (id, tripId, items, warnings) => upsert(id, tripId, { status: 'done', items, warnings, done: items?.length ?? 0 }),
         setError: (id, tripId, error) => upsert(id, tripId, { status: 'error', error }),
@@ -79,7 +89,9 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>()(
       partialize: (state) => ({
         tasks: state.tasks
           .filter((t) => !t.consumed && t.status !== 'error')
-          .map((t) => ({ id: t.id, tripId: t.tripId, label: t.label, status: t.status, done: t.done, total: t.total })),
+          // `kind` rides along: it is not a review flag but the context the review
+          // needs, and without it a reload silently falls back to 'bookings'.
+          .map((t) => ({ id: t.id, tripId: t.tripId, label: t.label, status: t.status, done: t.done, total: t.total, kind: t.kind })),
       }),
     },
   ),

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { User, Save, Lock, KeyRound, AlertTriangle, Shield, Camera, Trash2, Copy, Download, Printer } from 'lucide-react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from '../../i18n'
 import { useAuthStore } from '../../store/authStore'
 import { useToast } from '../shared/Toast'
+import { escapeHtml } from '@trek/shared'
 import { authApi, adminApi } from '../../api/client'
 import { getApiErrorMessage } from '../../types'
 import type { UserWithOidc } from '../../types'
@@ -11,6 +12,14 @@ import Section from './Section'
 import PasskeysSection from './PasskeysSection'
 
 const MFA_BACKUP_SESSION_KEY = 'trek_mfa_backup_codes_pending'
+
+// Drops every trailing slash, like the `/\/+$/` replace it stands in for — as a scan,
+// because that pattern re-walks the slash run from each start position.
+const stripTrailingSlashes = (value: string): string => {
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') end--
+  return value.slice(0, end)
+}
 
 export default function AccountTab(): React.ReactElement {
   const { user, updateProfile, uploadAvatar, deleteAvatar, logout, loadUser, demoMode, appRequireMfa } = useAuthStore()
@@ -106,7 +115,7 @@ export default function AccountTab(): React.ReactElement {
     if (!backupCodesText) return
     const html = `<!doctype html><html><head><meta charset="utf-8"/><title>TREK MFA Backup Codes</title>
       <style>body{font-family:Arial,sans-serif;padding:32px}h1{font-size:20px}pre{font-size:16px;line-height:1.6}</style>
-      </head><body><h1>TREK MFA Backup Codes</h1><p>${new Date().toLocaleString()}</p><pre>${backupCodesText}</pre></body></html>`
+      </head><body><h1>TREK MFA Backup Codes</h1><p>${escapeHtml(new Date().toLocaleString())}</p><pre>${escapeHtml(backupCodesText)}</pre></body></html>`
     const w = window.open('', '_blank', 'width=900,height=700')
     if (!w) return
     w.document.open()
@@ -197,7 +206,7 @@ export default function AccountTab(): React.ReactElement {
                 placeholder={t('settings.confirmPassword')}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent"
               />
-              <button
+              <button type="button"
                 onClick={async () => {
                   if (!currentPassword) return toast.error(t('settings.currentPasswordRequired'))
                   if (!newPassword) return toast.error(t('settings.passwordRequired'))
@@ -414,7 +423,7 @@ export default function AccountTab(): React.ReactElement {
               </div>
             )}
             <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} />
-            <button
+            <button type="button"
               onClick={() => avatarInputRef.current?.click()}
               style={{
                 position: 'absolute', bottom: -3, right: -3,
@@ -430,7 +439,7 @@ export default function AccountTab(): React.ReactElement {
               <Camera size={14} />
             </button>
             {user?.avatar_url && (
-              <button
+              <button type="button"
                 onClick={handleAvatarRemove}
                 className="bg-[#ef4444] text-white"
                 style={{
@@ -462,14 +471,14 @@ export default function AccountTab(): React.ReactElement {
             </div>
             {(user as UserWithOidc)?.oidc_issuer && (
               <p className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', marginTop: -2 }}>
-                {t('settings.oidcLinked')} {(user as UserWithOidc).oidc_issuer!.replace('https://', '').replace(/\/+$/, '')}
+                {t('settings.oidcLinked')} {stripTrailingSlashes((user as UserWithOidc).oidc_issuer!.replace('https://', ''))}
               </p>
             )}
           </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-          <button
+          <button type="button"
             onClick={saveProfile}
             disabled={saving}
             className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700 disabled:bg-slate-400"
@@ -478,7 +487,7 @@ export default function AccountTab(): React.ReactElement {
             <span className="hidden sm:inline">{t('settings.saveProfile')}</span>
             <span className="sm:hidden">{t('common.save')}</span>
           </button>
-          <button
+          <button type="button"
             onClick={async () => {
               if (user?.role === 'admin') {
                 try {
@@ -507,11 +516,11 @@ export default function AccountTab(): React.ReactElement {
           position: 'fixed', inset: 0, zIndex: 9999,
           backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        }} onClick={() => setShowDeleteConfirm(false)}>
+        }} role="presentation" onClick={e => { if (e.target === e.currentTarget) setShowDeleteConfirm(false) }}>
           <div className="bg-surface-card" style={{
             borderRadius: 16, padding: '28px 24px',
             maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-          }} onClick={e => e.stopPropagation()}>
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <div className="bg-[#fef3c7]" style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Shield size={18} className="text-[#d97706]" />
@@ -522,7 +531,7 @@ export default function AccountTab(): React.ReactElement {
               {t('settings.deleteBlockedMessage')}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
+              <button type="button"
                 onClick={() => setShowDeleteConfirm(false)}
                 className="border border-edge bg-surface-card text-content-secondary"
                 style={{
@@ -543,11 +552,11 @@ export default function AccountTab(): React.ReactElement {
           position: 'fixed', inset: 0, zIndex: 9999,
           backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        }} onClick={() => setShowDeleteConfirm(false)}>
+        }} role="presentation" onClick={e => { if (e.target === e.currentTarget) setShowDeleteConfirm(false) }}>
           <div className="bg-surface-card" style={{
             borderRadius: 16, padding: '28px 24px',
             maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-          }} onClick={e => e.stopPropagation()}>
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <div className="bg-[#fef2f2]" style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Trash2 size={18} className="text-[#ef4444]" />
@@ -558,7 +567,7 @@ export default function AccountTab(): React.ReactElement {
               {t('settings.deleteAccountWarning')}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
+              <button type="button"
                 onClick={() => setShowDeleteConfirm(false)}
                 className="border border-edge bg-surface-card text-content-secondary"
                 style={{
@@ -568,7 +577,7 @@ export default function AccountTab(): React.ReactElement {
               >
                 {t('common.cancel')}
               </button>
-              <button
+              <button type="button"
                 onClick={async () => {
                   try {
                     await authApi.deleteOwnAccount()

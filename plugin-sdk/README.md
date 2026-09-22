@@ -76,6 +76,28 @@ const data = await trek.invoke('/status')   // calls your own route, host-proxie
 trek.notify('success', 'Saved')
 ```
 
+### Keep UI state for this browser tab
+
+The opaque frame cannot use browser storage directly. The bridge provides
+host-managed, JSON-only session state instead. It survives an iframe remount and
+page reload in the same browser tab, but is not durable data. Do not use it to
+store secrets.
+
+```js
+// Default: this user + this plugin + this browser tab.
+await trek.session.set('dismissed-onboarding', true)
+const dismissed = await trek.session.get('dismissed-onboarding')
+
+// Explicitly partition state by the trip in view (fails without a trip context).
+await trek.session.set('filters', ['flight', 'hotel'], { scope: 'trip' })
+```
+
+`get()` returns `undefined` for a missing key. `set`, `get`, `remove`, and
+`clear` accept `{ scope: 'plugin' | 'trip' }`; `plugin` is the default. Use your
+plugin's own logical key (for example `reservation:88:expanded`) for any finer
+partitioning. Each plugin or individual trip scope is limited to 32 keys,
+64 characters per key, and 1 KiB per JSON value.
+
 The kit applies the theme, mirrors the appearance flags (reduced-motion,
 no-transparency) and auto-reports your height. It also upgrades any native
 `<select>` into a host-styled, keyboard-accessible dropdown that matches TREK —
@@ -105,6 +127,65 @@ Your plugin runs in an **isolated child process**. `ctx` is the only way to reac
 TREK, and it grants exactly the permissions your `trek-plugin.json` declares — an
 ungranted call throws `PERMISSION_DENIED`.
 
+## Settings
+
+Declare settings in `trek-plugin.json`; TREK renders the form, you write no settings UI.
+
+```json
+"settings": [
+  { "key": "api_url", "label": "API URL", "default": "https://api.example", "required": true },
+  { "key": "retries", "label": "Retries", "input_type": "number", "default": 3 },
+  { "key": "api_key", "label": "API key", "scope": "user", "secret": true, "required": true },
+  { "key": "region", "label": "Region", "input_type": "select",
+    "options": [{ "value": "eu", "label": "EU" }, { "value": "us", "label": "US" }], "default": "eu" }
+]
+```
+
+| Attribute | Meaning |
+|---|---|
+| `key` | Identifier (`^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$`). |
+| `scope` | `instance` (default) — set once by the admin, arrives in `ctx.config`. `user` — per user, read with `await ctx.settings.get(key)`. |
+| `input_type` | `text` (default), `password`, `number`, `checkbox`, `select` (with `options`). |
+| `default` | The field's value wherever nobody set one. The form pre-fills it **and the runtime resolves it** — `ctx.config.api_url` / `ctx.settings.get('region')` return it until someone saves something else — so a plugin with sensible defaults works before anyone opens the form. Satisfies `required`. Not allowed on a `secret` (the manifest is public); must be a boolean on a `checkbox` and one of the `options` when declared. `trek-plugin dev` seeds its fixtures from these too. |
+| `required` | Enforced: the form refuses Save while the field is blank, and the host answers `400 { error: 'Missing required setting "<key>"' }` if a save reaches it anyway. A `checkbox` is exempt (that would be consent, not a setting). A required `scope:'user'` field also gates whether a notification channel dispatches to that user. |
+| `secret` | Encrypted at rest, decrypted only into the server-side `ctx.config` / `ctx.settings`, masked to the browser, never sent to the iframe. |
+| `label`, `placeholder`, `hint` | Form text. |
+| `options` | `[{ "value", "label" }]` for a `select` (bare strings are accepted and coerced). |
+| `oauth` | Descriptive metadata only — for a host-brokered flow see the OAuth broker below. |
+
+Any other attribute is **silently dropped at install**. `trek-plugin validate` warns on
+one (`manifest.settings-known-keys`) so a typo like `"defalt"` doesn't quietly do nothing.
+
+### Actions
+
+Up to 8 buttons the host renders on a settings form, declared in `trek-plugin.json`
+and implemented in `definePlugin({ actions: { <key>: async (ctx) => ({ ok, message }) } })`:
+
+```json
+"actions": [
+  { "key": "testConnection", "label": "Test connection", "hint": "Pings the API." },
+  { "key": "purgeCache", "label": "Purge cache", "scope": "instance", "danger": true }
+]
+```
+
+| Attribute | Meaning |
+|---|---|
+| `scope` | `user` (default) — renders on the user Settings tab and runs as the clicking user. `instance` — renders in the admin instance-settings dialog and runs as the clicking admin. The default differs from settings fields on purpose: existing manifests keep their user-tab buttons. A host older than TREK 4.2.0 (which introduced action scope) ignores this field entirely and renders the button on every user's Settings tab, running it as each user — so if you declare `scope: "instance"`, set the manifest's `trek` range floor to `>=4.2.0` or the button will run in the wrong place on an older host. |
+| `danger` | Rendered destructive; the host asks for confirmation first. |
+| `hint` | Shown beside the button (≤ 200 chars). |
+
+Either way the handler gets the clicking person as acting user: `ctx.config` is the
+instance config, `ctx.settings.get()` returns their own user value, and trip reads are
+membership-checked against them. Return `{ ok, message }` or throw to report a failed
+action (the host shows the message, emoji-stripped, ≤ 200 chars). An instance action is
+disabled in the dialog until the plugin is active — there is no child process to run it.
+In the mock host, pass `declaredActions: ['testConnection', { key: 'purgeCache', scope: 'instance' }]`
+and drive either with `drv.action(key)`.
+
+`ctx.config` is frozen at activation — the host re-spawns the plugin when the admin
+saves. `ctx.settings.get()` is live per call and returns `undefined` in a userless
+context (`onLoad`, jobs, scheduler) — fall back to `ctx.config` there.
+
 ## Test without a running TREK
 
 ```js
@@ -117,6 +198,55 @@ const { ctx, broadcasts } = createMockHost({
 // the mock enforces the SAME permission model, so you can prove your plugin
 // degrades gracefully when a permission is missing.
 ```
+
+## Runtime limits
+
+The host enforces these limits on every ctx call and hook invocation. They are generous
+for a legitimate plugin and only bite a runaway or abusive one — build against them so
+`dev`/`mock-host` behavior matches production.
+
+| Area | Limit |
+|---|---|
+| `ctx.ai` | 200 calls/day per plugin (UTC midnight rollover); past it throws `"daily AI budget exhausted (resets at UTC midnight)"` |
+| `ctx.notify` | 100 calls/day per plugin (UTC midnight rollover); past it throws `"daily notification budget exhausted (resets at UTC midnight)"` |
+| RPC (every `ctx.*` call) | burst 60, sustained 20/s, 16 in-flight per plugin; a throttled call is refused with `HOST_ERROR: rate limit exceeded — slow down ctx.* calls` |
+| `ctx.db` (your own sqlite) | 256 MB per plugin |
+| `ctx.meta` | 64 KB per value, 256 chars per key, 100 keys per (plugin, entity) |
+| Plugin process | 300 MB RSS ceiling; auto-disabled after 5 crashes in 5 minutes |
+| Event redelivery buffer | 200 events held per plugin, dropped unreplayed after 15 minutes |
+
+Hook contribution caps (declarative content the host renders — a slow/failing call is
+skipped, never fatal):
+
+| Hook | Cap |
+|---|---|
+| `pdfSectionProvider` | ≤5 sections per provider |
+| `atlasLayerProvider` | ≤3 layers per provider |
+| `mapMarkerProvider` | ≤200 markers per provider |
+| `warningProvider` | ≤20 warnings per provider, each message ≤300 chars |
+| `placeDetailProvider` | ≤12 items per provider |
+| `searchProvider` | ≤20 places per provider, 2 s to answer |
+| `photoProvider` | ≤60 photos per page |
+| `calendarSource` | ≤500 events per source per request |
+| `tableContributor` | ≤20 columns / ≤10 actions per entity |
+| `tripCardProvider` | ≤4 badges per trip, ≤240 total per provider |
+
+## OAuth broker
+
+`ctx.oauth.getAccessToken()` is host-brokered outbound OAuth: the plugin never becomes a
+direct OAuth client. The host runs the whole flow (authorize → callback → token exchange
+→ refresh) with PKCE and a 10-minute state TTL, and holds the refresh token + client
+secret — a plugin only ever sees a short-lived access token for the ACTING USER, or
+`null` when they haven't connected (or in a userless context).
+
+Provider config is the plugin's admin-owned INSTANCE settings — declare `scope:'instance'`
+manifest fields named `oauth_authorize_url`, `oauth_token_url`, `oauth_scopes` (optional),
+`oauth_client_id`, `oauth_client_secret`, and the admin fills them in from Settings →
+Plugins → Connect. Both endpoint URLs must be `https` and may not point at loopback,
+`.local`/`.internal` names, or private/metadata addresses — the host refuses to start a
+flow against them. The host exposes
+`/api/plugin-oauth/:id/status|connect|callback|disconnect` to drive the connect UI;
+plugin code itself only ever calls `getAccessToken()`.
 
 ## Capture the screenshot
 
@@ -158,7 +288,28 @@ Needs `git` and an authenticated `gh`. It prints the PR URL at the end.
 
 **Updating** a listed plugin: bump `version` in the manifest, commit, and run
 `publish` again with the new tag — it detects the existing entry and prepends the
-new version, newest-first.
+new version, newest-first. Your TREK-Plugins fork is fast-forwarded automatically
+before the PR branch is cut, so a fork left behind doesn't break the submit (a
+*diverged* fork gets a warning and the `gh repo sync --force` command to fix it).
+
+### When a publish fails
+
+A failure **after** the release is cut (a preflight or PR problem) rolls back
+exactly what that run created — the GitHub release, the pushed tag, the local
+tag — so the same tag is free to re-run against once you've fixed the problem.
+Nothing that existed before the run is ever touched. Pass `--keep-release` to
+keep the release instead; the error then prints the manual cleanup commands.
+
+Two related conveniences:
+
+- A leftover tag from an earlier failed run (it has no release and doesn't point
+  at `HEAD`) is recognised as debris and **moved to your current commit** instead
+  of silently releasing the stale one.
+- `trek-plugin unrelease <vX.Y.Z> --repo you/repo` deletes a stranded release +
+  remote tag + local tag in one go. It checks the published registry index first
+  and **refuses to touch a version that is actually published** — those artifacts
+  are immutable (the registry pins their sha256), so the only way forward there is
+  a new version.
 
 Prefer to drive the steps yourself? They still exist individually — `pack`,
 `release` (pack → GitHub release → entry), `preflight`, `submit` (opens the PR),
@@ -177,7 +328,10 @@ It is a one-way door you may walk through **late**:
 
 - Unsigned throughout is fine — the sha256 pin is the only guarantee, and TREK accepts it.
 - **Unsigned → signed later breaks nobody.** Nothing is pinned until a signed version
-  installs, so adding a key at v1.4.0 is a real option, not a lost cause.
+  installs, so adding a key at v1.4.0 is a real option, not a lost cause. The registry
+  does require every version signed once your key appears in the entry — your first
+  signed update **retro-signs the older versions for you** (each pinned artifact is
+  downloaded, verified against its sha256, and signed with the same key).
 - **Signed → unsigned is refused forever**, on every instance that already has the plugin.
   `publish` refuses that at step 1, before anything is tagged or released.
 
@@ -193,6 +347,7 @@ npx trek-plugin-sdk publish --repo you/repo --tag v1.1.0 --sign   # or just answ
 - `definePlugin(def)` + all the plugin types (`PluginContext`, `PluginRoute`, `PluginJob`, `PhotoProvider`, `CalendarSource`).
 - `PLUGIN_API_VERSION` — embed as `apiVersion` in your manifest.
 - `validateManifest(json)` — the manifest rules the server loader uses.
+- `settingDefaults(manifest, scope)` — the `default`s of one settings scope, keyed by field: what the host resolves for an unset field, and what `dev` seeds `ctx.config` / `ctx.settings` with. Spread it under your own fixtures when calling `createMockHost` to mirror the host. `SETTING_FIELD_KEYS` is the attribute list the host stores.
 - `createMockHost(opts)` (from `trek-plugin-sdk/testing`).
 - `TREK_UI_CSS`, `TREK_THEME_JS`, `TREK_UI_MARKER`, `injectTrekUi(html)` — the design kit, for authors who inline it themselves (a bundler, a custom build). Most plugins just use the `<!-- trek:ui -->` marker instead.
 
@@ -220,6 +375,7 @@ bin if you install the package). `trek-plugin help <command>` — or
 - `preflight [dir] --repo o/n --tag vX [--entry f] [--all]` — the registry checks that need the network: the tag resolves to the pinned commit, the released artifact downloads and hashes, the id is not bound to another owner, and an update does not drop or rotate a published signing key.
 - `submit [dir] --repo o/n --tag vX [--registry o/n] [--draft]` — open the registry PR for you.
 - `release [dir] --repo o/n --tag vX [--sign [key]] [--merge f]` — pack → GitHub release → entry, without opening the PR.
+- `unrelease <vX.Y.Z> [dir] --repo o/n [--yes]` — delete a stranded release + remote tag + local tag. Refuses a version that is published in the registry (immutable); `--yes` consents when the registry index can't be checked.
 
 ## Update notice
 
@@ -251,3 +407,7 @@ It is already silent in CI (any `CI` env var), under `NODE_ENV=test`, and whenev
 stdout isn't a terminal (i.e. when piped or redirected).
 
 The SDK tooling in this repo is MIT. Your plugin is your own code under your own license.
+
+### Roadtrip category searches
+
+The `searchProvider.search` request can include `category` and `bounds` (south, west, north, east). Search within that rectangle for the category; `query` remains a readable category query and `near` its centre, so existing providers continue to work. These optional fields are absent on older hosts and ordinary name searches. The host validates and filters coordinates, namespaces IDs, and applies the exact route corridor after combining sources. The existing permission and two-second hook timeout still apply.

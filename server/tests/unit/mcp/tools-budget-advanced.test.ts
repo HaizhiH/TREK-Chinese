@@ -38,7 +38,15 @@ import { createTables } from '../../../src/db/schema';
 import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
 import { createUser, createTrip, createBudgetItem, addTripMember } from '../../helpers/factories';
-import { createMcpHarness, parseToolResult, type McpHarness } from '../../helpers/mcp-harness';
+import { createMcpHarness, parseToolResult, parseResourceResult, type McpHarness } from '../../helpers/mcp-harness';
+import { BudgetController } from '../../../src/nest/budget/budget.controller';
+import { BudgetService } from '../../../src/nest/budget/budget.service';
+import { DatabaseService } from '../../../src/nest/database/database.service';
+import { ExchangeRatesService } from '../../../src/nest/budget/exchange-rates.service';
+import { PermissionsService } from '../../../src/nest/permissions/permissions.service';
+import { RealtimeService } from '../../../src/nest/realtime/realtime.service';
+import type { TripAccess } from '../../../src/nest/database/database.service';
+import type { User } from '../../../src/types';
 
 beforeAll(() => {
   createTables(testDb);
@@ -49,9 +57,14 @@ beforeEach(() => {
   resetTestDb(testDb);
   broadcastMock.mockClear();
   delete process.env.DEMO_MODE;
+  // get_settlement_summary calls getRates(), which is a real fetch to
+  // api.frankfurter.dev with a 10 s abort. One case used to stub this inline;
+  // hoisted so a second settlement case cannot quietly reintroduce the call.
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
 });
 
 afterAll(() => {
+  vi.unstubAllGlobals();
   testDb.close();
 });
 
@@ -83,7 +96,13 @@ describe('Tool: set_budget_item_members', () => {
       // Regression: returns a hydrated item, not the raw row from updateMembers.
       expect(data.item.members.map((m: any) => m.user_id)).toEqual([user.id]);
       expect(Array.isArray(data.item.payers)).toBe(true);
-      expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'budget:members-updated', expect.any(Object));
+      // Quirk fix: the broadcast carries the REST payload shape (the legacy
+      // MCP-specific { item } shape was a silent no-op in the client handler).
+      expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'budget:members-updated', expect.objectContaining({
+        itemId: item.id,
+        members: expect.arrayContaining([expect.objectContaining({ user_id: user.id })]),
+        persons: 1,
+      }));
     });
   });
 
@@ -215,7 +234,9 @@ describe('Tool: toggle_budget_member_paid', () => {
       });
       const data = parseToolResult(result) as any;
       expect(data.member).toBeDefined();
-      expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'budget:member-paid-updated', expect.any(Object));
+      // Quirk fix: the broadcast carries the REST payload shape (the legacy
+      // MCP-specific { itemId, member } shape was a silent no-op in the client).
+      expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'budget:member-paid-updated', expect.objectContaining({ itemId: item.id, userId: user.id, paid: 1 }));
     });
   });
 
@@ -319,9 +340,41 @@ describe('Settlement tools', () => {
     });
   });
 
+  it('get_settlement_summary agrees with GET /budget/settlement, unpaid expense included (#2225)', async () => {
+    // The two surfaces resolve the trip currency and the rates separately before
+    // calling calculateSettlement, so the parity that matters is on the payload.
+    // The fixture carries the row the fix is about: a total nobody has paid.
+    const { user, other, trip } = tripWithTwo();
+    const paid = createBudgetItem(testDb, trip.id, { total_price: 100 });
+    testDb.prepare('INSERT INTO budget_item_members (budget_item_id, user_id, paid) VALUES (?, ?, 0), (?, ?, 0)')
+      .run(paid.id, user.id, paid.id, other.id);
+    testDb.prepare('INSERT INTO budget_item_payers (budget_item_id, user_id, amount) VALUES (?, ?, ?)')
+      .run(paid.id, user.id, 100);
+    const unpaid = createBudgetItem(testDb, trip.id, { total_price: 40 });
+    testDb.prepare('INSERT INTO budget_item_members (budget_item_id, user_id, paid) VALUES (?, ?, 0)')
+      .run(unpaid.id, other.id);
+
+    const dbService = new DatabaseService(testDb);
+    const controller = new BudgetController(
+      new BudgetService(dbService, new PermissionsService(dbService), new ExchangeRatesService(), new RealtimeService()),
+    );
+    const rest = await controller.settlement(
+      { id: user.id } as User,
+      { id: trip.id, user_id: user.id } as TripAccess,
+      String(trip.id),
+    );
+
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'get_settlement_summary', arguments: { tripId: trip.id } });
+      const data = parseToolResult(result) as { summary: typeof rest };
+      expect(data.summary.balances).toEqual(rest.balances);
+      expect(data.summary.flows).toEqual(rest.flows);
+      // Only the paid 100 settles; the 40 nobody paid is outstanding, not owed.
+      expect(rest.balances.map(b => b.balance)).toEqual([50, -50]);
+    });
+  });
+
   it('get_settlement_summary returns balances and flows', async () => {
-    // Avoid a real exchange-rate network call: force getRates() to fail closed.
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
     try {
       const { user, other, trip } = tripWithTwo();
       // user paid 100 for an item split between both → other owes user 50.
@@ -353,7 +406,7 @@ describe('Resource: trek://trips/{tripId}/budget/per-person', () => {
     const trip = createTrip(testDb, user.id);
     await withResourceHarness(user.id, async (h) => {
       const result = await h.client.readResource({ uri: `trek://trips/${trip.id}/budget/per-person` });
-      const data = JSON.parse(result.contents[0].text as string);
+      const data = parseResourceResult(result);
       expect(Array.isArray(data)).toBe(true);
     });
   });
@@ -364,7 +417,7 @@ describe('Resource: trek://trips/{tripId}/budget/per-person', () => {
     const trip = createTrip(testDb, other.id);
     await withResourceHarness(user.id, async (h) => {
       const result = await h.client.readResource({ uri: `trek://trips/${trip.id}/budget/per-person` });
-      const data = JSON.parse(result.contents[0].text as string);
+      const data = parseResourceResult(result) as { error?: string };
       expect(data.error).toBeDefined();
     });
   });
@@ -380,7 +433,9 @@ describe('Resource: trek://trips/{tripId}/budget/settlement', () => {
     const trip = createTrip(testDb, user.id);
     await withResourceHarness(user.id, async (h) => {
       const result = await h.client.readResource({ uri: `trek://trips/${trip.id}/budget/settlement` });
-      const data = JSON.parse(result.contents[0].text as string);
+      // The resource may answer with a summary object or a bare array, and the
+      // assertion below accepts either, so keep the balances field optional.
+      const data = parseResourceResult(result) as { balances?: unknown };
       expect(data).toBeDefined();
       expect(Array.isArray(data.balances) || Array.isArray(data)).toBe(true);
     });

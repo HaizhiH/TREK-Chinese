@@ -1,14 +1,13 @@
 import { Injectable, HttpException } from '@nestjs/common';
-import { broadcast } from '../../websocket';
-import { checkPermission } from '../../services/permissions';
-import { verifyTripAccess } from '../../services/tripAccess';
-import { createReservation } from '../../services/reservationService';
-import { createPlace } from '../../services/placeService';
-import { createBudgetItem, freezeForeignRate } from '../../services/budgetService';
-import { isAddonEnabled } from '../../services/adminService';
+import { RealtimeService } from '../realtime/realtime.service';
+import { PermissionsService } from '../permissions/permissions.service';
+import { ReservationsService } from '../reservations/reservations.service';
+import { PlacesService } from '../places/places.service';
+import { BudgetService } from '../budget/budget.service';
+import { AddonsService } from '../addons/addons.service';
 import { ADDON_IDS } from '../../addons';
-import { searchNominatim } from '../../services/mapsService';
-import { db } from '../../db/database';
+import { MapsService } from '../maps/maps.service';
+import { DatabaseService, type TripAccess } from '../database/database.service';
 import type { User } from '../../types';
 import { KitineraryExtractorService } from './kitinerary-extractor.service';
 import { LlmParseService } from '../llm-parse/llm-parse.service';
@@ -17,24 +16,36 @@ import { typeToCostCategory } from '@trek/shared';
 import type { BookingImportPreviewItem, BookingImportPreviewResponse, BookingImportConfirmResponse, BookingImportMode, BookingImportFileReport, Reservation } from '@trek/shared';
 import type { ParsedBookingItem, KiReservation } from './kitinerary.types';
 
-function resolveDayId(tripId: string, iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  const date = iso.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const exact = db.prepare('SELECT id FROM days WHERE trip_id = ? AND date = ? LIMIT 1').get(tripId, date) as { id: number } | undefined;
-  if (exact) return exact.id;
-  // Clamp to the nearest trip day so an out-of-range / unmatched check-in still
-  // resolves and the accommodation row is inserted.
-  const nearest = db.prepare('SELECT id FROM days WHERE trip_id = ? ORDER BY ABS(JULIANDAY(date) - JULIANDAY(?)) ASC, date ASC LIMIT 1').get(tripId, date) as { id: number } | undefined;
-  return nearest?.id ?? null;
-}
-
 @Injectable()
 export class BookingImportService {
   constructor(
     private readonly extractor: KitineraryExtractorService,
     private readonly llmParse: LlmParseService,
+    private readonly dbs: DatabaseService,
+    private readonly reservations: ReservationsService,
+    private readonly permissions: PermissionsService,
+    private readonly budget: BudgetService,
+    private readonly addons: AddonsService,
+    private readonly realtime: RealtimeService,
+    private readonly maps: MapsService,
+    private readonly places: PlacesService,
   ) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
+  private resolveDayId(tripId: string, iso: string | null | undefined): number | null {
+    if (!iso) return null;
+    const date = iso.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    const exact = this.db.prepare('SELECT id FROM days WHERE trip_id = ? AND date = ? LIMIT 1').get(tripId, date) as { id: number } | undefined;
+    if (exact) return exact.id;
+    // Clamp to the nearest trip day so an out-of-range / unmatched check-in still
+    // resolves and the accommodation row is inserted.
+    const nearest = this.db.prepare('SELECT id FROM days WHERE trip_id = ? ORDER BY ABS(JULIANDAY(date) - JULIANDAY(?)) ASC, date ASC LIMIT 1').get(tripId, date) as { id: number } | undefined;
+    return nearest?.id ?? null;
+  }
 
   isAvailable(): boolean {
     return this.extractor.isAvailable();
@@ -45,14 +56,6 @@ export class BookingImportService {
     return this.llmParse.isAvailable(userId);
   }
 
-  verifyTripAccess(tripId: string, userId: number) {
-    return verifyTripAccess(tripId, userId);
-  }
-
-  canEdit(trip: NonNullable<ReturnType<typeof verifyTripAccess>>, user: User): boolean {
-    return checkPermission('reservation_edit', user.role, trip.user_id, user.id, trip.user_id !== user.id);
-  }
-
   /**
    * Parse uploaded files and return a preview list. Does NOT persist anything.
    * Runs kitinerary first; depending on `mode`, falls back to the LLM:
@@ -61,6 +64,72 @@ export class BookingImportService {
    *  - force-ai:          LLM on every file (kitinerary skipped)
    * LLM-derived items are flagged needs_review. Per-file AI usage is reported.
    */
+  /**
+   * Give a transport's endpoints coordinates, so they survive the save.
+   *
+   * kitinerary and the LLM name stations, stops, terminals and rental desks but
+   * rarely geo-locate them — only airports come with coordinates, from the
+   * mapper's own airport table. `reservation_endpoints.lat`/`lng` are NOT NULL,
+   * so `saveEndpoints` drops anything without them. That guard is right; what
+   * was missing is this step on the path the clients actually take.
+   *
+   * It lived in confirm() alone, which nothing calls: both the desktop planner
+   * and mobile go preview -> review form -> ordinary save. So an endpoint the
+   * extractor had named appeared in the review step's From -> To summary and
+   * then vanished on save, with nothing shown and nothing logged (#1969).
+   *
+   * The query ladder matches the venue lookup above: name plus the booking's
+   * location first, then the location alone, then the bare name. Name-only is
+   * exactly what fails for a desk label like "Curbside Pickup Counter 7", so it
+   * comes last rather than first.
+   *
+   * Answers are cached for the length of one preview: a multi-leg train repeats
+   * its station names, and this lane is rate limited to roughly one request a
+   * second. Returns the names it could not place, for the caller to warn about
+   * rather than dropping them silently.
+   */
+  private async geocodeEndpoints(
+    endpoints: { name?: string | null; lat?: number | null; lng?: number | null }[] | undefined,
+    context: { location?: string | null; address?: string | null },
+    cache: Map<string, { lat: number; lng: number } | null>,
+  ): Promise<string[]> {
+    if (!Array.isArray(endpoints)) return [];
+    const unresolved: string[] = [];
+
+    for (const ep of endpoints) {
+      if (ep.lat != null && ep.lng != null) continue;
+      if (!ep.name) continue;
+
+      const key = ep.name.toLowerCase();
+      if (cache.has(key)) {
+        const hit = cache.get(key);
+        if (hit) { ep.lat = hit.lat; ep.lng = hit.lng; } else { unresolved.push(ep.name); }
+        continue;
+      }
+
+      const queries = [
+        context.location ? `${ep.name} ${context.location}` : null,
+        context.address ? `${ep.name} ${context.address}` : null,
+        ep.name,
+      ].filter((q): q is string => !!q);
+
+      let found: { lat: number; lng: number } | null = null;
+      try {
+        for (const q of queries) {
+          const hit = await this.maps.geocodeQuery(q);
+          if (hit) { found = hit; break; }
+        }
+      } catch {
+        // geocoding failure is non-fatal — the endpoint stays, and is warned about
+      }
+
+      cache.set(key, found);
+      if (found) { ep.lat = found.lat; ep.lng = found.lng; } else { unresolved.push(ep.name); }
+    }
+
+    return unresolved;
+  }
+
   async preview(
     files: Express.Multer.File[],
     mode: BookingImportMode,
@@ -75,6 +144,10 @@ export class BookingImportService {
 
     const allItems: ParsedBookingItem[] = [];
     const allWarnings: string[] = [];
+    // One lookup per distinct endpoint name across the whole preview: a
+    // multi-leg train repeats its stations, and this lane allows about one
+    // request a second.
+    const geoCache = new Map<string, { lat: number; lng: number } | null>();
     const fileReports: BookingImportFileReport[] = [];
 
     let processed = 0;
@@ -108,6 +181,22 @@ export class BookingImportService {
         const { items, warnings } = mapReservations(kiItems, file.originalname);
         // LLM extraction is less certain than kitinerary — always flag for review.
         if (aiUsed) for (const it of items) it.needs_review = true;
+
+        // Locate the endpoints here, on the path the clients take, rather than
+        // in confirm() where the code used to sit and nothing reached it.
+        for (const it of items) {
+          const missed = await this.geocodeEndpoints(
+            (it as { endpoints?: { name?: string | null; lat?: number | null; lng?: number | null }[] }).endpoints,
+            { location: (it as { location?: string | null }).location, address: (it as { _venue?: { address?: string | null } })._venue?.address },
+            geoCache,
+          );
+          // Kept on the item rather than filtered, so it is still editable in the
+          // review form, and said out loud rather than disappearing on save.
+          for (const name of missed) {
+            allWarnings.push(`${file.originalname}: could not locate "${name}" — set it manually before saving`);
+          }
+        }
+
         allItems.push(...items);
         allWarnings.push(...warnings);
       }
@@ -130,6 +219,7 @@ export class BookingImportService {
     socketId: string | undefined,
   ): Promise<BookingImportConfirmResponse> {
     const created: Reservation[] = [];
+    const confirmGeoCache = new Map<string, { lat: number; lng: number } | null>();
 
     for (const item of items) {
       try {
@@ -150,9 +240,8 @@ export class BookingImportService {
               ].filter((q): q is string => !!q);
 
               for (const q of queries) {
-                const results = await searchNominatim(q);
-                const hit = results[0];
-                if (hit?.lat != null && hit?.lng != null) {
+                const hit = await this.maps.geocodeQuery(q);
+                if (hit) {
                   lat = hit.lat;
                   lng = hit.lng;
                   break;
@@ -163,7 +252,7 @@ export class BookingImportService {
             }
           }
 
-          const place = createPlace(tripId, {
+          const place = this.places.create(tripId, {
             name: _venue.name,
             lat,
             lng,
@@ -172,26 +261,19 @@ export class BookingImportService {
             phone: _venue.phone,
           });
           placeId = (place as any).id;
-          broadcast(tripId, 'place:created', { place }, socketId);
+          this.realtime.broadcast(tripId, 'place:created', { place }, socketId);
         }
 
-        // Geocode transport endpoints (stations/stops/terminals/rental desks) that
-        // arrived without coords, so the route draws and map pins appear. The LLM
-        // and kitinerary rarely supply geo for non-airport endpoints.
+        // The same lookup preview() runs, through the same helper. On anything
+        // that came from a preview this is a no-op, since the endpoints already
+        // carry coordinates; it stays because this route can also be called
+        // with items that never went through one.
         if (Array.isArray(reservationData.endpoints)) {
-          for (const ep of reservationData.endpoints) {
-            if ((ep.lat == null || ep.lng == null) && ep.name) {
-              try {
-                const hit = (await searchNominatim(ep.name))[0];
-                if (hit?.lat != null && hit?.lng != null) {
-                  ep.lat = hit.lat;
-                  ep.lng = hit.lng;
-                }
-              } catch {
-                // geocoding failure is non-fatal
-              }
-            }
-          }
+          await this.geocodeEndpoints(
+            reservationData.endpoints,
+            { location: (reservationData as { location?: string | null }).location, address: _venue?.address },
+            confirmGeoCache,
+          );
           // Persist only coord'd endpoints (reservation_endpoints needs lat/lng);
           // ungeocodable ones still appeared in the preview's From→To.
           reservationData.endpoints = reservationData.endpoints.filter((ep) => ep.lat != null && ep.lng != null);
@@ -202,8 +284,8 @@ export class BookingImportService {
         // the accommodation row is actually inserted (createReservation gates on them).
         let createAccommodation: { place_id?: number; start_day_id?: number; end_day_id?: number; check_in?: string; check_out?: string; confirmation?: string } | undefined;
         if (item.type === 'hotel' && _accommodation) {
-          const startDayId = resolveDayId(tripId, _accommodation.check_in);
-          const endDayId   = resolveDayId(tripId, _accommodation.check_out);
+          const startDayId = this.resolveDayId(tripId, _accommodation.check_in);
+          const endDayId   = this.resolveDayId(tripId, _accommodation.check_out);
           createAccommodation = {
             place_id: placeId,
             start_day_id: startDayId ?? undefined,
@@ -214,25 +296,25 @@ export class BookingImportService {
           };
         }
 
-        const { reservation, accommodationCreated } = createReservation(tripId, {
+        const { reservation, accommodationCreated } = this.reservations.create(tripId, {
           ...reservationData,
           place_id: placeId,
           create_accommodation: createAccommodation,
         } as any);
 
-        broadcast(tripId, 'reservation:created', { reservation }, socketId);
+        this.realtime.broadcast(tripId, 'reservation:created', { reservation }, socketId);
         if (accommodationCreated) {
-          broadcast(tripId, 'accommodation:created', {}, socketId);
+          this.realtime.broadcast(tripId, 'accommodation:created', {}, socketId);
         }
 
         // Turn an extracted price into a real linked cost (Costs addon), so the
         // booking shows up as an expense — not just a price in metadata.
-        if (isAddonEnabled(ADDON_IDS.BUDGET)) {
+        if (this.addons.isAddonEnabled(ADDON_IDS.BUDGET)) {
           const meta =
             reservationData.metadata && typeof reservationData.metadata === 'object'
               ? (reservationData.metadata as Record<string, unknown>)
               : null;
-          const price = meta && meta.price != null ? Number(meta.price) : NaN;
+          const price = meta && meta.price != null ? Number(meta.price) : Number.NaN;
           if (Number.isFinite(price) && price > 0) {
             try {
               const budgetData = {
@@ -244,9 +326,9 @@ export class BookingImportService {
               };
               // Freeze the live FX rate for a foreign-currency booking price so a
               // settled position isn't re-opened when live rates drift (#1445).
-              await freezeForeignRate(tripId, budgetData);
-              const budgetItem = createBudgetItem(tripId, budgetData);
-              broadcast(tripId, 'budget:created', { item: budgetItem }, socketId);
+              await this.budget.freezeForeignRate(tripId, budgetData);
+              const budgetItem = this.budget.createBudgetItem(tripId, budgetData);
+              this.realtime.broadcast(tripId, 'budget:created', { item: budgetItem }, socketId);
             } catch (err) {
               console.error(
                 `[booking-import] Failed to create cost for "${item.title}":`,

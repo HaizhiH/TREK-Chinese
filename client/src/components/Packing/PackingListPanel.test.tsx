@@ -1,6 +1,6 @@
 // FE-COMP-PACKING-001 to FE-COMP-PACKING-020
 import { vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '../../../tests/helpers/render';
+import { render, screen, waitFor, fireEvent, within } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
@@ -58,9 +58,11 @@ describe('PackingListPanel', () => {
     expect(els.length).toBeGreaterThan(0);
   });
 
-  it('FE-COMP-PACKING-003: empty state shows hint text', () => {
-    render(<PackingListPanel tripId={1} items={[]} />);
-    expect(screen.getByText(/Add items or use the suggestions/i)).toBeInTheDocument();
+  it('FE-COMP-PACKING-003: empty state shows the packing mascot illustration', () => {
+    const { container } = render(<PackingListPanel tripId={1} items={[]} />);
+    // The reworded empty state drops the old hint copy in favour of the shared
+    // EmptyState: the TREK mascot acting out the "packing" scene beside the title.
+    expect(container.querySelector('.trek--packing')).toBeInTheDocument();
   });
 
   it('FE-COMP-PACKING-004: shows items from props grouped by category', () => {
@@ -169,7 +171,7 @@ describe('PackingListPanel', () => {
     const user = userEvent.setup();
     render(<PackingListPanel tripId={1} items={[]} />);
     await user.click(screen.getByText('Add list'));
-    await screen.findByPlaceholderText('List name (e.g. Clothing)');
+    expect(await screen.findByPlaceholderText('List name (e.g. Clothing)')).toBeInTheDocument();
   });
 
   it('FE-COMP-PACKING-016: delete item button exists and triggers API call', async () => {
@@ -390,7 +392,7 @@ describe('PackingListPanel', () => {
     render(<PackingListPanel tripId={1} items={[]} />);
 
     // "Apply template" button appears when templates are available
-    await screen.findByText('Apply template');
+    expect(await screen.findByText('Apply template')).toBeInTheDocument();
   });
 
   it('FE-COMP-PACKING-031: "Uncheck All" bulk action calls PUT to uncheck checked items', async () => {
@@ -445,7 +447,7 @@ describe('PackingListPanel', () => {
     const { container } = render(<PackingListPanel tripId={1} items={[]} />);
 
     // Click the Import button (Upload icon in the header)
-    const importBtn = container.querySelector('svg.lucide-upload')?.closest('button');
+    const importBtn = container.querySelector('svg.lucide-download')?.closest('button');
     expect(importBtn).toBeTruthy();
     await user.click(importBtn!);
 
@@ -536,7 +538,7 @@ describe('PackingListPanel', () => {
     const { container } = render(<PackingListPanel tripId={1} items={[]} />);
 
     // Open import modal
-    const importBtn = container.querySelector('svg.lucide-upload')?.closest('button');
+    const importBtn = container.querySelector('svg.lucide-download')?.closest('button');
     await user.click(importBtn!);
     await screen.findByText('Import Packing List');
 
@@ -653,7 +655,7 @@ describe('PackingListPanel', () => {
     const { container } = render(<PackingListPanel tripId={1} items={[]} />);
 
     // Open import modal
-    const importBtn = container.querySelector('svg.lucide-upload')?.closest('button');
+    const importBtn = container.querySelector('svg.lucide-download')?.closest('button');
     await user.click(importBtn!);
     await screen.findByText('Import Packing List');
 
@@ -897,9 +899,10 @@ describe('PackingListPanel', () => {
     const packageBtn = container.querySelector('svg.lucide-package')?.closest('button');
     fireEvent.click(packageBtn!);
 
-    // Picker is open - find "Trolley" button inside the dropdown
-    // The dropdown renders as an absolute positioned div inside the item row
-    const trolleyBtn = await screen.findByRole('button', { name: /Trolley/ });
+    // Picker is open - find "Trolley" button inside the dropdown. The bag
+    // sidebar carries the same name on its own button, so scope the query to
+    // the picker (the dropdown is a sibling of the package button).
+    const trolleyBtn = await within(packageBtn!.parentElement!).findByRole('button', { name: /Trolley/ });
     fireEvent.click(trolleyBtn);
 
     await waitFor(() => expect(putBody).toMatchObject({ bag_id: 7 }));
@@ -927,7 +930,7 @@ describe('PackingListPanel', () => {
     const { container } = render(<PackingListPanel tripId={1} items={[]} />);
 
     // Open import modal
-    const importBtn = container.querySelector('svg.lucide-upload')?.closest('button');
+    const importBtn = container.querySelector('svg.lucide-download')?.closest('button');
     await user.click(importBtn!);
     await screen.findByText('Import Packing List');
 
@@ -1213,7 +1216,7 @@ describe('PackingListPanel', () => {
     const { container } = render(<PackingListPanel tripId={1} items={[]} />);
 
     // Open import modal
-    const importBtn = container.querySelector('svg.lucide-upload')?.closest('button');
+    const importBtn = container.querySelector('svg.lucide-download')?.closest('button');
     await user.click(importBtn!);
     await screen.findByText('Import Packing List');
 
@@ -1316,6 +1319,60 @@ describe('PackingListPanel', () => {
     await user.keyboard('{Enter}');
 
     await waitFor(() => expect(updateBody).toMatchObject({ name: 'Luggage' }));
+  });
+
+  // #207: the column, the contract and the API have existed since v2.9.0 — there was
+  // simply no way to type a limit in, so users encoded it in the bag name instead.
+  it('FE-COMP-PACKING-065b: a bag without a limit offers to set one, in kg', async () => {
+    const user = userEvent.setup();
+    let updateBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get('/api/addons', () => HttpResponse.json({ bagTracking: true, addons: [] })),
+      http.get('/api/trips/:id/packing/bags', () =>
+        HttpResponse.json({ bags: [{ id: 12, name: 'Cabin bag', color: '#10b981', weight_limit_grams: null, members: [] }] })
+      ),
+      http.put('/api/trips/1/packing/bags/12', async ({ request }) => {
+        updateBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ bag: { id: 12, name: 'Cabin bag', color: '#10b981', weight_limit_grams: 8000, members: [] } });
+      })
+    );
+    render(<PackingListPanel tripId={1} items={[buildPackingItem({ name: 'Jacket', category: 'Clothing' })]} />);
+
+    await waitFor(() => expect(screen.getAllByText('Set limit').length).toBeGreaterThan(0));
+    await user.click(screen.getAllByText('Set limit')[0]);
+
+    const limitInput = await screen.findByLabelText('Weight limit');
+    await user.type(limitInput, '8');
+    await user.keyboard('{Enter}');
+
+    // Entered in kilograms, stored in grams.
+    await waitFor(() => expect(updateBody).toMatchObject({ weight_limit_grams: 8000 }));
+  });
+
+  it('FE-COMP-PACKING-065c: an existing limit is shown next to the packed weight and can be cleared', async () => {
+    const user = userEvent.setup();
+    let updateBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get('/api/addons', () => HttpResponse.json({ bagTracking: true, addons: [] })),
+      http.get('/api/trips/:id/packing/bags', () =>
+        HttpResponse.json({ bags: [{ id: 13, name: 'Hold bag', color: '#6366f1', weight_limit_grams: 20000, members: [] }] })
+      ),
+      http.put('/api/trips/1/packing/bags/13', async ({ request }) => {
+        updateBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ bag: { id: 13, name: 'Hold bag', color: '#6366f1', weight_limit_grams: null, members: [] } });
+      })
+    );
+    render(<PackingListPanel tripId={1} items={[buildPackingItem({ name: 'Boots', category: 'Clothing' })]} />);
+
+    await waitFor(() => expect(screen.getAllByText(/\/ 20\.0 kg/).length).toBeGreaterThan(0));
+
+    await user.click(screen.getAllByText(/\/ 20\.0 kg/)[0]);
+    const limitInput = await screen.findByLabelText('Weight limit');
+    await user.clear(limitInput);
+    await user.keyboard('{Enter}');
+
+    // An emptied field clears the limit rather than writing 0.
+    await waitFor(() => expect(updateBody).toMatchObject({ weight_limit_grams: null }));
   });
 
   it('FE-COMP-PACKING-066: BagCard Plus button opens user picker with trip members', async () => {
@@ -1444,7 +1501,7 @@ describe('PackingListPanel', () => {
     const { container } = render(<PackingListPanel tripId={1} items={[]} />);
 
     // Open import modal
-    const importBtn = container.querySelector('svg.lucide-upload')?.closest('button');
+    const importBtn = container.querySelector('svg.lucide-download')?.closest('button');
     await user.click(importBtn!);
     await screen.findByText('Import Packing List');
 

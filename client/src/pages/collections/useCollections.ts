@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from '../../i18n'
 import { useElementSize } from '../../hooks/useElementSize'
 import { useElementRect } from '../../hooks/useElementRect'
 import { useSettingsStore } from '../../store/settingsStore'
 import { useAuthStore } from '../../store/authStore'
 import { useToast } from '../../components/shared/Toast'
+import { collectionsApi } from '../../api/collections'
+import { downloadCollectionFile, downloadCollectionGpx, type CollectionExportFormat } from '../../components/Collections/collectionFile'
 import { getApiErrorMessage } from '../../types'
 import { addListener, removeListener } from '../../api/websocket'
 import { useCollectionStore, ALL_SAVED } from '../../store/collectionStore'
 import type { ActiveCollectionId } from '../../store/collectionStore'
 import { categoriesApi } from '../../api/client'
-import type { Collection, CollectionStatus } from '@trek/shared'
+import type { Collection, CollectionStatus, CollectionFile } from '@trek/shared'
 import type { Category, Place } from '../../types'
 import { filterPlaces, sortPlaces, statusCounts, mappablePlaces, presentCategories, presentLabels } from './collectionsModel'
 import type { CollectionLabelUpdateRequest } from '@trek/shared'
@@ -50,15 +52,15 @@ export function useCollections() {
   const store = useCollectionStore()
   const {
     collections, activeId, places, members, labels, incomingInvites,
-    view, statusFilter, categoryFilter, labelFilter, search, selectedPlaceId, selectMode, selectedIds,
+    view, statusFilter, categoryFilter, ratingFilter, labelFilter, sortMode, search, selectedPlaceId, selectMode, selectedIds,
     loading, placesLoading,
     loadAll, setActive, refreshActive, loadCollection,
     deleteCollection,
-    setStatus, updatePlace, deletePlace, deleteMany, copyToTrip, clearSelection,
+    setStatus, updatePlace, uploadPlaceImage, ratePlace, deletePlace, deleteMany, copyToTrip, clearSelection,
     moveToList, duplicateToList, setSelectedIds,
     createLabel, updateLabel, deleteLabel, assignLabels,
     acceptInvite, declineInvite,
-    setView, setStatusFilter, setCategoryFilter, setLabelFilter, setSearch, setSelectedPlaceId, setSelectMode, toggleSelect,
+    setView, setStatusFilter, setCategoryFilter, setRatingFilter, setLabelFilter, setSortMode, setSearch, setSelectedPlaceId, setSelectMode, toggleSelect,
   } = store
 
   // ── Page-local UI state ─────────────────────────────────────────────
@@ -68,6 +70,11 @@ export function useCollections() {
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
   const [showShare, setShowShare] = useState(false)
   const [showAddPlace, setShowAddPlace] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  // Export / import as a file (#2198) — distinct from showImport above, which
+  // is the "pull places out of one of my trips" dialog.
+  const [exporting, setExporting] = useState(false)
+  const [showImportFile, setShowImportFile] = useState(false)
   // The place ids the Copy-to-trip modal is open for (null = closed). Single
   // place from the detail panel, or the select-mode set for a bulk copy.
   const [copyIds, setCopyIds] = useState<number[] | null>(null)
@@ -163,12 +170,23 @@ export function useCollections() {
   useEffect(() => { setShowShare(false) }, [activeId])
 
   const ownedLists = useMemo(() => collections.filter(c => c.is_owner !== false), [collections])
+  /**
+   * Lists a file may be added to: the person's own, plus a shared one where
+   * they are an editor or an admin. Same rule the server applies on the way in,
+   * so the import dialog never offers a list the import would refuse.
+   */
+  const writableLists = useMemo(
+    () => collections.filter(c => c.is_owner !== false || (c.members ?? []).some(
+      m => m.user_id === currentUserId && m.status === 'accepted' && (m.role === 'editor' || m.role === 'admin'),
+    )),
+    [collections, currentUserId],
+  )
   const sharedLists = useMemo(() => collections.filter(c => c.is_owner === false), [collections])
 
   // Labels are per-collection, so never apply them on the "All saved" union.
   const visiblePlaces = useMemo(
-    () => sortPlaces(filterPlaces(places, statusFilter, search, categoryFilter, isAllSaved ? [] : labelFilter)),
-    [places, statusFilter, search, categoryFilter, isAllSaved, labelFilter],
+    () => sortPlaces(filterPlaces(places, statusFilter, search, categoryFilter, isAllSaved ? [] : labelFilter, ratingFilter), sortMode),
+    [places, statusFilter, search, categoryFilter, isAllSaved, labelFilter, ratingFilter, sortMode],
   )
   // Categories actually present in this list, for the category filter dropdown.
   const categoryOptions = useMemo(() => presentCategories(places), [places])
@@ -177,6 +195,11 @@ export function useCollections() {
   // Stable reference so the map doesn't tear down + rebuild every marker on each
   // unrelated re-render (which would swallow marker clicks mid-rebuild).
   const mappable = useMemo(() => mappablePlaces(visiblePlaces), [visiblePlaces])
+  // Whether this list has anything mappable AT ALL, filters aside. The layout
+  // hangs off this rather than off `mappable`: a label with no places left the
+  // filtered set empty, which tore the map out and reflowed the page to full
+  // width. The filter should empty the map, not remove it.
+  const hasMappable = useMemo(() => mappablePlaces(places).length > 0, [places])
   const counts = useMemo(() => statusCounts(places), [places])
 
   // ── Handlers ────────────────────────────────────────────────────────
@@ -192,6 +215,88 @@ export function useCollections() {
   }, [navigate])
 
   const handlePlaceAdded = useCallback(() => { refreshActive() }, [refreshActive])
+
+  /**
+   * Download the active list as a file, in the format picked from the menu.
+   *
+   * The file is fetched rather than built from what this page holds: the page
+   * has the places for display, the server decides what may leave the instance.
+   * A GPX holds only places with coordinates, so the rest are counted and the
+   * count is said; a list with none at all gets no empty file (#2301).
+   */
+  const handleExportList = useCallback(async (format: CollectionExportFormat = 'trek') => {
+    if (typeof activeId !== 'number') return
+    setExporting(true)
+    try {
+      if (format === 'trek') {
+        downloadCollectionFile(await collectionsApi.exportFile(activeId))
+        return
+      }
+      const result = await collectionsApi.exportGpx(activeId)
+      if (result.waypoints === 0) {
+        toast.warning(t('collections.file.gpxNothing'))
+        return
+      }
+      downloadCollectionGpx(result.name, result.gpx)
+      if (result.omitted > 0) toast.info(t('collections.file.gpxOmitted', { count: result.omitted }))
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, t('common.error')))
+    } finally {
+      setExporting(false)
+    }
+  }, [activeId, toast, t])
+
+  /** A GPX read into a list file for the import dialog to show. The server does the parsing. */
+  const handleReadGpx = useCallback(
+    (gpx: string, fileName: string) => collectionsApi.readGpx({ gpx, file_name: fileName }),
+    [],
+  )
+
+  /**
+   * Read a chosen file and create the list it describes.
+   *
+   * Lands on the new list, because that is the thing the person was after and
+   * an import that leaves you where you were reads as one that did nothing.
+   */
+  const handleImportFile = useCallback(async (file: CollectionFile, name?: string) => {
+    const result = await collectionsApi.importFile({ file, name })
+    await loadAll()
+    const created = result.collection as Collection
+    navigate(`/collections/${created.id}`)
+    if (result.skipped > 0) {
+      toast.info(t('collections.file.doneSkipped', { count: result.imported, skipped: result.skipped }))
+    } else {
+      toast.success(t('collections.file.done', { count: result.imported }))
+    }
+    setShowImportFile(false)
+  }, [loadAll, navigate, toast, t])
+
+  /**
+   * Read a chosen file into a list that is already there.
+   *
+   * Lands on that list, for the same reason a new one does. Nothing in it is
+   * overwritten: the server counts the places it already had and leaves them,
+   * and the toast says so rather than letting a file quietly do less than it
+   * looked like it would.
+   */
+  const handleImportFileInto = useCallback(async (file: CollectionFile, collectionId: number) => {
+    const result = await collectionsApi.importFileInto(collectionId, { file })
+    const name = (result.collection as Collection).name
+    const duplicates = result.duplicates ?? 0
+    await loadAll()
+    if (activeId === collectionId) refreshActive()
+    else navigate(`/collections/${collectionId}`)
+    if (result.imported === 0 && duplicates > 0) {
+      toast.info(t('collections.file.doneIntoNothing', { name }))
+    } else if (duplicates > 0) {
+      toast.success(t('collections.file.doneIntoDuplicates', { count: result.imported, duplicates, name }))
+    } else if (result.skipped > 0) {
+      toast.info(t('collections.file.doneSkipped', { count: result.imported, skipped: result.skipped }))
+    } else {
+      toast.success(t('collections.file.doneInto', { count: result.imported, name }))
+    }
+    setShowImportFile(false)
+  }, [activeId, loadAll, refreshActive, navigate, toast, t])
 
   const handleDeleteList = useCallback(async () => {
     if (confirmDeleteList == null) return
@@ -220,6 +325,14 @@ export function useCollections() {
       toast.error(getApiErrorMessage(err, t('common.error')))
     }
   }, [deletePlace, toast, t])
+
+  const handleRatePlace = useCallback(async (placeId: number, rating: number | null) => {
+    try {
+      await ratePlace(placeId, rating)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, t('common.error')))
+    }
+  }, [ratePlace, toast, t])
 
   const handleDeleteSelected = useCallback(async () => {
     if (selectedIds.length === 0) return
@@ -377,19 +490,23 @@ export function useCollections() {
     collections, ownedLists, sharedLists, activeCollection, isAllSaved, isOwner,
     myRole, canEdit, canDelete,
     canShare, shareMemberCount,
-    activeId, places, visiblePlaces, mappable, members, incomingInvites, counts,
-    view, statusFilter, categoryFilter, categoryOptions, search, selectedPlaceId, selectMode, selectedIds,
+    activeId, places, visiblePlaces, mappable, hasMappable, members, incomingInvites, counts,
+    view, statusFilter, categoryFilter, categoryOptions, ratingFilter, sortMode, search, selectedPlaceId, selectMode, selectedIds,
     labels, labelFilter, labelOptions,
     loading, placesLoading,
     // store setters
-    setView, setStatusFilter, setCategoryFilter, setLabelFilter, setSearch, setSelectedPlaceId, setSelectMode, toggleSelect,
-    updatePlace,
+    setView, setStatusFilter, setCategoryFilter, setRatingFilter, setLabelFilter, setSortMode, setSearch, setSelectedPlaceId, setSelectMode, toggleSelect,
+    updatePlace, uploadPlaceImage,
     // labels
     showLabelManager, setShowLabelManager, labelPickerOpen, setLabelPickerOpen,
     handleCreateLabel, handleUpdateLabel, handleDeleteLabel, handleBulkAssignLabels, handleAssignPlaceLabels,
     // local UI state
     editorTarget, setEditorTarget, handleEditorCreated,
     showAddPlace, setShowAddPlace, handlePlaceAdded,
+    showImport, setShowImport,
+    exporting, handleExportList,
+    showImportFile, setShowImportFile, handleImportFile, handleImportFileInto, handleReadGpx,
+    writableLists,
     confirmDeleteList, setConfirmDeleteList,
     mobileRailOpen, setMobileRailOpen,
     showShare, setShowShare, handleAfterLeave,
@@ -399,7 +516,7 @@ export function useCollections() {
     copyIds, openCopyForSelectedPlace, openCopyForSelection, closeCopy, handleCopyToTrip,
     // handlers
     handleSelectList, handleDeleteList,
-    handleStatusChange, handleDeletePlace, handleDeleteSelected,
+    handleStatusChange, handleRatePlace, handleDeletePlace, handleDeleteSelected,
     handleAcceptInvite, handleDeclineInvite,
     allVisibleSelected, handleSelectAll,
     listPickerMode, setListPickerMode, handleMoveToList, handleDuplicateToList,

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
 import en from '@trek/shared/i18n/en'
 import type { SupportedLanguageCode } from '@trek/shared'
@@ -120,6 +120,10 @@ export function TranslationProvider({ children }: TranslationProviderProps) {
     let cancelled = false
     loader().then(mod => {
       if (!cancelled) setStrings(mod.default)
+    }).catch(err => {
+      // The locale chunk can be gone after a deploy. Keep the strings we have —
+      // an untranslated UI beats an unhandled rejection and a blank screen.
+      console.error('[i18n] locale chunk failed to load', err)
     })
     return () => { cancelled = true }
   }, [language])
@@ -129,7 +133,9 @@ export function TranslationProvider({ children }: TranslationProviderProps) {
       let val: string = (strings[key] ?? en[key] ?? key) as string
       if (params) {
         Object.entries(params).forEach(([k, v]) => {
-          val = val.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v))
+          // Function replacement: a value carrying `$&` or `$1` (a trip named
+          // "A$&B") would otherwise be expanded as a replacement pattern.
+          val = val.replace(new RegExp(`\\{${k}\\}`, 'g'), () => String(v))
         })
       }
       return val
@@ -141,7 +147,7 @@ export function TranslationProvider({ children }: TranslationProviderProps) {
         Object.entries(params).forEach(([k, v]) => {
           // Escape BEFORE substitution so a user-controlled value with `<` or
           // `&` cannot break out of the surrounding template's markup.
-          val = val.replace(new RegExp(`\\{${k}\\}`, 'g'), escapeHtml(String(v)))
+          val = val.replace(new RegExp(`\\{${k}\\}`, 'g'), () => escapeHtml(String(v)))
         })
       }
       // Then re-sanitise the fully-built string: even if a translator ships a
@@ -153,7 +159,7 @@ export function TranslationProvider({ children }: TranslationProviderProps) {
     return { t, tHtml, language, locale: getLocaleForLanguage(language) }
   }, [strings, language])
 
-  return <TranslationContext.Provider value={value}>{children}</TranslationContext.Provider>
+  return <TranslationContext value={value}>{children}</TranslationContext>
 }
 
 export function useTranslation(): TranslationContextValue {

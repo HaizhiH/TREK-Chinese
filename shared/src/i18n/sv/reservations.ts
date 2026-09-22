@@ -70,6 +70,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Kryssning',
   'reservations.type.event': 'Evenemang',
   'reservations.type.tour': 'Rundtur',
+  'reservations.type.parking': 'Parkering',
   'reservations.type.other': 'Övrigt',
   'reservations.type.bus': 'Buss',
   'reservations.type.ferry': 'Färja',
@@ -127,6 +128,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': 'Ankomst',
   'reservations.span.inTransit': 'Under transport',
   'reservations.span.pickup': 'Upphämtning',
+  'reservations.span.dropOff': 'Inlämning',
   'reservations.span.return': 'Återlämning',
   'reservations.span.active': 'Aktiv',
   'reservations.span.start': 'Start',
@@ -161,6 +163,8 @@ const reservations: TranslationStrings = {
   'reservations.airtrail.syncedHint': 'Synkroniserat från AirTrail – ändringarna synkroniseras åt båda hållen.',
   'reservations.airtrail.notSynced': 'Ej synkroniserad',
   'reservations.airtrail.notSyncedHint': 'Denna flygning har tagits bort i AirTrail och synkroniseras inte längre.',
+  'reservations.airtrail.layoverHint':
+    'Importerad från AirTrail. En flerdelad flygning med mellanlandning har ingen enskild AirTrail-flygning att synkronisera mot och förblir därför en engångsimport.',
   'reservations.airtrail.loadError': 'Det gick inte att hämta dina AirTrail-flygningar.',
   'reservations.airtrail.imported': '{count} flygning(ar) importerades',
   'reservations.airtrail.skippedDuplicate': '{count} redan under den här resan, hoppade över',
@@ -180,5 +184,8 @@ const reservations: TranslationStrings = {
   'reservations.removeExpense': 'Ta bort utgiften',
   'reservations.urlLabel': 'Länk',
   'reservations.urlPlaceholder': 'https://...',
+  'reservations.travelers.label': 'Resenärer',
+  'reservations.travelers.assign': 'Tilldela resenärer',
+  'reservations.travelers.none': 'Inga resedeltagare ännu.',
 };
 export default reservations;

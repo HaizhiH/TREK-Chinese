@@ -1,3 +1,5 @@
+import { localIsoDate } from './localDate'
+
 export type JourneyLifecycle = 'archived' | 'live' | 'upcoming' | 'completed' | 'draft'
 
 export function computeJourneyLifecycle(
@@ -8,7 +10,7 @@ export function computeJourneyLifecycle(
   if (status === 'archived') return 'archived'
 
   if (tripDateMin && tripDateMax) {
-    const today = new Date().toISOString().split('T')[0]
+    const today = localIsoDate()
     if (tripDateMin <= today && today <= tripDateMax) return 'live'
     if (tripDateMin > today) return 'upcoming'
     return 'completed'
@@ -20,11 +22,11 @@ export function computeJourneyLifecycle(
 
   // Single boundary: only start or only end
   if (tripDateMin && !tripDateMax) {
-    const today = new Date().toISOString().split('T')[0]
+    const today = localIsoDate()
     return tripDateMin > today ? 'upcoming' : 'live'
   }
   if (!tripDateMin && tripDateMax) {
-    const today = new Date().toISOString().split('T')[0]
+    const today = localIsoDate()
     return tripDateMax < today ? 'completed' : 'live'
   }
 

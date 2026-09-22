@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': '行程',
   'oauth.scope.group.places': '地點',
+  'oauth.scope.group.collections': '收藏集',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': '行李',
   'oauth.scope.group.todos': '待辦事項',
@@ -26,6 +27,10 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': '讀取地點、每日指派、標籤及類別',
   'oauth.scope.places:write.label': '管理地點',
   'oauth.scope.places:write.description': '建立、更新及刪除地點、指派及標籤',
+  'oauth.scope.collections:read.label': '檢視收藏集',
+  'oauth.scope.collections:read.description': '讀取地點收藏集及其中的地點、評分、標籤與成員',
+  'oauth.scope.collections:write.label': '管理收藏集',
+  'oauth.scope.collections:write.description': '建立/編輯收藏集，儲存、評分、標記及複製地點，並分享清單',
   'oauth.scope.atlas:read.label': '檢視 Atlas',
   'oauth.scope.atlas:read.description': '讀取已造訪的國家、地區及願望清單',
   'oauth.scope.atlas:write.label': '管理 Atlas',
@@ -87,5 +92,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': '檔案',
+  'oauth.scope.group.settings': '設定',
+  'oauth.scope.files:read.label': '檢視行程檔案',
+  'oauth.scope.files:read.description': '列出行程的文件：名稱、大小、上傳者以及關聯的對象',
+  'oauth.scope.files:write.label': '管理行程檔案',
+  'oauth.scope.files:write.description': '重新命名與描述檔案，關聯至訂位和地點，加上星號並移至垃圾桶',
+  'oauth.scope.files:content.label': '讀取檔案內容',
+  'oauth.scope.files:content.description': '讀取已上傳文件的內容，例如訂位 PDF 或票券',
+  'oauth.scope.settings:read.label': '檢視你的偏好設定',
+  'oauth.scope.settings:read.description': '讀取單位、時間格式、語言、預設貨幣和起始頁',
+  'oauth.scope.settings:write.label': '更改你的偏好設定',
+  'oauth.scope.settings:write.description': '更改單位、時間格式、語言、預設貨幣和起始頁。絕不涉及已儲存的 API 金鑰',
+  'oauth.scope.group.plugins': '外掛',
+  'oauth.scope.plugins:use.label': '執行外掛工具',
+  'oauth.scope.plugins:use.description': '允許此用戶端呼叫由管理員安裝並核准的外掛所發布的工具。每個外掛都以其已獲授予的權限運作，而非以此權杖的權限範圍運作',
 };
 export default oauth;

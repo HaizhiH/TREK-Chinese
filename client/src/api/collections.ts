@@ -9,6 +9,14 @@ import type {
   CollectionUpdateRequest,
   CollectionSavePlaceRequest,
   CollectionSaveFromTripRequest,
+  CollectionImportablesResponse,
+  CollectionFile,
+  CollectionImportRequest,
+  CollectionImportIntoRequest,
+  CollectionImportResult,
+  CollectionGpxExport,
+  CollectionGpxReadRequest,
+  CollectionGpxReadResult,
   CollectionPlaceUpdateRequest,
   CollectionCopyToTripRequest,
   CollectionInviteRequest,
@@ -16,6 +24,7 @@ import type {
   CollectionInviteActionRequest,
   CollectionInviteCancelRequest,
   CollectionStatus,
+  CollectionSetStatusManyResponse,
   Collection,
   CollectionPlace,
   CollectionLabel,
@@ -51,9 +60,28 @@ export const collectionsApi = {
     ax.get(base).then((r: AxiosResponse) => r.data),
   get: (id: number): Promise<CollectionDetailResponse> =>
     ax.get(`${base}/${id}`).then((r: AxiosResponse) => r.data),
-  create: (body: CollectionCreateRequest): Promise<{ collection: Collection }> =>
+  // Export / import as a file (#2198). The export body IS the file; the import
+  // sends the parsed file back through the same contract.
+  exportFile: (id: number): Promise<CollectionFile> =>
+    ax.get(`${base}/${id}/export`).then((r: AxiosResponse) => r.data),
+  importFile: (body: CollectionImportRequest): Promise<CollectionImportResult> =>
+    ax.post(`${base}/import`, body satisfies CollectionImportRequest).then((r: AxiosResponse) => r.data),
+  /** The same file into a list that already exists: it only ever adds to it. */
+  importFileInto: (id: number, body: CollectionImportIntoRequest): Promise<CollectionImportResult> =>
+    ax.post(`${base}/${id}/import`, body satisfies CollectionImportIntoRequest).then((r: AxiosResponse) => r.data),
+  // The same list as GPX (#2301). A GPX is read by the server into a list file,
+  // which then goes through importFile above like any other.
+  exportGpx: (id: number): Promise<CollectionGpxExport> =>
+    ax.get(`${base}/${id}/export/gpx`).then((r: AxiosResponse) => r.data),
+  readGpx: (body: CollectionGpxReadRequest): Promise<CollectionGpxReadResult> =>
+    ax.post(`${base}/gpx/read`, body satisfies CollectionGpxReadRequest).then((r: AxiosResponse) => r.data),
+  // Both answer with the bare collection, not a { collection } envelope — the
+  // controller returns the service's `Collection` straight through, and the e2e
+  // suite pins that shape. Declaring the envelope made createCollection() resolve
+  // undefined for every caller.
+  create: (body: CollectionCreateRequest): Promise<Collection> =>
     ax.post(base, body satisfies CollectionCreateRequest).then((r: AxiosResponse) => r.data),
-  update: (id: number, body: CollectionUpdateRequest): Promise<{ collection: Collection }> =>
+  update: (id: number, body: CollectionUpdateRequest): Promise<Collection> =>
     ax.patch(`${base}/${id}`, body satisfies CollectionUpdateRequest).then((r: AxiosResponse) => r.data),
   uploadCover: (id: number, formData: FormData): Promise<Collection> =>
     postMultipart(`${base}/${id}/cover`, formData),
@@ -68,10 +96,22 @@ export const collectionsApi = {
     ax.post(`${base}/places/from-trip`, body satisfies CollectionSaveFromTripRequest).then((r: AxiosResponse) => r.data),
   saveFromTripMany: (collectionId: number, tripId: number, placeIds: number[], force?: boolean): Promise<{ copied: number; skipped: { id: number; name: string }[] }> =>
     ax.post(`${base}/places/from-trip-many`, { collection_id: collectionId, source_trip_id: tripId, source_place_ids: placeIds, force }).then((r: AxiosResponse) => r.data),
+  importable: (collectionId: number, tripId: number): Promise<CollectionImportablesResponse> =>
+    ax.get(`${base}/${collectionId}/importable/${tripId}`).then((r: AxiosResponse) => r.data),
   updatePlace: (pid: number, body: CollectionPlaceUpdateRequest): Promise<CollectionPlace> =>
     ax.patch(`${base}/places/${pid}`, body satisfies CollectionPlaceUpdateRequest).then((r: AxiosResponse) => r.data),
+  uploadPlaceImage: (pid: number, formData: FormData): Promise<CollectionPlace> =>
+    postMultipart(`${base}/places/${pid}/image`, formData),
   setStatus: (pid: number, status: CollectionStatus): Promise<CollectionPlace> =>
     ax.post(`${base}/places/${pid}/status`, { status }).then((r: AxiosResponse) => r.data),
+  setStatusMany: (ids: number[], status: CollectionStatus): Promise<CollectionSetStatusManyResponse> =>
+    ax.post(`${base}/places/status-many`, { ids, status }).then((r: AxiosResponse) => r.data),
+  setStatusFromTrip: (tripId: number, placeIds: number[], status: CollectionStatus): Promise<CollectionSetStatusManyResponse> =>
+    ax.post(`${base}/places/status-from-trip`, { trip_id: tripId, place_ids: placeIds, status }).then((r: AxiosResponse) => r.data),
+  ratePlace: (pid: number, rating: number | null): Promise<CollectionPlace> =>
+    rating === null
+      ? ax.delete(`${base}/places/${pid}/rating`).then((r: AxiosResponse) => r.data)
+      : ax.put(`${base}/places/${pid}/rating`, { rating }).then((r: AxiosResponse) => r.data),
   deletePlace: (pid: number): Promise<unknown> =>
     ax.delete(`${base}/places/${pid}`).then((r: AxiosResponse) => r.data),
   deleteMany: (ids: number[]): Promise<unknown> =>

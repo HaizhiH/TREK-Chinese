@@ -1,4 +1,4 @@
-import { decrypt_api_key, maybe_encrypt_api_key } from '../../services/apiKeyCrypto';
+import { decrypt_api_key, maybe_encrypt_api_key } from '../common/crypto/apiKeyCrypto';
 import { safeFetchFollow } from '../../utils/ssrfGuard';
 import { DatabaseService } from '../database/database.service';
 import { Injectable } from '@nestjs/common';

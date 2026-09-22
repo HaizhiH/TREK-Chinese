@@ -70,6 +70,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Cruise',
   'reservations.type.event': 'Event',
   'reservations.type.tour': 'Tour',
+  'reservations.type.parking': 'Parking',
   'reservations.type.other': 'Other',
   'reservations.type.bus': 'Bus',
   'reservations.type.ferry': 'Ferry',
@@ -126,7 +127,11 @@ const reservations: TranslationStrings = {
   'reservations.span.departure': 'Departure',
   'reservations.span.arrival': 'Arrival',
   'reservations.span.inTransit': 'In transit',
+  // span.pickup does double duty: the day a rental car is picked up, and the day a
+  // multi-day parking ends and you collect your own car again. Both read the same way
+  // in every locale, so parking only needs the drop-off wording of its own.
   'reservations.span.pickup': 'Pickup',
+  'reservations.span.dropOff': 'Drop-off',
   'reservations.span.return': 'Return',
   'reservations.span.active': 'Active',
   'reservations.span.start': 'Start',
@@ -160,6 +165,8 @@ const reservations: TranslationStrings = {
   'reservations.airtrail.syncedHint': 'Synced from AirTrail — edits stay in sync both ways.',
   'reservations.airtrail.notSynced': 'Not synced',
   'reservations.airtrail.notSyncedHint': 'This flight was removed in AirTrail and no longer syncs.',
+  'reservations.airtrail.layoverHint':
+    'Imported from AirTrail. A multi-leg flight with a layover has no single AirTrail flight to sync back to, so it stays as a one-time import.',
   'reservations.airtrail.loadError': 'Could not load your AirTrail flights.',
   'reservations.airtrail.imported': '{count} flight(s) imported',
   'reservations.airtrail.skippedDuplicate': '{count} already in this trip, skipped',
@@ -177,5 +184,8 @@ const reservations: TranslationStrings = {
   'reservations.createExpenseHint': 'Saves the booking, then opens the Costs editor.',
   'reservations.linkedExpense': 'Linked expense',
   'reservations.removeExpense': 'Remove expense',
+  'reservations.travelers.label': 'Travelers',
+  'reservations.travelers.assign': 'Assign travelers',
+  'reservations.travelers.none': 'No trip members yet.',
 };
 export default reservations;

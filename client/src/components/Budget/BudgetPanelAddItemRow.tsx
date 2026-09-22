@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { Plus } from 'lucide-react'
 import { CustomDatePicker } from '../shared/CustomDateTimePicker'
+import { normalizePastedAmount } from './BudgetPanel.helpers'
 
 interface AddItemRowProps {
   onAdd: (data: { name: string; total_price: number; persons: number | null; days: number | null; note: string | null; expense_date: string | null }) => void
@@ -18,7 +19,7 @@ export default function AddItemRow({ onAdd, t }: AddItemRowProps) {
 
   const handleAdd = () => {
     if (!name.trim()) return
-    onAdd({ name: name.trim(), total_price: parseFloat(String(price).replace(',', '.')) || 0, persons: parseInt(persons) || null, days: parseInt(days) || null, note: note.trim() || null, expense_date: expenseDate || null })
+    onAdd({ name: name.trim(), total_price: Number.parseFloat(String(price).replace(',', '.')) || 0, persons: Number.parseInt(persons) || null, days: Number.parseInt(days) || null, note: note.trim() || null, expense_date: expenseDate || null })
     setName(''); setPrice(''); setPersons(''); setDays(''); setNote(''); setExpenseDate('')
     setTimeout(() => nameRef.current?.focus(), 50)
   }
@@ -33,7 +34,7 @@ export default function AddItemRow({ onAdd, t }: AddItemRowProps) {
       </td>
       <td style={{ padding: '4px 6px' }}>
         <input value={price} onChange={e => setPrice(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()}
-          onPaste={e => { e.preventDefault(); let t = e.clipboardData.getData('text').trim().replace(/[^\d.,-]/g, ''); const lc = t.lastIndexOf(','), ld = t.lastIndexOf('.'), dp = Math.max(lc, ld); if (dp > -1) { t = t.substring(0, dp).replace(/[.,]/g, '') + '.' + t.substring(dp + 1) } else { t = t.replace(/[.,]/g, '') } setPrice(t) }}
+          onPaste={e => { e.preventDefault(); setPrice(normalizePastedAmount(e.clipboardData.getData('text'))) }}
           placeholder="0,00" inputMode="decimal" style={{ ...inp, textAlign: 'center' }} />
       </td>
       <td className="hidden sm:table-cell" style={{ padding: '4px 6px', textAlign: 'center' }}>
@@ -56,7 +57,7 @@ export default function AddItemRow({ onAdd, t }: AddItemRowProps) {
         <input value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()} placeholder={t('budget.table.note')} style={inp} />
       </td>
       <td style={{ padding: '4px 6px', textAlign: 'center' }}>
-        <button onClick={handleAdd} disabled={!name.trim()} title={t('reservations.add')}
+        <button type="button" onClick={handleAdd} disabled={!name.trim()} title={t('reservations.add')}
           style={{ background: name.trim() ? 'var(--text-primary)' : 'var(--border-primary)', border: 'none', borderRadius: 4, color: 'var(--bg-primary)',
             cursor: name.trim() ? 'pointer' : 'default', padding: '4px 8px', display: 'inline-flex', alignItems: 'center' }}>
           <Plus size={14} />

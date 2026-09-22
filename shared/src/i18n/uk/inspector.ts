@@ -14,6 +14,8 @@ const inspector: TranslationStrings = {
   'inspector.confirmedRes': 'Підтверджене бронювання',
   'inspector.pendingRes': 'Очікуване бронювання',
   'inspector.google': 'Google Maps',
+  'inspector.navigation': 'Навігація',
+  'inspector.openWith': 'Відкрити в',
   'inspector.openStreetMap': 'OpenStreetMap',
   'inspector.website': 'Відкрити сайт',
   'inspector.saveToCollection': 'Зберегти в колекцію',
@@ -22,5 +24,8 @@ const inspector: TranslationStrings = {
   'inspector.editRes': 'Редагувати бронювання',
   'inspector.participants': 'Учасники',
   'inspector.trackStats': 'Дані маршруту',
+  'inspector.trackColor': 'Колір маршруту',
+  'inspector.trackColorAuto': 'Автоматичний колір',
+  'inspector.trackColorCustom': 'Вибрати свій колір',
 };
 export default inspector;

@@ -62,7 +62,7 @@ describe('InAppNotificationBell', () => {
     const bell = screen.getAllByRole('button')[0];
     await user.click(bell);
     // Panel shows "Notifications" title
-    await screen.findByText('Notifications');
+    expect(await screen.findByText('Notifications')).toBeInTheDocument();
   });
 
   it('FE-COMP-BELL-004: notification panel shows empty state when no notifications', async () => {
@@ -76,7 +76,7 @@ describe('InAppNotificationBell', () => {
     render(<InAppNotificationBell />);
     const bell = screen.getAllByRole('button')[0];
     await user.click(bell);
-    await screen.findByText('No notifications');
+    expect(await screen.findByText('No notifications')).toBeInTheDocument();
   });
 
   it('FE-COMP-BELL-005: shows unread badge count when there are unread notifications', async () => {
@@ -98,7 +98,7 @@ describe('InAppNotificationBell', () => {
     render(<InAppNotificationBell />);
     const bell = screen.getAllByRole('button')[0];
     await user.click(bell);
-    await screen.findByTitle('Mark all read');
+    expect(await screen.findByTitle('Mark all read')).toBeInTheDocument();
   });
 
   it('FE-COMP-BELL-008: panel shows empty description when no notifications', async () => {
@@ -111,7 +111,7 @@ describe('InAppNotificationBell', () => {
     const user = userEvent.setup();
     render(<InAppNotificationBell />);
     await user.click(screen.getAllByRole('button')[0]);
-    await screen.findByText("You're all caught up!");
+    expect(await screen.findByText("You're all caught up!")).toBeInTheDocument();
   });
 
   it('FE-COMP-BELL-009: bell is accessible as a button', () => {

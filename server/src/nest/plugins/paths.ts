@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readEnv } from '../../app-config';
 
 /**
  * Filesystem layout for the plugin system (#plugins). Code and data are two
@@ -16,15 +17,37 @@ const DATA_ROOT = path.resolve(__dirname, '../../../data');
 // Read lazily so a deployment (or a test) can point these at dedicated volumes
 // via env without import-order surprises.
 export function pluginsCodeRoot(): string {
-  return process.env.TREK_PLUGINS_DIR || path.join(DATA_ROOT, 'plugins');
+  return readEnv().plugins.dir || path.join(DATA_ROOT, 'plugins');
 }
 export function pluginsDataRoot(): string {
-  return process.env.TREK_PLUGINS_DATA_DIR || path.join(DATA_ROOT, 'plugins-data');
+  return readEnv().plugins.dataDir || path.join(DATA_ROOT, 'plugins-data');
+}
+
+/**
+ * Plugin ids reach these helpers straight from a route parameter — `POST
+ * /api/admin/plugins/:id/uninstall` hands its id to pluginCodeDir, and what comes
+ * back goes to a recursive remove. Express decodes `%2F` AFTER routing, so
+ * `..%2F..%2Fuploads` still matches the route and arrives here as
+ * `../../uploads`; a plain path.join then points outside the plugin tree.
+ *
+ * Deliberately narrower than the manifest's ID_RE, which demands 3–40 lowercase
+ * characters and is the right rule at install time. This one only has to keep an
+ * id from leaving its parent, so it stays permissive about length and case and
+ * refuses exactly what steers a path: separators, a leading dot, and the
+ * drive/stream colon.
+ */
+const SAFE_PLUGIN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function safePluginId(id: string): string {
+  if (typeof id !== 'string' || id.length > 64 || !SAFE_PLUGIN_ID.test(id)) {
+    throw new Error(`invalid plugin id: ${JSON.stringify(id)}`);
+  }
+  return id;
 }
 
 /** A plugin's installed code directory (contains trek-plugin.json + server/index.js). */
 export function pluginCodeDir(id: string): string {
-  return path.join(pluginsCodeRoot(), id);
+  return path.join(pluginsCodeRoot(), safePluginId(id));
 }
 
 /**
@@ -59,7 +82,7 @@ export function ensurePluginModuleType(codeDir: string): void {
 
 /** A plugin's writable data directory (its own sqlite file + any blobs). */
 export function pluginDataDir(id: string): string {
-  return path.join(pluginsDataRoot(), id);
+  return path.join(pluginsDataRoot(), safePluginId(id));
 }
 
 /** The plugin's own sqlite file — opened by the HOST, reached by the plugin only via RPC. */
@@ -112,7 +135,18 @@ export function serverCodeRoot(): string {
  */
 let warnedPermissionsOff = false;
 export function pluginPermissionArgs(pluginId: string): string[] {
-  if ((process.env.TREK_PLUGIN_PERMISSIONS ?? 'on').toLowerCase() === 'off') {
+  if (readEnv().plugins.permissionsOff) {
+    // Refuse outright when somebody other than this install's admin runs it. A
+    // warning is the right answer for a machine its owner chose to trust; here
+    // the person who set the flag and the people whose data is in the database
+    // are not the same person, and "fail closed" is the repo rule for exactly
+    // that case. Nothing spawns rather than spawning without the jail.
+    if (readEnv().managed.enabled) {
+      throw new Error(
+        'TREK_PLUGIN_PERMISSIONS=off is refused on a centrally administered install: ' +
+          'the OS permission jail is what keeps an installed plugin out of trek.db and the secret files.',
+      );
+    }
     // The OS permission jail is the boundary that stops an installed plugin from
     // reading trek.db / the secret files / shelling out. Turning it off makes plugin
     // isolation crash-only — surface that loudly once so an operator can't leave it

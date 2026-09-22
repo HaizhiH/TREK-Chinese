@@ -83,6 +83,31 @@ function setupAssignmentFixtures(userId: number) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Create assignment', () => {
+  it('sets a day end for one visit, preserves its times, and clears it again', async () => {
+    const { user } = createUser(testDb);
+    const { trip, day, place } = setupAssignmentFixtures(user.id);
+    const created = await request(app).post(`/api/trips/${trip.id}/days/${day.id}/assignments`)
+      .set('Cookie', authCookie(user.id)).send({ place_id: place.id });
+    const id = created.body.assignment.id;
+    const url = `/api/trips/${trip.id}/assignments/${id}/end-day`;
+    testDb.prepare('UPDATE day_assignments SET assignment_time = ? WHERE id = ?').run('07:00', id);
+    const changed = await request(app).put(url).set('Cookie', authCookie(user.id)).send({ end_day: true }).expect(200);
+    expect(changed.body.assignment).toMatchObject({ end_day: true, assignment_time: '07:00' });
+    const listed = await request(app).get(`/api/trips/${trip.id}/days`).set('Cookie', authCookie(user.id)).expect(200);
+    expect(listed.body.days[0].assignments[0].end_day).toBe(true);
+    const repeatedDay = createDay(testDb, trip.id, { day_number: 2 });
+    const repeated = await request(app).post(`/api/trips/${trip.id}/days/${repeatedDay.id}/assignments`)
+      .set('Cookie', authCookie(user.id)).send({ place_id: place.id }).expect(201);
+    expect(repeated.body.assignment.end_day).toBe(false);
+    await request(app).put(url).set('Cookie', authCookie(user.id)).send({ end_day: 'true' }).expect(400);
+    const foreign = createTrip(testDb, user.id);
+    await request(app).put(`/api/trips/${foreign.id}/assignments/${id}/end-day`).set('Cookie', authCookie(user.id))
+      .send({ end_day: true }).expect(404);
+    const cleared = await request(app).put(url).set('Cookie', authCookie(user.id)).send({ end_day: false }).expect(200);
+    expect(cleared.body.assignment).toMatchObject({ end_day: false, assignment_time: '07:00' });
+    await request(app).put(url).send({ end_day: true }).expect(401);
+  });
+
   it('ASSIGN-001 — POST creates assignment linking place to day', async () => {
     const { user } = createUser(testDb);
     const { trip, day, place } = setupAssignmentFixtures(user.id);
@@ -189,6 +214,30 @@ describe('List assignments', () => {
       .set('Cookie', authCookie(user.id));
     expect(res.status).toBe(200);
     expect(res.body.assignments).toHaveLength(0);
+  });
+
+  it('ASSIGN-003 — the embedded place carries osm_id so the day-plan thumbnail can auto-fetch (#1136)', async () => {
+    const { user } = createUser(testDb);
+    const { trip, day, place } = setupAssignmentFixtures(user.id);
+    testDb.prepare('UPDATE places SET osm_id = ? WHERE id = ?').run('node:42', place.id);
+
+    await request(app)
+      .post(`/api/trips/${trip.id}/days/${day.id}/assignments`)
+      .set('Cookie', authCookie(user.id))
+      .send({ place_id: place.id });
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/days/${day.id}/assignments`)
+      .set('Cookie', authCookie(user.id));
+    expect(res.status).toBe(200);
+    expect(res.body.assignments[0].place.osm_id).toBe('node:42');
+
+    // Also surfaced through the full trip-days bundle (the actual day-plan source).
+    const daysRes = await request(app)
+      .get(`/api/trips/${trip.id}/days`)
+      .set('Cookie', authCookie(user.id));
+    const embedded = daysRes.body.days.find((d: { id: number }) => d.id === day.id).assignments[0].place;
+    expect(embedded.osm_id).toBe('node:42');
   });
 
   it('ASSIGN-006 — non-member cannot list assignments', async () => {

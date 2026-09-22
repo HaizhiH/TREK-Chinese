@@ -1,4 +1,5 @@
-import React from 'react'
+import SchoolHolidayCatalog from '../components/Admin/SchoolHolidayCatalog'
+import React, { Fragment } from 'react'
 import { adminApi } from '../api/client'
 import DevNotificationsPanel from '../components/Admin/DevNotificationsPanel'
 import DefaultUserSettingsTab from '../components/Admin/DefaultUserSettingsTab'
@@ -12,7 +13,8 @@ import PackingTemplateManager from '../components/Admin/PackingTemplateManager'
 import AuditLogPanel from '../components/Admin/AuditLogPanel'
 import AdminMcpTokensPanel from '../components/Admin/AdminMcpTokensPanel'
 import AdminPluginsPanel from '../components/Admin/AdminPluginsPanel'
-import { Users, Map, Briefcase, Shield, FileText, SlidersHorizontal, UserCog, Puzzle, Blocks, Settings as SettingsIcon, Bell, Database, ScrollText, KeyRound, GitBranch, Bug } from 'lucide-react'
+import AdminStoragePanel from '../components/Admin/storage/AdminStoragePanel'
+import { Users, Map, Briefcase, Shield, FileText, SlidersHorizontal, UserCog, Puzzle, Blocks, Settings as SettingsIcon, Bell, Database, ScrollText, KeyRound, GitBranch, Bug, HardDrive } from 'lucide-react'
 import PageSidebar, { type PageSidebarTab } from '../components/Layout/PageSidebar'
 import { useAdmin } from './admin/useAdmin'
 import AdminUpdateBanner from './admin/AdminUpdateBanner'
@@ -21,14 +23,21 @@ import AdminUsersTab from './admin/AdminUsersTab'
 import AdminSettingsTab from './admin/AdminSettingsTab'
 import AdminNotificationsTab from './admin/AdminNotificationsTab'
 import AdminUserModals from './admin/AdminUserModals'
+import { managedAdminTabs } from '../managed'
 
 export default function AdminPage(): React.ReactElement {
+  // ViewportRoute in App.tsx picks the branch now, so the phone screen is a
+  // chunk of its own instead of a dead limb in this one.
+  return <AdminPageDesktop />
+}
+
+function AdminPageDesktop(): React.ReactElement {
   const { t, locale } = useTranslation()
   // Page = wiring container: all admin data slices + handlers live in the hook,
   // each tab/section renders from a dedicated sub-component.
   const admin = useAdmin()
   const {
-    demoMode, mcpEnabled, devMode, toast,
+    demoMode, mcpEnabled, devMode, managed, toast,
     activeTab, setActiveTab, stats,
     bagTrackingEnabled, setBagTrackingEnabled,
     collabFeatures, setCollabFeatures,
@@ -40,6 +49,7 @@ export default function AdminPage(): React.ReactElement {
   const gConfig = t('admin.group.config')
   const gIntegration = t('admin.group.integration')
   const gMaintenance = t('admin.group.maintenance')
+  const GROUP_LABELS = { users: gUsers, config: gConfig, integration: gIntegration, maintenance: gMaintenance }
   const TABS: PageSidebarTab[] = [
     { id: 'users', label: t('admin.tabs.users'), icon: Users, group: gUsers },
     { id: 'defaults', label: t('admin.tabs.defaults'), icon: UserCog, group: gUsers },
@@ -47,12 +57,26 @@ export default function AdminPage(): React.ReactElement {
     { id: 'settings', label: t('admin.tabs.settings'), icon: SettingsIcon, group: gConfig },
     { id: 'addons', label: t('admin.tabs.addons'), icon: Puzzle, group: gConfig },
     { id: 'plugins', label: t('admin.tabs.plugins'), icon: Blocks, group: gConfig },
+    // Storage backends and their credentials are hoster-level configuration —
+    // the server refuses the whole surface in managed mode (MANAGED_FORBIDDEN).
+    ...(managed ? [] : [{ id: 'storage', label: t('admin.tabs.storage'), icon: HardDrive, group: gConfig }]),
     { id: 'notifications', label: t('admin.tabs.notifications'), icon: Bell, group: gIntegration },
     ...(mcpEnabled ? [{ id: 'mcp-tokens', label: t('admin.tabs.mcpTokens'), icon: KeyRound, group: gIntegration }] : []),
-    { id: 'github', label: t('admin.tabs.github'), icon: GitBranch, group: gIntegration },
-    { id: 'backup', label: t('admin.tabs.backup'), icon: Database, group: gMaintenance },
+    // Releases and update cadence belong to whoever operates the install.
+    ...(managed ? [] : [{ id: 'github', label: t('admin.tabs.github'), icon: GitBranch, group: gIntegration }]),
+    // Backups run off-volume on a managed install; the tab would offer a
+    // schedule that competes with the real one.
+    ...(managed ? [] : [{ id: 'backup', label: t('admin.tabs.backup'), icon: Database, group: gMaintenance }]),
     { id: 'audit', label: t('admin.tabs.audit'), icon: ScrollText, group: gMaintenance },
     ...(devMode ? [{ id: 'dev-notifications', label: 'Dev: Notifications', icon: Bug, group: gMaintenance }] : []),
+    // Empty in this repository — see client/src/managed. Appended per group
+    // rather than inserted, because the sidebar needs a group's tabs contiguous.
+    ...managedAdminTabs.map(tab => ({
+      id: tab.id,
+      label: tab.label,
+      icon: tab.Icon,
+      group: GROUP_LABELS[tab.group ?? 'config'],
+    })),
   ]
 
   return (
@@ -81,7 +105,7 @@ export default function AdminPage(): React.ReactElement {
                 <p className="text-sm font-semibold text-amber-900">Demo Baseline</p>
                 <p className="text-xs text-amber-700">Save current state as the hourly reset point. All admin trips and settings will be preserved.</p>
               </div>
-              <button
+              <button type="button"
                 onClick={async () => {
                   try {
                     await adminApi.saveDemoBaseline()
@@ -117,7 +141,7 @@ export default function AdminPage(): React.ReactElement {
             tabs={TABS}
             activeTab={activeTab}
             onTabChange={setActiveTab}
-            footer="admin · self-hosted"
+            footer=""
           >
             {/* Tab content */}
           {activeTab === 'users' && (
@@ -128,6 +152,7 @@ export default function AdminPage(): React.ReactElement {
             <div className="space-y-6">
               <PackingTemplateManager />
               <CategoryManager />
+              <SchoolHolidayCatalog />
             </div>
           )}
 
@@ -138,9 +163,15 @@ export default function AdminPage(): React.ReactElement {
                 setBagTrackingEnabled(next)
                 try { await adminApi.updateBagTracking(next) } catch { setBagTrackingEnabled(!next) }
               }} collabFeatures={collabFeatures} onToggleCollabFeature={async (key: string) => {
-                const next = { ...collabFeatures, [key]: !collabFeatures[key] }
-                setCollabFeatures(next)
-                try { await adminApi.updateCollabFeatures({ [key]: next[key] }) } catch { setCollabFeatures(collabFeatures) }
+                const previous = collabFeatures[key]
+                setCollabFeatures({ ...collabFeatures, [key]: !previous })
+                try {
+                  await adminApi.updateCollabFeatures({ [key]: !previous })
+                } catch {
+                  // Only this key rolls back — a slower request must not undo a toggle
+                  // the admin made in the meantime.
+                  setCollabFeatures(prev => ({ ...prev, [key]: previous }))
+                }
               }} />
             </div>
           )}
@@ -161,11 +192,18 @@ export default function AdminPage(): React.ReactElement {
 
           {activeTab === 'plugins' && <AdminPluginsPanel />}
 
+          {activeTab === 'storage' && <AdminStoragePanel />}
+
           {activeTab === 'github' && <GitHubPanel isPrerelease={updateInfo?.is_prerelease ?? false} />}
 
           {activeTab === 'defaults' && <DefaultUserSettingsTab />}
 
           {activeTab === 'dev-notifications' && <DevNotificationsPanel />}
+
+          {/* Empty in this repository — see client/src/managed. */}
+          {managedAdminTabs.map(tab => (
+            activeTab === tab.id ? <Fragment key={tab.id}>{tab.element}</Fragment> : null
+          ))}
           </PageSidebar>
         </div>
 

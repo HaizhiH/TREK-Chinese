@@ -54,5 +54,38 @@ const system_notice: TranslationStrings = {
   'system_notice.v3014_whitespace_collision.title': 'Vyžadována akce: konflikt uživatelského účtu',
   'system_notice.v3014_whitespace_collision.body':
     'Aktualizace 3.0.14 zjistila jeden nebo více konfliktů uživatelského jména nebo e-mailu způsobených mezerami na začátku nebo konci uložených hodnot. Dotčené účty byly automaticky přejmenovány. Zkontrolujte protokoly serveru na řádky začínající **[migration] WHITESPACE COLLISION** a zjistěte, které účty vyžadují kontrolu.',
+  // The release modal. One stable set of keys: each big release swaps the copy in place.
+  'system_notice.release_notes.eyebrow': 'Aktualizace nainstalována',
+  'system_notice.release_notes.headline': 'Čtyři věci, které TREK nyní zvládne sám.',
+  'system_notice.release_notes.intro': 'Vlastní API míst, road tripy naplánované od začátku do konce, historie polohy ve vašich rukou, a dokumenty v synchronizaci.',
+  'system_notice.release_notes.features_label': 'Hlavní novinky',
+  'system_notice.release_notes.features_aside': 'Zdaleka ne všechno',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'První open source plánovač cest s vlastním API míst. 73,6 milionu míst, bez klíče, bez limitu.',
+  'system_notice.release_notes.feature_roadtrip_title': 'Doplněk Cesta autem',
+  'system_notice.release_notes.feature_roadtrip_body': 'Naplánuje jízdu sám: trasu, vzdálenost, hodiny a zastávky. Vypnuto, dokud to admin nezapne.',
+  'system_notice.release_notes.feature_dawarich_title': 'Integrace Dawarich',
+  'system_notice.release_notes.feature_dawarich_body': 'Self-hosted odpověď na Google Timeline, teď čitelná přímo v TREK. TREK čte, a jen čte.',
+  'system_notice.release_notes.footnote': 'A k tomu dlouhý seznam menších změn napříč zbytkem TREK.',
+  'system_notice.release_notes.notes_label': 'Poznámky k vydání',
+  'system_notice.release_notes.note_eyebrow': 'Slovo od autora',
+  'system_notice.release_notes.note_title': 'Vy jste důvod, proč na TREK pořád pracuji.',
+  'system_notice.release_notes.note_body':
+    'TREK začal jako malý nástroj pro mé vlastní cesty, psaný po práci, protože jsem je chtěl plánovat lépe. Vlastně nikdy nepřestal růst. Skoro všechno, co používáte, vzniklo pozdě v noci, o víkendech, ve vlacích, vedle práce na plný úvazek, a bylo spoustu večerů, kdy jsem se potichu ptal, jestli ho tam venku vůbec někdy někdo otevře.',
+  'system_notice.release_notes.promise_label': 'Slib',
+  'system_notice.release_notes.promise_lead': 'TREK zůstane zdarma, navždy.',
+  'system_notice.release_notes.promise_text':
+    'Každá funkce, každá aktualizace, pro všechny. Žádné placené verze, žádná předplatná, žádné háčky.',
+  'system_notice.release_notes.note_body_after':
+    'A pak jste ho otevřeli. Během pár měsíců vás byly tisíce: hvězdičky, hlášení chyb, překlady do jazyků, kterými nemluvím, pull requesty od lidí, které jsem nikdy nepotkal. Každé ráno se pořád nejdřív podívám do repozitáře a pořád mi to nepřijde úplně skutečné.',
+  'system_notice.release_notes.note_closing': 'Děkuji, že jste tady. Váš Maurice',
+  'system_notice.release_notes.support_lead':
+    'TREK je a vždycky bude zdarma, ale servery, domény a spousta pozdních nocí zdarma nejsou.',
+  'system_notice.release_notes.support_text':
+    'Pokud si TREK získal místo na vašich cestách, kupte mi kávu a pomozte, aby přišlo i další vydání.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'Podpořit na Ko-fi',
+  'system_notice.release_notes.feature_docsync_title': 'Synchronizace dokumentů',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud a Synology Drive. Dokumenty cesty proudí oběma směry s úložištěm, které už provozujete.',
 };
 export default system_notice;

@@ -57,6 +57,23 @@ export interface ScaffoldOptions {
 
 export const TEMPLATES = ['blank', 'notification-channel'] as const;
 
+/**
+ * The credential fields the OAuth broker (server-side `oauth.getToken`) needs to run the
+ * authorization-code flow on the plugin's behalf. ALL `scope: 'instance'` — unlike the
+ * notification-channel template's `scope: 'user'` settings above, these are configured ONCE
+ * per install by an admin, not per recipient: the broker itself reads them at token-exchange
+ * time, there is no per-user client id/secret. Deliberately not user-scoped.
+ */
+const OAUTH_SETTINGS: Array<{
+  key: string; label: string; input_type: string; required: boolean; secret?: boolean; scope: 'instance';
+}> = [
+  { key: 'oauth_authorize_url', label: 'OAuth authorize URL', input_type: 'text', required: true, scope: 'instance' },
+  { key: 'oauth_token_url', label: 'OAuth token URL', input_type: 'text', required: true, scope: 'instance' },
+  { key: 'oauth_scopes', label: 'OAuth scopes (space-separated)', input_type: 'text', required: false, scope: 'instance' },
+  { key: 'oauth_client_id', label: 'OAuth client id', input_type: 'text', required: true, scope: 'instance' },
+  { key: 'oauth_client_secret', label: 'OAuth client secret', input_type: 'text', required: true, secret: true, scope: 'instance' },
+];
+
 /** Mirrors the server's widget slots (and the manifest validator's). */
 export const WIDGET_SLOTS = ['sidebar', 'hero', 'place-detail', 'day-detail', 'reservation-detail'] as const;
 export type WidgetSlot = (typeof WIDGET_SLOTS)[number];
@@ -96,7 +113,7 @@ export function scaffold(name: string, type: string, targetDir: string, opts: Sc
   if (fs.existsSync(root)) throw new Error(`${root} already exists`);
   fs.mkdirSync(path.join(root, 'server'), { recursive: true });
 
-  const displayName = name.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const displayName = name.replaceAll('-', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase());
   let perms = opts.permissions?.length ? opts.permissions : ['db:own'];
   const egress = opts.egress ?? [];
   if (isChannel) {
@@ -121,11 +138,13 @@ export function scaffold(name: string, type: string, targetDir: string, opts: Sc
     author: opts.author || 'Your Name',
     description: opts.description || (isChannel ? `Deliver TREK notifications over ${displayName}.` : 'Describe what your plugin does.'),
     type,
-    // 3.4.0, not 3.3.0. The `ctx` namespaces this scaffold is written against — ctx.meta,
-    // ctx.places, ctx.days, ctx.itinerary, ctx.costs, ctx.packing, ctx.files — only exist from
-    // 3.4.0. Claiming 3.3.0 lets the plugin install on a host where they are `undefined`, which
-    // fails at the first call with a TypeError instead of a clear "incompatible" at install.
-    trek: '>=3.4.0 <4.0.0',
+    // Floor 4.0.0: the host surface this scaffold is written against — the enforced
+    // apiVersion gate, the generated core-event catalog (EVENT_FAMILIES /
+    // EVENT_SNAPSHOT_GRANT), the OAuth-broker settings contract — is the TREK 4 surface.
+    // Claiming an older floor lets the plugin install on a host where parts of it are
+    // missing, which fails at the first call instead of a clear "incompatible" at install.
+    // Ceiling 5.0.0: bounded, per the trek-range rule; widen only against a tested host.
+    trek: '>=4.0.0 <5.0.0',
     nativeModules: false,
     permissions: perms,
     // Dependency declarations (empty by default). `requiredAddons` lists addon ids
@@ -182,6 +201,16 @@ export function scaffold(name: string, type: string, targetDir: string, opts: Sc
         scope: 'user',
       },
     ];
+  }
+  // The broker (ctx.oauth.getToken) needs somewhere to read the authorize/token URLs and the
+  // app's client id/secret — an admin configures them once, instance-wide, and the broker
+  // reads them at token-exchange time. Merge with any settings the template above already
+  // wrote (a channel template never grants oauth:client today, so there is no real overlap,
+  // but keys are deduped anyway rather than trusting that stays true).
+  if (perms.includes('oauth:client')) {
+    const existing = (manifest.settings as Array<{ key: string }> | undefined) ?? [];
+    const seen = new Set(existing.map((s) => s.key));
+    manifest.settings = [...existing, ...OAUTH_SETTINGS.filter((s) => !seen.has(s.key))];
   }
 
   fs.writeFileSync(path.join(root, 'trek-plugin.json'), JSON.stringify(manifest, null, 2) + '\n');

@@ -28,6 +28,7 @@ export function PlacesBulkCategoryModal({ count, categories, onPick, onClose }: 
   const { t } = useTranslation()
   return createPortal(
     <div
+      role="presentation"
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
       style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
     >
@@ -37,7 +38,7 @@ export function PlacesBulkCategoryModal({ count, categories, onPick, onClose }: 
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{t('places.changeCategory')}</span>
-          <button onClick={onClose} aria-label={t('common.close')} className="text-content-muted" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}>
+          <button type="button" onClick={onClose} aria-label={t('common.close')} className="text-content-muted" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}>
             <X size={15} strokeWidth={2} />
           </button>
         </div>
@@ -47,13 +48,13 @@ export function PlacesBulkCategoryModal({ count, categories, onPick, onClose }: 
           {categories.map(c => {
             const CatIcon = getCategoryIcon(c.icon)
             return (
-              <button key={c.id} onClick={() => onPick(c.id)} className="text-content bg-transparent" style={rowStyle} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+              <button type="button" key={c.id} onClick={() => onPick(c.id)} className="text-content bg-transparent" style={rowStyle} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
                 <CatIcon size={14} strokeWidth={2} color={c.color || 'var(--text-muted)'} />
                 <span style={{ flex: 1 }}>{c.name}</span>
               </button>
             )
           })}
-          <button onClick={() => onPick(null)} className="text-content-muted bg-transparent" style={{ ...rowStyle, borderTop: categories.length > 0 ? '1px solid var(--border-faint)' : 'none', marginTop: categories.length > 0 ? 2 : 0 }} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+          <button type="button" onClick={() => onPick(null)} className="text-content-muted bg-transparent" style={{ ...rowStyle, borderTop: categories.length > 0 ? '1px solid var(--border-faint)' : 'none', marginTop: categories.length > 0 ? 2 : 0 }} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
             <MapPin size={14} strokeWidth={2} color="var(--text-faint)" />
             <span style={{ flex: 1 }}>{t('places.noCategory')}</span>
           </button>

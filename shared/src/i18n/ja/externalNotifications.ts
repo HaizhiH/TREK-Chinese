@@ -28,6 +28,10 @@ const ja: NotificationLocale = {
       title: 'Vacay Fusion招待',
       body: `${p.actor}が休暇プランの統合に招待しています。TREKを開いて承認または拒否してください。`,
     }),
+    vacay_share: (p) => ({
+      title: 'Vacayカレンダーが共有されました',
+      body: `${p.actor}が休暇カレンダーを共有しました。TREKを開いて確認してください。`,
+    }),
     collection_invite: (p) => ({
       title: 'コレクション招待',
       body: `${p.actor}がコレクションの共有に招待しています。TREKを開いて承認または拒否してください。`,
@@ -47,6 +51,12 @@ const ja: NotificationLocale = {
     version_available: (p) => ({
       title: '新しいTREKバージョンが利用可能',
       body: `TREK ${p.version}が利用可能になりました。管理パネルからアップデートしてください。`,
+    }),
+    replica_failure: (p) => ({
+      title: 'ストレージレプリカの障害',
+      body:
+        `レプリカ '${p.backend}' への書き込みに失敗しました：${p.op} / ${p.key} — ${p.error}。` +
+        (p.suppressed !== '0' ? `前回の通知以降、${p.suppressed}件の追加の失敗が抑制されました。` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Synologyセッションがクリアされました',

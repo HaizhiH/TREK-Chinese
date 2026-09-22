@@ -143,16 +143,64 @@ const admin: TranslationStrings = {
   'admin.requireMfaHint':
     'Pengguna tanpa 2FA harus menyelesaikan pengaturan di Pengaturan sebelum menggunakan aplikasi.',
   'admin.apiKeys': 'Kunci API',
-  'admin.apiKeysHint': 'Opsional. Mengaktifkan data tempat yang lebih lengkap seperti foto dan cuaca.',
+  'admin.apiKeysHint': 'Dari mana data tempat berasal. Indeks TREK tidak butuh kunci; dua penyedia di bawah bersifat opsional.',
+  'admin.trekApi.badgeDefault': 'Sumber baku yang disarankan',
+  'admin.googleCaveat.badge': 'Tidak disarankan',
+  'admin.googleCaveat.body':
+    'TREK adalah perangkat lunak sumber terbuka dan di sini kami tidak netral. Pada skala ini ulasan dan foto usaha biasa hanya ada di Google, dan itulah monopoli. Kolom ini ada karena tidak ada penggantinya, bukan karena kami menyarankan. Lalu setiap pencarian pergi ke Google.',
+  'admin.trekApi.tagline':
+    'Indeks tempat milik TREK sendiri. Mencari tanpa kunci Google, tanpa kuota, dan tanpa ada yang menghitung pencarian Anda.',
+  'admin.trekApi.factPlaces':
+    '73,6 juta tempat di seluruh dunia',
+  'admin.trekApi.factNoKey':
+    'Tanpa kunci, tanpa kuota',
+  'admin.trekApi.factOffline':
+    'Paket per negara jalan offline',
+  'admin.trekApi.factPrivacy':
+    'Pencarian tidak pernah dicatat',
+  'admin.trekApi.more':
+    'Apa isinya',
+  'admin.trekApi.fieldPhone':
+    'Telepon',
+  'admin.trekApi.fieldStableId':
+    'Id tetap',
+  'admin.trekApi.includedNote':
+    'Deskripsi berasal dari situs tempat itu sendiri, jam buka dari OpenStreetMap di mana sudah diisi.',
+  'admin.trekApi.notRatings':
+    'Ulasan',
+  'admin.trekApi.notPhotos':
+    'Foto usaha biasa',
+  'admin.trekApi.notIncludedNote':
+    'Tidak ada sumber terbuka yang punya keduanya, dengan harga berapa pun. Untuk keduanya kunci Google tetap satu-satunya jalan.',
+  'admin.trekApi.sourcesLabel':
+    'Sumber',
+  'admin.trekApi.sourcesNote':
+    'Setiap ruas dalam respons menyebutkan berasal dari yang mana.',
+  'admin.trekApi.included':
+    'Termasuk',
+  'admin.trekApi.notIncluded':
+    'Tidak termasuk',
   'admin.mapsKey': 'Kunci API Google Maps',
   'admin.mapsKeyHint': 'Diperlukan untuk pencarian tempat. Dapatkan di console.cloud.google.com',
   'admin.mapsKeyHintLong':
-    'Tanpa kunci API, OpenStreetMap digunakan untuk pencarian tempat. Dengan kunci API Google, foto, rating, dan jam buka juga bisa dimuat. Dapatkan di console.cloud.google.com.',
+    'Tanpa kunci API Google, TREK API yang disarankan akan dipakai. Dengan kunci, foto, ulasan, dan jam buka bisa dimuat sebagai tambahan. Buat kunci di console.cloud.google.com.',
   'admin.recommended': 'Direkomendasikan',
   'admin.weatherKey': 'Kunci API OpenWeatherMap',
   'admin.weatherKeyHint': 'Untuk data cuaca. Gratis di openweathermap.org',
   'admin.unsplashKey': 'Kunci API Unsplash',
   'admin.unsplashKeyHint': 'Untuk pencarian gambar. Gratis di unsplash.com/developers',
+  'admin.amapKey': 'Kunci API Amap (高德地图)',
+  'admin.amapKeyHint':
+    'Untuk pencarian tempat di Tiongkok daratan, tempat Google tidak dapat diakses dan data OpenStreetMap sangat sedikit. Perlu kunci jenis "Web 服务" (layanan web), bukan kunci JS API. Dapatkan di console.amap.com.',
+  'admin.placesProvider.title': 'Penyedia pencarian tempat',
+  'admin.placesProvider.subtitle':
+    'Indeks milik TREK dan OpenStreetMap menjawab setiap pencarian. Di sini dipilih siapa lagi yang ditanya bila keduanya tidak menemukan apa pun: Otomatis memilih Google bila ada kunci, lalu Amap.',
+  'admin.placesProvider.auto': 'Otomatis',
+  'admin.placesProvider.google': 'Google Places',
+  'admin.placesProvider.amap': 'Amap (高德地图)',
+  'admin.placesProvider.openstreetmap': 'OpenStreetMap',
+  'admin.placesProvider.missingKey': 'Penyedia yang dipilih belum punya kunci API, jadi pencarian tempat hanya dijawab oleh indeks TREK dan OpenStreetMap.',
+  'admin.placesProvider.saved': 'Penyedia pencarian tempat disimpan',
   'admin.validateKey': 'Uji',
   'admin.keyValid': 'Terhubung',
   'admin.keyInvalid': 'Tidak valid',
@@ -171,6 +219,8 @@ const admin: TranslationStrings = {
   'admin.fileTypesFormat':
     'Ekstensi dipisahkan koma (contoh: jpg,png,pdf,doc). Gunakan * untuk mengizinkan semua jenis.',
   'admin.fileTypesSaved': 'Pengaturan jenis file disimpan',
+  'admin.googleOptions': 'Kunci ini dipakai untuk apa',
+  'admin.googleOptionsSummary': '{on} dari {total} aktif',
   'admin.placesPhotos.title': 'Foto Tempat',
   'admin.placesPhotos.subtitle':
     'Mengambil foto dari Google Places API. Nonaktifkan untuk menghemat kuota API. Foto Wikimedia tidak terpengaruh.',
@@ -180,6 +230,20 @@ const admin: TranslationStrings = {
   'admin.placesDetails.title': 'Detail Tempat',
   'admin.placesDetails.subtitle':
     'Mengambil informasi detail tempat (jam, penilaian, situs web) dari Google Places API. Nonaktifkan untuk menghemat kuota API.',
+  'admin.placesEnrich.title': 'Pengayaan tempat',
+  'admin.placesEnrich.subtitle':
+    'Menampilkan gambar dan deskripsi saat menambahkan tempat. Wikipedia dan OpenStreetMap selalu digunakan; Google ditambahkan bila Foto Tempat atau Detail Tempat aktif.',
+  'admin.transitProvider.title': 'Penyedia transportasi umum',
+  'admin.transitProvider.subtitle': 'Layanan mana yang menjawab pencarian transportasi umum.',
+  'admin.transitProvider.transitous': 'Transitous (gratis)',
+  'admin.transitProvider.google': 'Google',
+  'admin.transitProvider.transitousHint': 'Umpan GTFS komunitas. Gratis dan tanpa kunci, dengan cakupan terbaik di Eropa.',
+  'admin.transitProvider.googleHint': 'Menggunakan kunci Google di atas, untuk wilayah yang tidak memiliki data Transitous. Ditagih per pencarian — selama belum ada kunci, Transitous yang dipakai.',
+  'admin.transitProvider.noKeyWarning': 'Google dipilih, tetapi belum ada kunci Google yang dikonfigurasi — pencarian transportasi masih memakai Transitous. Tambahkan kunci di Kunci API di atas.',
+  'admin.transitProvider.personalKeyWarning': 'Hanya kunci Google milikmu yang disetel, sehingga pencarian anggota lain tetap kembali ke Transitous. Simpan kunci di atas sebagai admin agar berlaku untuk seluruh instance.',
+  'admin.placeShadow.title': 'Log pencarian tempat',
+  'admin.placeShadow.subtitle':
+    'Mencatat hasil pencarian mana yang dipilih, agar indeks tempat lain nanti bisa diukur dengan pencarian sungguhan. Tidak ada yang meninggalkan instans ini, dan admin bisa mengekspor atau menghapus log kapan saja.',
   'admin.bagTracking.title': 'Pelacak Tas',
   'admin.bagTracking.subtitle': 'Aktifkan berat dan penugasan tas untuk item packing',
   'admin.collab.chat.title': 'Chat',
@@ -215,9 +279,12 @@ const admin: TranslationStrings = {
   'admin.packingTemplates.loadError': 'Gagal memuat template',
   'admin.packingTemplates.createError': 'Gagal membuat template',
   'admin.packingTemplates.deleteError': 'Gagal menghapus template',
+  'admin.packingTemplates.deleteCategoryError': 'Gagal menghapus kategori',
+  'admin.packingTemplates.deleteItemError': 'Gagal menghapus item',
   'admin.packingTemplates.saveError': 'Gagal menyimpan',
   'admin.tabs.addons': 'Addon',
   'admin.tabs.plugins': 'Plugins',
+  'admin.tabs.storage': 'Penyimpanan',
   'admin.plugins.rescan': 'Pindai ulang',
   'admin.plugins.rescanned': 'Folder plugin dipindai ulang',
   'admin.plugins.upload': 'Unggah plugin',
@@ -271,6 +338,7 @@ const admin: TranslationStrings = {
   'admin.plugins.updateTo': 'Update → v{version}',
   'admin.plugins.enabledToggle': 'Aktifkan plugin',
   'plugins.notFound': 'Plugin tidak ditemukan',
+  'plugins.frameLoadFailed': 'This plugin could not be loaded.',
   'admin.plugins.title': 'Plugins',
   'admin.plugins.subtitle': 'Pasang dan kelola plugin pihak ketiga di instans kamu.',
   'admin.plugins.disabledTitle': 'Plugin dinonaktifkan',
@@ -374,12 +442,27 @@ const admin: TranslationStrings = {
   'admin.plugins.perm.hook:calendar-source': 'Menyediakan acara untuk kalender',
   'admin.plugins.perm.hook:place-detail-provider':
     'Menyumbangkan detail tambahan (ulasan, peringkat, tautan) untuk suatu tempat',
+  'admin.plugins.perm.hook:search-provider': 'Menjawab pencarian tempat dari indeks sendiri, di samping hasil TREK',
   'admin.plugins.perm.hook:trip-warning-provider':
     'Munculkan peringatan validasi pada perjalanan (ditampilkan di perencana)',
   'admin.plugins.perm.hook:table-contributor':
     'Menambahkan kolom dan tindakan ke tampilan perjalanan (pemesanan, tempat, hari)',
   'admin.plugins.perm.hook:map-marker-provider':
     'Menambahkan penanda ke peta perjalanan (mis. menampilkan pemesanan atau POI)',
+  'admin.plugins.perm.hook:map-layer-provider': 'Menggambar rute, koridor, dan zona di peta perjalanan',
+  'admin.plugins.perm.hook:route-provider':
+    'Menawarkan profil routing yang dapat digunakan perencana untuk menghitung rute hari (mis. routing mobil listrik dengan pemberhentian pengisian daya)',
+  'admin.plugins.perm.hook:day-schedule-provider':
+    'Melampirkan entri waktu ke rencana hari (pemberhentian pengisian daya, jeda keamanan)',
+  'admin.plugins.perm.hook:day-tint-provider':
+    'Memberi warna pada hari di rencana hari (misalnya bagian perjalanan mana yang memuat suatu hari)',
+  'admin.plugins.cap.mcpTools': 'Menerbitkan alat AI',
+  'admin.plugins.mcpToolsTitle': 'Alat AI yang diterbitkan',
+  'admin.plugins.mcpToolsHint': 'Asisten dapat menjalankannya atas nama pengguna. Masing-masing bertindak dengan akses yang diberikan di atas.',
+  'admin.plugins.perm.mcp:tools':
+    'Menerbitkan alat yang dapat dijalankan asisten AI atas nama Anda (bertindak dengan akses yang Anda berikan ke plugin di sini, bukan milik asisten)',
+  'admin.plugins.perm.geolocation:read':
+    'Meminta lokasi terkinimu selama salah satu tampilannya terbuka (TREK membacanya dengan izin lokasi situs ini, bukan izin milik plugin sendiri)',
   'admin.plugins.perm.hook:pdf-section-provider': 'Menambahkan bagian teks ke ekspor PDF perjalanan',
   'admin.plugins.perm.hook:atlas-layer-provider':
     'Menyorot negara di peta dunia Atlas (mis. daftar keinginan atau peringatan perjalanan)',
@@ -469,11 +552,31 @@ const admin: TranslationStrings = {
   'admin.plugins.sortUpdates': 'Pembaruan dulu',
   'admin.plugins.sortDownloads': 'Paling banyak diunduh',
   'admin.plugins.updatesAvailable': '{count} pembaruan tersedia untuk plugin kamu.',
+  'admin.plugins.newerNeedsTrek': 'v{version} tersedia — membutuhkan TREK {range}',
+  'admin.plugins.versionsTitle': 'Versi',
+  'admin.plugins.versionPickerTitle': 'Ubah versi — {name}',
+  'admin.plugins.versionSwitch': 'Beralih ke {version}',
+  'admin.plugins.versionNeedsTrek': 'membutuhkan TREK {range}',
+  'admin.plugins.changeVersion': 'Ubah versi…',
+  'admin.plugins.noVersions': 'Tidak ada versi terpublikasi yang ditemukan di registri.',
+  'admin.plugins.downgradeTitle': 'Kembalikan plugin ini?',
+  'admin.plugins.downgradeBody': 'Beralih dari v{from} ke v{to}: data yang ditulis oleh versi yang lebih baru tetap ada, dan versi yang lebih lama mungkin tidak memahaminya.',
+  'admin.plugins.downgradeConfirm': 'Kembalikan',
+  'admin.plugins.updatesHeld': 'Pembaruan dijeda di v{version}',
+  'admin.plugins.resumeUpdates': 'Lanjutkan pembaruan',
+  'admin.plugins.updatesResumed': 'Pembaruan dilanjutkan',
   'admin.plugins.updateAll': 'Perbarui semua',
   'admin.plugins.noMatchInstalled': 'Tidak ada plugin terpasang yang cocok dengan pencarianmu.',
   'admin.plugins.noMatchRegistry': 'Tidak ada plugin di registri yang cocok dengan pencarianmu.',
   'admin.plugins.restart': 'Mulai ulang',
   'admin.plugins.restarted': 'Plugin dimulai ulang',
+  'admin.plugins.instanceSettings': 'Pengaturan instans',
+  'admin.plugins.settingsSaved': 'Pengaturan disimpan',
+  'admin.plugins.settingsSavedRestarted': 'Pengaturan disimpan — plugin dimulai ulang',
+  'admin.plugins.actions': 'Tindakan',
+  'admin.plugins.actions.confirm': 'Jalankan tindakan ini?',
+  'admin.plugins.actions.inactive': 'Aktifkan plugin untuk menjalankan tindakannya',
+  'admin.plugins.requiredMissing': '"{field}" wajib diisi',
   'admin.plugins.cap.readsTrips': 'Membaca perjalananmu',
   'admin.plugins.cap.readsUsers': 'Membaca profil dasar',
   'admin.plugins.cap.readsCosts': 'Membaca pengeluaranmu',
@@ -496,7 +599,13 @@ const admin: TranslationStrings = {
   'admin.plugins.cap.photos': 'Menyediakan foto',
   'admin.plugins.cap.calendar': 'Menyediakan acara kalender',
   'admin.plugins.cap.placeDetails': 'Memperkaya tempat',
+  'admin.plugins.cap.search': 'Menjawab pencarian',
   'admin.plugins.cap.warnings': 'Tandai masalah',
+  'admin.plugins.cap.mapLayers': 'Menggambar di peta',
+  'admin.plugins.cap.routing': 'Menyediakan routing',
+  'admin.plugins.cap.daySchedule': 'Menambahkan waktu rencana',
+  'admin.plugins.cap.dayTint': 'Mewarnai hari',
+  'admin.plugins.cap.geolocation': 'Membaca lokasimu',
   'admin.plugins.cap.events': 'Bereaksi terhadap aktivitas',
   'admin.plugins.cap.requiresAddon': 'Membutuhkan {addon}',
   'admin.plugins.cap.dependsOn': 'Membutuhkan {id} {version}',
@@ -513,6 +622,19 @@ const admin: TranslationStrings = {
   'admin.plugins.dep.trekIncompatible': 'Membutuhkan TREK {range} — server ini menjalankan {host}',
   'admin.plugins.dep.trekUnknown': 'Tidak menyatakan versi TREK mana yang didukung',
   'admin.plugins.installCompatible': 'Instal {version}',
+  'admin.plugins.installAnyway': 'Tetap pasang',
+  'admin.plugins.rangeBypass.pill': 'Pemeriksaan versi nonaktif',
+  'admin.plugins.rangeBypass.pillHint':
+    'TREK_PLUGINS_IGNORE_TREK_RANGE disetel — plugin dapat dipasang dan dijalankan di luar versi TREK yang dinyatakan penulisnya',
+  'admin.plugins.rangeBypass.title': 'Di luar versi TREK yang didukung',
+  'admin.plugins.rangeBypass.noticeTitle': 'Dipasang di luar versi TREK yang didukung',
+  'admin.plugins.rangeBypass.body':
+    '“{name}” menyatakan dukungan untuk TREK {range}, sedangkan server ini menjalankan {host}. TREK meloloskannya hanya karena TREK_PLUGINS_IGNORE_TREK_RANGE disetel. Penulisnya belum memperbarui rentang versi plugin untuk TREK ini, jadi tidak ada jaminan plugin ini berfungsi — dan dalam kasus yang jarang, plugin yang tidak cocok dapat merusak data TREK. Lanjutkan hanya jika Anda menerima risiko itu.',
+  'admin.plugins.rangeBypass.bodyUnknown':
+    '“{name}” tidak menyatakan versi TREK mana yang didukungnya; server ini menjalankan {host}. TREK meloloskannya hanya karena TREK_PLUGINS_IGNORE_TREK_RANGE disetel. Tidak ada tanda bahwa penulisnya mengujinya di TREK ini, jadi tidak ada jaminan plugin ini berfungsi — dan dalam kasus yang jarang, plugin yang tidak cocok dapat merusak data TREK. Lanjutkan hanya jika Anda menerima risiko itu.',
+  'admin.plugins.dep.trekBypassed':
+    'Di luar rentang TREK-nya ({range}) — pemeriksaan versi nonaktif',
+  'admin.plugins.dep.trekBypassedUnknown': 'Tidak menyatakan rentang TREK — pemeriksaan versi nonaktif',
   'admin.plugins.incompatible': 'Tidak kompatibel',
   'admin.plugins.accessTitle': 'Yang bisa diaksesnya',
   'admin.plugins.connectsTitle': 'Terhubung ke',
@@ -528,7 +650,7 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.packing.name': 'Daftar',
   'admin.addons.catalog.packing.description': 'Daftar packing dan tugas to-do untuk perjalananmu',
   'admin.addons.catalog.budget.name': 'Biaya',
-  'admin.addons.catalog.budget.description': 'Lacak pengeluaran dan rencanakan anggaran perjalananmu',
+  'admin.addons.catalog.budget.description': 'Catat pengeluaran perjalanan dan bagi di antara para pelancong',
   'admin.addons.catalog.documents.name': 'Dokumen',
   'admin.addons.catalog.documents.description': 'Simpan dan kelola dokumen perjalanan',
   'admin.addons.catalog.vacay.name': 'Vacay',
@@ -536,13 +658,24 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.atlas.name': 'Atlas',
   'admin.addons.catalog.atlas.description': 'Peta dunia dengan negara yang pernah dikunjungi dan statistik perjalanan',
   'admin.addons.catalog.collab.name': 'Collab',
-  'admin.addons.catalog.collab.description': 'Catatan real-time, polling, dan chat untuk perencanaan perjalanan',
+  'admin.addons.catalog.collab.description': 'Catatan, jajak pendapat, obrolan, dan saran untuk merencanakan bersama',
+  'admin.addons.catalog.roadtrip.name': 'Perjalanan darat',
+  'admin.addons.catalog.roadtrip.description': 'Rencanakan perjalanan dengan perhentian; waktu berkendara dan tiba dihitung ulang otomatis',
   'admin.addons.catalog.memories.name': 'Foto (Immich)',
   'admin.addons.catalog.memories.description': 'Bagikan foto perjalanan melalui instans Immich kamu',
   'admin.addons.catalog.mcp.name': 'MCP',
   'admin.addons.catalog.mcp.description': 'Model Context Protocol untuk integrasi asisten AI',
   'admin.addons.subtitleBefore': 'Aktifkan atau nonaktifkan fitur untuk menyesuaikan ',
   'admin.addons.subtitleAfter': ' kamu.',
+  'admin.addons.catalog.naver_list_import.name': 'Naver List Import',
+  'admin.addons.catalog.naver_list_import.description': 'Impor tempat dari daftar Naver Maps yang dibagikan',
+  'admin.addons.catalog.airtrail.name': 'AirTrail',
+  'admin.addons.catalog.airtrail.description': 'Sinkronkan penerbangan dari instans AirTrail milikmu',
+  'admin.addons.catalog.dawarich.name': 'Dawarich',
+  'admin.addons.catalog.dawarich.description':
+    'Baca kunjungan dan rute terekam dari instans Dawarich yang dihubungkan sendiri oleh tiap pembaca',
+  'admin.addons.catalog.llm_parsing.name': 'Analisis AI',
+  'admin.addons.catalog.llm_parsing.description': 'Membaca pemesanan yang tidak dipahami pengurai bawaan, dengan model AI pilihanmu',
   'admin.addons.enabled': 'Aktif',
   'admin.addons.disabled': 'Nonaktif',
   'admin.addons.type.trip': 'Perjalanan',
@@ -553,6 +686,7 @@ const admin: TranslationStrings = {
   'admin.addons.integrationHint': 'Layanan backend dan integrasi API tanpa halaman tersendiri',
   'admin.addons.toast.updated': 'Addon diperbarui',
   'admin.addons.toast.error': 'Gagal memperbarui addon',
+  'admin.addons.group.count': '{enabled} dari {total} aktif',
   'admin.addons.noAddons': 'Tidak ada addon yang tersedia',
   'admin.weather.title': 'Data Cuaca',
   'admin.weather.badge': 'Sejak 24 Maret 2026',
@@ -643,8 +777,7 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.journey.name': 'Journey',
   'admin.addons.catalog.journey.description': 'Pelacakan perjalanan & jurnal dengan check-in, foto, dan cerita harian',
   'admin.addons.catalog.collections.name': 'Koleksi',
-  'admin.addons.catalog.collections.description':
-    'Pustaka tempat pribadi — simpan tempat lintas perjalanan ke dalam daftar bernama, salin ke perjalanan mana pun, bagikan dengan orang lain',
+  'admin.addons.catalog.collections.description': 'Kumpulkan tempat dari perjalanan mana pun ke dalam daftar bernama dan gunakan lagi',
   'admin.passkey.title': 'Login dengan passkey',
   'admin.passkey.cardHint': 'Izinkan pengguna masuk dengan passkey (WebAuthn). Nonaktif secara default.',
   'admin.passkey.login': 'Aktifkan login dengan passkey',
@@ -676,6 +809,9 @@ const admin: TranslationStrings = {
   'admin.defaultSettings.mapboxStylePlaceholder': 'Pilih gaya…',
   'admin.defaultSettings.mapbox3d': 'Bangunan & medan 3D',
   'admin.defaultSettings.mapboxQuality': 'Mode kualitas tinggi',
+  'admin.defaultSettings.cartoKey': 'Kunci CARTO bersama',
+  'admin.defaultSettings.cartoKeyHint':
+    'Digunakan untuk setiap pengguna yang belum memasukkan kunci mereka sendiri, sehingga seluruh instance mendapatkan ubin CARTO tanpa tanda air. Disimpan dalam bentuk terenkripsi.',
   'admin.group.users': 'Users',
   'admin.group.config': 'Configuration',
   'admin.group.integration': 'Integrations',
@@ -684,5 +820,9 @@ const admin: TranslationStrings = {
   'admin.invite.tripNone': 'Tanpa perjalanan',
   'admin.invite.tripHint': 'Pengguna baru otomatis ditambahkan ke perjalanan ini saat mereka mendaftar melalui tautan.',
   'admin.invite.boundTo': 'menambahkan ke {trip}',
+  'admin.placesUsageTitle': 'Untuk apa kunci ini dipakai',
+  'admin.mapsKeyHintShort': 'Menambahkan foto, penilaian, dan jam buka. Setiap pencarian lalu ke Google.',
+  'admin.amapKeyHintShort': 'Untuk pencarian tempat di Tiongkok daratan. Perlu kunci layanan web, bukan kunci JS API.',
+  'admin.collab.links.subtitle': 'Tautan bersama dan penanda',
 };
 export default admin;

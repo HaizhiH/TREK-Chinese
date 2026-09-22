@@ -54,5 +54,38 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': '{n}. bildirime git',
   'system_notice.pager.position': '{total} Bildirimden {current}.',
+  'system_notice.release_notes.eyebrow': 'Güncelleme yüklendi',
+  'system_notice.release_notes.features_label': 'Öne çıkanlar',
+  'system_notice.release_notes.features_aside': 'Hepsi bu kadar değil',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'Kendi yer API’sine sahip ilk açık kaynak seyahat planlayıcısı. 73,6 milyon yer, anahtar yok, kota yok.',
+  'system_notice.release_notes.feature_roadtrip_title': 'Yol gezisi eklentisi',
+  'system_notice.release_notes.feature_roadtrip_body': 'Sürüşü kendi planlar: rota, mesafe, saatler ve duraklar. Bir yönetici açana kadar kapalı.',
+  'system_notice.release_notes.feature_dawarich_title': 'Dawarich entegrasyonu',
+  'system_notice.release_notes.feature_dawarich_body': 'Google Timeline’ın kendi sunucunda çalışan alternatifi, artık TREK içinden okunabiliyor. TREK okur, yalnızca okur.',
+  'system_notice.release_notes.footnote':
+    "Ayrıca TREK'in geri kalanına yayılmış, daha küçük değişikliklerden oluşan uzun bir liste var.",
+  'system_notice.release_notes.notes_label': 'Sürüm notları',
+  'system_notice.release_notes.note_eyebrow': 'Geliştiriciden bir not',
+  'system_notice.release_notes.note_title': "TREK'i geliştirmeye devam etmemin sebebi sensin.",
+  'system_notice.release_notes.note_body':
+    'TREK, kendi seyahatlerim için küçük bir araç olarak başladı. Onları daha iyi planlamak istediğim için iş çıkışlarında yazıyordum. O günden beri de büyümeyi hiç tam olarak bırakmadı. Kullandığın neredeyse her şey gece geç saatlerde, hafta sonlarında, trenlerde, tam zamanlı bir işin yanında yapıldı ve birinin onu bir gün gerçekten açıp açmayacağını içten içe merak ettiğim çok akşam oldu.',
+  'system_notice.release_notes.promise_label': 'Söz',
+  'system_notice.release_notes.promise_lead': 'TREK sonsuza dek ücretsiz kalacak.',
+  'system_notice.release_notes.promise_text':
+    'Her özellik, her güncelleme, herkes için. Ücretli paket yok, abonelik yok, gizli şart yok.',
+  'system_notice.release_notes.note_body_after':
+    "Sonra sizler açtınız. Birkaç ay içinde sayınız binleri buldu: yıldızlar, hata bildirimleri, konuşmadığım dillere çeviriler, hiç tanışmadığım insanlardan pull request'ler. Hâlâ her sabah ilk iş repoya bakıyorum ve bu hâlâ tam olarak gerçekmiş gibi gelmiyor.",
+  'system_notice.release_notes.note_closing': 'Burada olduğun için teşekkür ederim. Sevgiler, Maurice.',
+  'system_notice.release_notes.support_lead':
+    'TREK ücretsiz ve hep öyle kalacak, ama sunucular, alan adları ve bir sürü geç gece ücretsiz değil.',
+  'system_notice.release_notes.support_text':
+    'TREK seyahatlerinde kendine bir yer edindiyse, bana bir kahve ısmarla ve bir sonraki sürümün gelmesine yardım et.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': "Ko-fi'de Destek Ol",
+  'system_notice.release_notes.headline': 'TREK’in artık kendi başına yaptığı dört şey.',
+  'system_notice.release_notes.intro': 'Kendi yer API’si, baştan sona planlanan yol gezileri, konum geçmişiniz sizin elinizde, ve belgeleriniz eşitlenmiş.',
+  'system_notice.release_notes.feature_docsync_title': 'Belge Eşitleme',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud ve Synology Drive. Bir seyahatin belgeleri, zaten kullandığınız depoyla iki yönlü akar.',
 };
 export default system_notice;

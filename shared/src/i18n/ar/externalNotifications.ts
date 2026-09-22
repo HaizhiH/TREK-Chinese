@@ -28,6 +28,10 @@ const ar: NotificationLocale = {
       title: 'دعوة دمج الإجازة',
       body: `${p.actor} يدعوك لدمج خطط الإجازة. افتح TREK للقبول أو الرفض.`,
     }),
+    vacay_share: (p) => ({
+      title: 'تمت مشاركة تقويم Vacay',
+      body: `${p.actor} شارك تقويم إجازاته معك. افتح TREK لعرضه.`,
+    }),
     collection_invite: (p) => ({
       title: 'دعوة إلى مجموعة',
       body: `${p.actor} يدعوك لمشاركة مجموعة. افتح TREK للقبول أو الرفض.`,
@@ -47,6 +51,12 @@ const ar: NotificationLocale = {
     version_available: (p) => ({
       title: 'إصدار TREK جديد متاح',
       body: `TREK ${p.version} متاح الآن. تفضل بزيارة لوحة الإدارة للتحديث.`,
+    }),
+    replica_failure: (p) => ({
+      title: 'فشل النسخة المتماثلة للتخزين',
+      body:
+        `فشلت الكتابة على النسخة المتماثلة '${p.backend}': ${p.op} لـ ${p.key} — ${p.error}.` +
+        (p.suppressed !== '0' ? ` تم تجاهل ${p.suppressed} فشل إضافي منذ آخر إشعار.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'تمت إعادة تعيين جلسة Synology',

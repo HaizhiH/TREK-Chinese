@@ -6,5 +6,9 @@ const pdf: TranslationStrings = {
   'pdf.costLabel': '費用',
   'pdf.preview': 'PDFプレビュー',
   'pdf.saveAsPdf': 'PDFとして保存',
+  'pdf.pageBreakPerDay': '日ごとに改ページ',
+  'pdf.mapTitle': 'ルート概要',
+  'pdf.distanceLabel': '距離',
+  'pdf.mapCredit': '国境線: geoBoundaries (CC BY 4.0)',
 };
 export default pdf;

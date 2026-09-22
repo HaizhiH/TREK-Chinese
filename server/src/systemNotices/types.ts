@@ -9,6 +9,10 @@ export type NoticeCondition =
   | { kind: 'dateWindow'; startsAt: string; endsAt?: string }
   | { kind: 'role'; roles: Array<'admin' | 'user'> }
   | { kind: 'addonEnabled'; addonId: string }
+  // Whether the operator of this install owns its configuration. A notice that
+  // asks the reader to update, to check a log or to fund the project assumes
+  // they run it themselves.
+  | { kind: 'managed'; is: boolean }
   | { kind: 'custom'; id: string };
 
 export interface NoticeMedia {
@@ -24,6 +28,45 @@ export type NoticeCta =
   | { kind: 'link';   labelKey: string; href: string }  // external URL, opens in a new tab
   | { kind: 'action'; labelKey: string; actionId: string; dismissOnAction?: boolean };
 
+export interface NoticeReleaseFeature {
+  iconName: string;
+  /** A small illustration the client draws on the card; unknown names fall back to the icon. */
+  visual?: string;
+  /** `wide` spans the row, picture beside the text; the default is an upright card. */
+  layout?: 'card' | 'wide';
+  titleKey: string;
+  bodyKey: string;
+}
+
+/**
+ * The release layout: the release on the left, a note from the maintainer on
+ * the right. A notice carrying this renders through the dedicated two-column
+ * modal instead of the generic notice body.
+ */
+export interface NoticeRelease {
+  version: string;
+  eyebrowKey: string;
+  headlineKey: string;
+  introKey: string;
+  featuresLabelKey: string;
+  featuresAsideKey?: string;
+  features: NoticeReleaseFeature[];
+  notes?: { labelKey: string; href: string };
+  footnoteKey?: string;
+  note: {
+    eyebrowKey: string;
+    titleKey: string;
+    bodyKey: string;
+    promiseLabelKey: string;
+    promiseLeadKey: string;
+    promiseTextKey: string;
+    bodyAfterKey: string;
+    closingKey: string;
+  };
+  supportLeadKey: string;
+  supportTextKey: string;
+}
+
 export interface SystemNotice {
   id: string;
   display: Display;
@@ -36,6 +79,8 @@ export interface SystemNotice {
   highlights?: Array<{ labelKey: string; iconName?: string }>;
   cta?: NoticeCta;
   secondaryCta?: NoticeCta;
+  /** Set to render the two-column release modal rather than the generic body. */
+  release?: NoticeRelease;
   // Hide this notice on small/mobile viewports (evaluated client-side).
   desktopOnly?: boolean;
   dismissible: boolean;

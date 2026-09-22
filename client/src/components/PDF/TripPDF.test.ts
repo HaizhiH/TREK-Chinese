@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { downloadTripPDF } from './TripPDF'
 import { server } from '../../../tests/helpers/msw/server'
 import { clearExchangeRateCache } from '../../hooks/useExchangeRates'
+import { getMergedItems, getTransportForDay } from '../../utils/dayMerge'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -252,6 +253,38 @@ describe('downloadTripPDF', () => {
     expect(iframe!.srcdoc).toContain('Air Italia · AI123 · CDG → FCO')
   })
 
+  it('FE-COMP-TRIPPDF-013c: a flight that lands the same day shows both times (#1310)', async () => {
+    const sameDay = { ...transportReservation, reservation_end_time: '2025-06-01T16:45:00' }
+    await downloadTripPDF({ ...richArgs, reservations: [sameDay] })
+    const iframe = getIframe()
+
+    // Without the landing time the reader cannot tell what is left of the day.
+    expect(iframe!.srcdoc).toContain('14:30 – 16:45')
+  })
+
+  it('FE-COMP-TRIPPDF-013d: a flight without a landing time still shows its departure', async () => {
+    await downloadTripPDF(richArgs)
+    const iframe = getIframe()
+
+    expect(iframe!.srcdoc).toContain('14:30')
+    expect(iframe!.srcdoc).not.toContain('14:30 –')
+  })
+
+  it('FE-COMP-TRIPPDF-013e: an overnight flight keeps its arrival on the arrival day (#1310)', async () => {
+    // Landing tomorrow: the departure day must not carry tomorrow's clock next
+    // to today's departure — the arrival day shows it as its own time.
+    const overnight = { ...transportReservation, day_id: 10, end_day_id: 11, reservation_end_time: '2025-06-02T06:15:00' }
+    await downloadTripPDF({
+      ...richArgs,
+      days: [dayWithPlaces, { id: 11, day_number: 2, title: null, date: '2025-06-02' } as never],
+      reservations: [overnight],
+    })
+    const iframe = getIframe()
+
+    expect(iframe!.srcdoc).not.toContain('14:30 – 06:15')
+    expect(iframe!.srcdoc).toContain('06:15')
+  })
+
   it('FE-COMP-TRIPPDF-013b: renders every flight number for a multi-leg flight', async () => {
     await downloadTripPDF({ ...richArgs, reservations: [multiLegFlight] })
     const iframe = getIframe()
@@ -265,6 +298,18 @@ describe('downloadTripPDF', () => {
     const iframe = getIframe()
     // Cover image rendered as background-image on .cover-bg
     expect(iframe!.srcdoc).toContain('cover.jpg')
+  })
+
+  it('FE-COMP-TRIPPDF-023: a cover url cannot close url() and add a second declaration', async () => {
+    // cover_image is a free string on the write path, and the style attribute is decoded
+    // before the CSS is parsed, so the quote and the paren have to be encoded.
+    const hostile = "http://host/a.jpg');background-image:url('http://elsewhere/leak.jpg"
+    await downloadTripPDF({ ...richArgs, trip: { ...richArgs.trip, cover_image: hostile } as any })
+    const iframe = getIframe()
+    const style = /<div class="cover-bg" style="([^"]*)"/.exec(iframe!.srcdoc)![1]
+
+    expect(style.split('url(')).toHaveLength(2)
+    expect(style.match(/'/g)).toHaveLength(2)
   })
 
   it('FE-COMP-TRIPPDF-015: renders accommodation section when accommodations exist', async () => {
@@ -513,5 +558,732 @@ describe('downloadTripPDF', () => {
     server.use(http.get('/api/pdf-sections/:tripId', () => HttpResponse.error()))
     await expect(downloadTripPDF(minimalArgs)).resolves.not.toThrow()
     expect(getIframe()!.srcdoc).not.toContain('class="plugin-sections')
+  })
+})
+
+// FE-W5PDF-001 to FE-W5PDF-030 — multi-day transport spans, the remaining
+// reservation subtitles, accommodation phases and cover fallbacks.
+describe('downloadTripPDF remaining branches', () => {
+  const dA = { id: 10, day_number: 1, title: 'Day A', date: '2025-06-01' } as any
+  const dB = { id: 11, day_number: 2, title: null, date: null } as any
+  const dC = { id: 12, day_number: 3, title: 'Day C', date: '2025-06-03' } as any
+
+  const spanArgs = (reservations: any[], overrides: Record<string, unknown> = {}) => ({
+    ...minimalArgs,
+    trip: { id: 10, title: 'Span Trip', description: null, cover_image: null } as any,
+    days: [dA, dB, dC],
+    reservations,
+    ...overrides,
+  })
+
+  const srcdoc = () => getIframe()!.srcdoc
+
+  // #2066 — the document is assembled outside React, so it read no setting at all
+  // and printed the stored column. Four surfaces carried a clock; all four were 24h
+  // whatever the reader had chosen.
+  describe('time format (#2066)', () => {
+    // The place chip reads the assignment's embedded place, not the places array,
+    // so both have to carry the clock under test.
+    const at = (placeTime: string, over: Record<string, unknown> = {}) => {
+      const place = { ...placeWithDetails, place_time: placeTime }
+      return {
+        ...richArgs,
+        places: [place],
+        assignments: { '10': [{ ...assignmentForDay, place }] },
+        reservations: [{
+          id: 700, title: 'Ferry', type: 'ferry', day_id: 10,
+          reservation_time: '2025-06-01T09:05', reservation_end_time: '2025-06-01T16:45',
+        }],
+        ...over,
+      }
+    }
+
+    it('FE-W5PDF-031: a 12h reader gets meridiem clocks on places and transports', async () => {
+      await downloadTripPDF(at('14:30', { timeFormat: '12h' }) as never)
+      const html = srcdoc()
+
+      expect(html).toContain('2:30 PM')
+      expect(html).toContain('9:05 AM')
+      expect(html).toContain('4:45 PM')
+      expect(html).not.toContain('14:30')
+      expect(html).not.toContain('16:45')
+    })
+
+    it('FE-W5PDF-032: a 24h reader gets the same times without a meridiem', async () => {
+      await downloadTripPDF(at('14:30', { timeFormat: '24h' }) as never)
+      const html = srcdoc()
+
+      expect(html).toContain('14:30')
+      expect(html).toContain('09:05')
+      expect(html).toContain('16:45')
+      expect(html).not.toContain('2:30 PM')
+    })
+
+    // check_in / check_out come off the accommodation row and were the one pair
+    // that printed the raw column in BOTH directions.
+    it('FE-W5PDF-033: accommodation check-in and check-out follow the setting too', async () => {
+      server.use(http.get('/api/trips/:id/accommodations', () => HttpResponse.json({
+        accommodations: [{
+          id: 1, place_id: 1, place_name: 'Hotel Roma', place_address: 'Via Roma 1',
+          start_day_id: 10, end_day_id: 10, check_in: '15:00', check_out: '11:00', notes: null,
+        }],
+      })))
+
+      await downloadTripPDF(at('14:30', { timeFormat: '12h' }) as never)
+
+      expect(srcdoc()).toContain('3:00 PM')
+    })
+
+    // A clock stored with a meridiem — the booking importer and a 12h user typing
+    // into the place form both produce one — must not print as 3 AM for a 24h reader.
+    it('FE-W5PDF-034: a stored meridiem is converted, not printed raw', async () => {
+      await downloadTripPDF(at('3:00 PM', { timeFormat: '24h' }) as never)
+
+      const html = srcdoc()
+      expect(html).toContain('15:00')
+      expect(html).not.toContain('3:00 PM')
+    })
+  })
+
+  it('FE-W5PDF-001: a multi-day cruise is labelled start / ongoing / end with the right times', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 500, title: 'Nordic Cruise', type: 'cruise', day_id: 10, end_day_id: 12,
+      reservation_time: '2025-06-01T09:00', reservation_end_time: '2025-06-03T18:00',
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('reservations.span.start: Nordic Cruise')
+    expect(html).toContain('reservations.span.ongoing: Nordic Cruise')
+    expect(html).toContain('reservations.span.end: Nordic Cruise')
+    expect(html).toContain('09:00')
+    expect(html).toContain('18:00')
+  })
+
+  it('FE-W5PDF-002: a multi-day flight uses departure/arrival wording', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 501, title: 'Red Eye', type: 'flight', day_id: 10, end_day_id: 11,
+      reservation_time: '2025-06-01T23:00', reservation_end_time: '2025-06-02T06:00',
+      metadata: JSON.stringify({}),
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('reservations.span.departure: Red Eye')
+    expect(html).toContain('reservations.span.arrival: Red Eye')
+  })
+
+  it('FE-W5PDF-003: a multi-day car hire is labelled pickup/return and skips the middle day', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 502, title: 'Rental', type: 'car', day_id: 10, end_day_id: 12,
+      reservation_time: '2025-06-01T10:00', reservation_end_time: '2025-06-03T10:00',
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('reservations.span.pickup: Rental')
+    expect(html).toContain('reservations.span.return: Rental')
+    expect(html).not.toContain('reservations.span.active')
+  })
+
+  it('FE-W5PDF-029: a multi-day parking is labelled drop-off/pickup and skips the middle day (#1937)', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 506, title: 'Airport Parking', type: 'parking', day_id: 10, end_day_id: 12,
+      reservation_time: '2025-06-01T05:30', reservation_end_time: '2025-06-03T19:00',
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('reservations.span.dropOff: Airport Parking')
+    expect(html).toContain('reservations.span.pickup: Airport Parking')
+    expect(html).not.toContain('reservations.span.ongoing')
+    // Day B holds nothing else, so it prints the empty-day hint rather than the booking.
+    expect(html).toContain('dayplan.emptyDay')
+  })
+
+  it('FE-W5PDF-004: hotels, day-less and unknown-day reservations are all skipped', async () => {
+    await downloadTripPDF(spanArgs([
+      { id: 503, title: 'Hotel Row', type: 'hotel', day_id: 10 },
+      { id: 504, title: 'Floating', type: 'event', day_id: null },
+      { id: 505, title: 'Ghost Span', type: 'train', day_id: 900, end_day_id: 901 },
+    ]))
+    const html = srcdoc()
+
+    expect(html).not.toContain('Hotel Row')
+    expect(html).not.toContain('Floating')
+    expect(html).not.toContain('Ghost Span')
+    expect(html).toContain('dayplan.emptyDay')
+  })
+
+  it('FE-W5PDF-005: a single-leg train renders its number, platform, seat and route', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 506, title: 'ICE 599', type: 'train', day_id: 10,
+      reservation_time: '10:15',
+      endpoints: [{ sequence: 1, code: 'BER' }, { sequence: 0, code: 'FRA' }],
+      metadata: { train_number: 'ICE 599', platform: '7', seat: '21A' },
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('ICE 599 · Gl. 7 · Seat 21A · FRA → BER')
+  })
+
+  it('FE-W5PDF-006: a multi-leg train renders one line per leg', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 507, title: 'Alpine Run', type: 'train', day_id: 10,
+      metadata: JSON.stringify({
+        legs: [
+          { train_number: 'IC 1', platform: '3', from: 'BER', to: 'MUC' },
+          { train_number: 'EC 2', from: 'MUC', to: 'ZRH' },
+        ],
+      }),
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('IC 1 · Gl. 3 · BER → MUC')
+    expect(html).toContain('EC 2 · MUC → ZRH')
+  })
+
+  it('FE-W5PDF-007: restaurant, event, tour and unknown types get their own subtitles', async () => {
+    await downloadTripPDF(spanArgs([
+      { id: 508, title: 'Dinner', type: 'restaurant', day_id: 10, metadata: { party_size: 4 } },
+      { id: 509, title: 'Concert', type: 'event', day_id: 10, metadata: { venue: 'Arena' } },
+      { id: 510, title: 'Walk', type: 'tour', day_id: 10, metadata: { operator: 'GuideCo' } },
+      { id: 511, title: 'Mystery', type: 'submarine', day_id: 10, metadata: null, location: 'Docks' },
+    ]))
+    const html = srcdoc()
+
+    expect(html).toContain('4 guests')
+    expect(html).toContain('Arena')
+    expect(html).toContain('GuideCo')
+    expect(html).toContain('Mystery')
+    expect(html).toContain('Docks')
+  })
+
+  it('FE-W5PDF-008: reservation positions come from day_positions, then the plan position, then the end', async () => {
+    await downloadTripPDF(spanArgs([
+      { id: 512, title: 'By Numeric Key', type: 'event', day_id: 10, day_positions: { 10: -5 } },
+      { id: 513, title: 'By String Key', type: 'event', day_id: 10, day_positions: { '10': -4 } },
+      { id: 514, title: 'By Plan Position', type: 'event', day_id: 10, day_plan_position: -3 },
+      { id: 515, title: 'By Fallback', type: 'event', day_id: 10 },
+    ]))
+    const html = srcdoc()
+
+    expect(html.indexOf('By Numeric Key')).toBeLessThan(html.indexOf('By String Key'))
+    expect(html.indexOf('By String Key')).toBeLessThan(html.indexOf('By Plan Position'))
+    expect(html.indexOf('By Plan Position')).toBeLessThan(html.indexOf('By Fallback'))
+  })
+
+  it('FE-W5PDF-009: a flight leg without a route still lists airline and number', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 516, title: 'Charter', type: 'flight', day_id: 10,
+      metadata: JSON.stringify({
+        legs: [
+          { airline: 'AirX', flight_number: 'X1' },
+          { airline: 'AirX', flight_number: 'X2', from: 'AAA', to: 'BBB' },
+        ],
+      }),
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('AirX · X1')
+    expect(html).toContain('AirX · X2 · AAA → BBB')
+  })
+
+  it('FE-W5PDF-030: a stopover flight prints the booking code of each segment that has one (#1943)', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 518, title: 'Layover', type: 'flight', day_id: 10, confirmation_number: 'BOOK1',
+      metadata: JSON.stringify({
+        legs: [
+          { airline: 'LH', flight_number: 'LH1', from: 'FRA', to: 'BER', confirmation_number: 'ABC123' },
+          { airline: 'ANA', flight_number: 'NH2', from: 'BER', to: 'HND' },
+        ],
+      }),
+    }]))
+    const html = srcdoc()
+
+    expect(html).toContain('LH · LH1 · FRA → BER · ABC123')
+    // A segment without one keeps the line it had before, and the booking's own
+    // reference still prints once for the whole card.
+    expect(html).toContain('ANA · NH2 · BER → HND')
+    expect(html).toContain('Code: BOOK1')
+  })
+
+  it('FE-W5PDF-010: a single-leg flight with waypoints joins the whole route', async () => {
+    await downloadTripPDF(spanArgs([{
+      id: 517, title: 'Long Haul', type: 'flight', day_id: 10,
+      endpoints: [{ sequence: 0, code: 'FRA' }, { sequence: 1, name: 'Berlin' }, { sequence: 2, code: 'HND' }],
+      metadata: { airline: 'LH', flight_number: 'LH7' },
+    }]))
+
+    expect(srcdoc()).toContain('LH · LH7 · FRA → Berlin → HND')
+  })
+
+  it('FE-W5PDF-011: an assignment without a place contributes nothing', async () => {
+    await downloadTripPDF(spanArgs([], {
+      assignments: { '10': [{ id: 1, day_id: 10, order_index: 0, place: null }] } as any,
+    }))
+
+    expect(srcdoc()).toContain('class="day-body"')
+    expect(srcdoc()).not.toContain('class="place-card"')
+  })
+
+  it('FE-W5PDF-012: a bare place renders without badge, address, coordinates or chips', async () => {
+    await downloadTripPDF(spanArgs([], {
+      assignments: {
+        '10': [{ id: 1, day_id: 10, order_index: 0, place: { id: 70, name: 'Bare Place', price: '0' } }],
+      } as any,
+    }))
+    const html = srcdoc()
+
+    expect(html).toContain('Bare Place')
+    expect(html).not.toContain('class="cat-badge"')
+    expect(html).not.toContain('<div class="chips">')
+    expect(html).toContain('class="place-thumb-fallback"')
+  })
+
+  it('FE-W5PDF-013: coordinates are printed for a place that has no address', async () => {
+    await downloadTripPDF(spanArgs([], {
+      assignments: {
+        '10': [{ id: 1, day_id: 10, order_index: 0, place: { id: 71, name: 'Pin Only', lat: 48.858093, lng: 2.294694 } }],
+      } as any,
+    }))
+
+    expect(srcdoc()).toContain('48.85809, 2.29469')
+  })
+
+  it('FE-W5PDF-014: a note without a time renders only its text and falls back to the default icon', async () => {
+    await downloadTripPDF(spanArgs([], {
+      dayNotes: [{ id: 1, day_id: 10, text: 'Just a note', time: null, icon: 'NotAnIcon', sort_order: 0 }] as any,
+    }))
+    const html = srcdoc()
+
+    expect(html).toContain('Just a note')
+    expect(html).not.toContain('class="note-time"')
+  })
+
+  it('FE-W5PDF-015: check-in, middle and check-out days each get their own accommodation block', async () => {
+    server.use(
+      http.get('/api/trips/:id/accommodations', () =>
+        HttpResponse.json({
+          accommodations: [{
+            id: 1, start_day_id: 10, end_day_id: 12, place_name: 'Hotel Nord', place_address: 'Main St',
+            check_in: '15:00', check_out: '10:00', confirmation: 'CONF-9', notes: 'Late arrival',
+          }],
+        }),
+      ),
+    )
+    await downloadTripPDF(spanArgs([]))
+    const html = srcdoc()
+
+    expect(html).toContain('reservations.meta.checkIn')
+    expect(html).toContain('reservations.meta.linkAccommodation')
+    expect(html).toContain('reservations.meta.checkOut')
+    expect(html).toContain('Hotel Nord')
+    expect(html).toContain('Main St')
+    expect(html).toContain('Late arrival')
+    expect(html).toContain('CONF-9')
+    expect(html).toContain('class="day-accommodations single"')
+  })
+
+  it('FE-W5PDF-016: two accommodations on one day are ordered by their start day', async () => {
+    server.use(
+      http.get('/api/trips/:id/accommodations', () =>
+        HttpResponse.json({
+          accommodations: [
+            { id: 2, start_day_id: 11, end_day_id: 12, place_name: 'Later Inn', place_address: null, check_in: null, check_out: null, confirmation: null },
+            { id: 1, start_day_id: 10, end_day_id: 12, place_name: 'Earlier Inn', place_address: null, check_in: null, check_out: null, confirmation: null },
+          ],
+        }),
+      ),
+    )
+    await downloadTripPDF(spanArgs([]))
+    const html = srcdoc()
+
+    expect(html.indexOf('Earlier Inn')).toBeLessThan(html.indexOf('Later Inn'))
+    // the shared days list two hotels, so they lose the single-column class
+    expect(html).toContain('class="day-accommodations "')
+  })
+
+  it('FE-W5PDF-017: a trip without dated days prints no date range and no day dates', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      trip: { id: 1, title: 'Undated', description: null, cover_image: null } as any,
+      days: [{ id: 1, day_number: 1, title: null, date: null }] as any[],
+    })
+    const html = srcdoc()
+
+    expect(html).not.toContain('class="cover-dates"')
+    expect(html).not.toContain('class="day-date"')
+    expect(html).toContain('class="cover-circle-ph"')
+  })
+
+  it('FE-W5PDF-018: the print button asks the preview frame to print', async () => {
+    await downloadTripPDF(minimalArgs)
+    const iframe = getIframe()!
+    const print = vi.fn()
+    Object.defineProperty(iframe, 'contentWindow', { value: { print }, configurable: true })
+
+    document.getElementById('pdf-print-btn')!.click()
+
+    expect(print).toHaveBeenCalled()
+  })
+
+  it('FE-W5PDF-019: an external cover image is used verbatim, a non-image one is dropped', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      trip: { id: 1, title: 'Cover Trip', description: null, cover_image: 'https://cdn.example.com/a.jpg' } as any,
+    })
+    expect(srcdoc()).toContain('https://cdn.example.com/a.jpg')
+
+    getOverlay()?.remove()
+    await downloadTripPDF({
+      ...minimalArgs,
+      trip: { id: 1, title: 'Cover Trip', description: null, cover_image: '/uploads/cover.svg' } as any,
+    })
+    expect(srcdoc()).not.toContain('/uploads/cover.svg')
+    expect(srcdoc()).toContain('class="cover-circle-ph"')
+  })
+
+  it('FE-W5PDF-020: plugin sections render their paragraphs and tables', async () => {
+    server.use(
+      http.get('/api/pdf-sections/:tripId', () =>
+        HttpResponse.json({
+          sections: [
+            { title: 'Packing', paragraphs: ['Bring a towel'], table: { headers: ['Item', 'Qty'], rows: [['Socks', '3']] } },
+            { title: 'Bare', paragraphs: null, table: null },
+          ],
+        }),
+      ),
+    )
+    await downloadTripPDF(minimalArgs)
+    const html = srcdoc()
+
+    expect(html).toContain('Packing')
+    expect(html).toContain('Bring a towel')
+    expect(html).toContain('<th>Item</th>')
+    expect(html).toContain('<td>Socks</td>')
+    expect(html).toContain('Bare')
+  })
+})
+
+// FE-W5PDF-021 to FE-W5PDF-026 — the defaulting arms of the exporter.
+describe('downloadTripPDF defaults', () => {
+  type Args = Parameters<typeof downloadTripPDF>[0]
+  const srcdoc = () => getIframe()!.srcdoc
+
+  it('FE-W5PDF-021: a call without days, places, notes or a translator still produces a document', async () => {
+    await downloadTripPDF({ trip: { id: 1 }, assignments: {}, locale: 'en-US' } as unknown as Args)
+    const html = srcdoc()
+
+    // no translator, no days, no places, no notes
+    expect(html).toContain('pdf.travelPlan')
+    expect(html).toContain('<div class="cover-title">My Trip</div>')
+    expect(html).toContain('<div class="cover-stat-num">0</div>')
+  })
+
+  it('FE-W5PDF-022: an accommodations response without the key degrades to no hotels', async () => {
+    server.use(
+      http.get('/api/trips/:id/accommodations', () => HttpResponse.json({})),
+      http.get('/api/pdf-sections/:tripId', () => HttpResponse.json({})),
+    )
+    await downloadTripPDF({ ...minimalArgs } as unknown as Args)
+
+    expect(srcdoc()).not.toContain('day-accommodations-overview"')
+    expect(srcdoc()).not.toContain('class="plugin-sections')
+  })
+
+  it('FE-W5PDF-023: items without an explicit order fall back to position zero', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      days: [{ id: 1, day_number: 1, title: 'Only Day', date: '2025-06-01' }] as any[],
+      assignments: { '1': [{ id: 1, day_id: 1, order_index: null, place: { id: 5, name: 'Unordered Place' } }] } as any,
+      dayNotes: [{ id: 2, day_id: 1, text: 'Unordered Note', sort_order: null, icon: 'Info' }] as any,
+    })
+    const html = srcdoc()
+
+    expect(html).toContain('Unordered Place')
+    expect(html).toContain('Unordered Note')
+  })
+
+  it('FE-W5PDF-024: an empty metadata string and a missing title are handled', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      trip: { id: 1, title: null, description: null, cover_image: null } as any,
+      days: [{ id: 1, day_number: 1, title: null, date: '2025-06-01' }] as any[],
+      reservations: [{ id: 1, title: null, type: 'restaurant', day_id: 1, metadata: '' }] as any[],
+    })
+    const html = srcdoc()
+
+    expect(html).toContain('<title>pdf.travelPlan</title>')
+    expect(html).toContain('note-card')
+    expect(html).toContain('Day 1')
+  })
+
+  it('FE-W5PDF-025: an extensionless relative image url is resolved against the origin', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      days: [{ id: 1, day_number: 1, title: 'Only Day', date: '2025-06-01' }] as any[],
+      assignments: {
+        '1': [{ id: 1, day_id: 1, order_index: 0, place: { id: 5, name: 'Proxy Photo', image_url: 'uploads/places/photo.jpg' } }],
+      } as any,
+    })
+
+    // no leading slash: absUrl has to insert one
+    expect(srcdoc()).toContain('http://localhost:3000/uploads/places/photo.jpg')
+  })
+
+  it('FE-W5PDF-026: the last day of a span without an end time prints no time', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      days: [
+        { id: 1, day_number: 1, title: 'Start Day', date: '2025-06-01' },
+        { id: 2, day_number: 2, title: 'End Day', date: '2025-06-02' },
+      ] as any[],
+      reservations: [{ id: 1, title: 'Overnight Bus', type: 'bus', day_id: 1, end_day_id: 2, reservation_time: '22:00', reservation_end_time: null }] as any[],
+    })
+    const html = srcdoc()
+    const endSection = html.slice(html.indexOf('End Day'))
+
+    expect(html).toContain('reservations.span.start: Overnight Bus')
+    expect(endSection).toContain('reservations.span.end: Overnight Bus')
+    expect(endSection).not.toContain('22:00')
+  })
+
+  it('FE-W5PDF-027: an export without a locale still renders, with lang="en"', async () => {
+    await downloadTripPDF({ ...minimalArgs, locale: '' })
+
+    expect(srcdoc()).toContain('<html lang="en">')
+  })
+
+  it('FE-W5PDF-028: an export without assignments renders the days as empty', async () => {
+    await downloadTripPDF({ ...minimalArgs, assignments: undefined as any })
+
+    expect(srcdoc()).toContain('Day 1')
+  })
+})
+
+// #1292 — every day started a new page, so a plan of short days printed one
+// sheet per handful of lines. The flowing layout is opt-in and remembered.
+describe('page breaks between days (#1292)', () => {
+  const twoDays = {
+    ...minimalArgs,
+    days: [
+      { id: 1, day_number: 1, title: 'First', date: '2025-06-01' },
+      { id: 2, day_number: 2, title: 'Second', date: '2025-06-02' },
+    ] as any[],
+  }
+
+  beforeEach(() => {
+    localStorage.removeItem('trek_pdf_page_break_per_day')
+  })
+
+  const toggle = () =>
+    document.querySelector<HTMLButtonElement>('#pdf-daybreak-toggle')
+  const isOn = () => toggle()!.getAttribute('aria-checked') === 'true'
+
+  it('FE-PDF-BREAK-001: days break onto their own page by default', async () => {
+    await downloadTripPDF(twoDays)
+    const html = getIframe()!.srcdoc
+
+    expect(html).toContain('day-section day-break')
+    expect(html).not.toContain('class="pdf-flow"')
+    expect(isOn()).toBe(true)
+  })
+
+  it('FE-PDF-BREAK-001b: the control is the switch from the rest of the app, not a checkbox', async () => {
+    await downloadTripPDF(twoDays)
+    const el = toggle()!
+
+    expect(el.tagName).toBe('BUTTON')
+    expect(el.getAttribute('role')).toBe('switch')
+    expect(el.style.background).toContain('--accent')
+    expect(document.querySelector('#pdf-daybreak-toggle input')).toBeNull()
+  })
+
+  it('FE-PDF-BREAK-002: the remembered flowing layout comes back on the next export', async () => {
+    localStorage.setItem('trek_pdf_page_break_per_day', '0')
+    await downloadTripPDF(twoDays)
+    const html = getIframe()!.srcdoc
+
+    // The class stays on the day; the body is what decides whether it breaks.
+    expect(html).toContain('day-section day-break')
+    expect(html).toContain('<body class="pdf-flow">')
+    expect(isOn()).toBe(false)
+    // Off uses the neutral track, so the two states are told apart by more than the knob.
+    expect(toggle()!.style.background).toContain('--border-primary')
+  })
+
+  it('FE-PDF-BREAK-003: the first day never carries a break of its own', async () => {
+    await downloadTripPDF(twoDays)
+    const html = getIframe()!.srcdoc
+
+    expect(html.indexOf('<table class="day-section">')).toBeGreaterThan(-1)
+    expect(html.match(/day-section day-break/g)).toHaveLength(1)
+  })
+
+  it('FE-PDF-BREAK-004: turning the breaks off is remembered and shown at once', async () => {
+    await downloadTripPDF(twoDays)
+    toggle()!.click()
+
+    expect(isOn()).toBe(false)
+    expect(localStorage.getItem('trek_pdf_page_break_per_day')).toBe('0')
+    const body = getIframe()!.contentDocument?.body
+    if (body) expect(body.classList.contains('pdf-flow')).toBe(true)
+  })
+
+  it('FE-PDF-BREAK-005: turning them back on is remembered too', async () => {
+    localStorage.setItem('trek_pdf_page_break_per_day', '0')
+    await downloadTripPDF(twoDays)
+    toggle()!.click()
+
+    expect(isOn()).toBe(true)
+    expect(localStorage.getItem('trek_pdf_page_break_per_day')).toBe('1')
+    const body = getIframe()!.contentDocument?.body
+    if (body) expect(body.classList.contains('pdf-flow')).toBe(false)
+  })
+
+  it('FE-PDF-BREAK-006: a storage the browser blocks costs the preference, not the export', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+
+    await downloadTripPDF(twoDays)
+    const html = getIframe()!.srcdoc
+    expect(html).toContain('day-section day-break')
+    expect(html).not.toContain('class="pdf-flow"')
+
+    expect(() => toggle()!.click()).not.toThrow()
+  })
+
+  // Verified against a real print engine: without this rule Chromium tore a stay
+  // across the page edge, the check-in time on one sheet and the hotel name on
+  // the next. Place and note cards already carried it.
+  it('FE-PDF-BREAK-007: a stay may not be split by a page edge', async () => {
+    await downloadTripPDF(twoDays)
+    const html = getIframe()!.srcdoc
+    const rule = html.slice(html.indexOf('.day-accommodation {'))
+    expect(rule.slice(0, rule.indexOf('}'))).toContain('break-inside: avoid')
+  })
+
+  // Measured against Chromium: with the days flowing, a header bar could be left
+  // at the foot of a sheet while its content moved on, and the repeat from #1471
+  // then read as the same day printed twice. break-after on the thead and
+  // break-before on the tbody are both ignored; holding the day together is what
+  // works, and a day too long for one page still breaks and still repeats.
+  it('FE-PDF-BREAK-008: a flowing day is held together so its header is never stranded', async () => {
+    localStorage.setItem('trek_pdf_page_break_per_day', '0')
+    await downloadTripPDF(twoDays)
+    const html = getIframe()!.srcdoc
+
+    expect(html).toContain('.pdf-flow .day-section { break-inside: avoid; page-break-inside: avoid; }')
+    // Scoped: a day that starts its own page cannot strand a header.
+    const at = html.indexOf('.day-section { break-inside: avoid')
+    expect(html.slice(at - 10, at)).toContain('.pdf-flow ')
+  })
+})
+
+/**
+ * The order a day prints in (#1978).
+ *
+ * The export used to order a day by itself, on `day_plan_position` — one global
+ * number per booking, auto-seeded from whichever day happened to render first.
+ * On any other day of a span it therefore pointed at the wrong slot, and where
+ * it was still null the export fell back to the order the API returned rows in.
+ * That is why the same trip printed correctly some of the time and swapped two
+ * bookings the rest of it, and why adding a place and removing it again "fixed"
+ * it: the reseed happened to land on the day being looked at.
+ *
+ * It now goes through utils/dayMerge, the same functions the day plan uses, so
+ * the two cannot disagree. These cases are written from the plan's rules rather
+ * than from the old implementation's.
+ */
+describe('a printed day follows the plan (#1978)', () => {
+  const d1 = { id: 21, day_number: 1, title: 'Day One', date: '2025-06-01' } as any
+  const d2 = { id: 22, day_number: 2, title: 'Day Two', date: '2025-06-02' } as any
+  const srcdoc = () => getIframe()!.srcdoc
+
+  /** Where each needle first appears, so order can be asserted without parsing. */
+  const positions = (html: string, needles: string[]) => needles.map(n => html.indexOf(n))
+
+  it('orders the day by the clock, not by the order the API sent rows in', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      trip: { id: 21, title: 'Order Trip', description: null, cover_image: null } as any,
+      days: [d1],
+      // As the API returns them: reservation_time ASC with nulls first.
+      reservations: [
+        { id: 1, title: 'Untimed Transfer', type: 'transfer', day_id: 21, reservation_time: null },
+        { id: 2, title: 'Evening Train', type: 'train', day_id: 21, reservation_time: '2025-06-01T19:30' },
+        { id: 3, title: 'Morning Flight', type: 'flight', day_id: 21, reservation_time: '2025-06-01T07:15' },
+      ],
+    })
+    const [morning, evening] = positions(srcdoc(), ['Morning Flight', 'Evening Train'])
+    expect(morning).toBeGreaterThan(-1)
+    expect(evening).toBeGreaterThan(-1)
+    expect(morning).toBeLessThan(evening)
+  })
+
+  /*
+   * The reported shape: a booking on the last day of a span whose global
+   * position was seeded from a busier earlier day, which sank it below
+   * everything on the day it actually belongs to.
+   */
+  it('ignores a global position seeded from another day', async () => {
+    await downloadTripPDF({
+      ...minimalArgs,
+      trip: { id: 22, title: 'Span Trip', description: null, cover_image: null } as any,
+      days: [d1, d2],
+      reservations: [
+        {
+          id: 4, title: 'Car Return', type: 'car', day_id: 21, end_day_id: 22,
+          reservation_time: '2025-06-01T10:00', reservation_end_time: '2025-06-02T09:00',
+          // Seeded from day one, where five places had already been placed.
+          day_plan_position: 5,
+        },
+        { id: 5, title: 'Late Flight', type: 'flight', day_id: 22, reservation_time: '2025-06-02T18:00' },
+      ],
+    })
+    const html = srcdoc()
+    // On day two the 09:00 return comes before the 18:00 flight, whatever the
+    // stale global position says.
+    const [ret, flight] = positions(html, ['Car Return', 'Late Flight'])
+    expect(ret).toBeGreaterThan(-1)
+    expect(flight).toBeGreaterThan(-1)
+    expect(ret).toBeLessThan(flight)
+  })
+
+  /*
+   * The strongest form of the same claim: whatever the plan would show, the
+   * print shows, in that order. Asserted against getMergedItems itself rather
+   * than against a hand-written expectation, so the two cannot drift apart
+   * again without this failing.
+   */
+  it('prints a mixed day in exactly the order the plan merges it', async () => {
+    const reservations = [
+      { id: 8, title: 'Untimed Transfer', type: 'transfer', day_id: 21, reservation_time: null },
+      { id: 9, title: 'Evening Train', type: 'train', day_id: 21, reservation_time: '2025-06-01T19:30' },
+      { id: 10, title: 'Morning Flight', type: 'flight', day_id: 21, reservation_time: '2025-06-01T07:15' },
+    ]
+    const dayAssignments = [
+      { id: 100, day_id: 21, order_index: 0, place: { id: 1, name: 'Museum', place_time: '11:00' } },
+      { id: 101, day_id: 21, order_index: 1, place: { id: 2, name: 'Market', place_time: '16:00' } },
+    ]
+
+    await downloadTripPDF({
+      ...minimalArgs,
+      trip: { id: 24, title: 'Mixed Trip', description: null, cover_image: null } as any,
+      days: [d1],
+      assignments: { '21': dayAssignments } as any,
+      reservations,
+    })
+    const html = srcdoc()
+
+    const expected = getMergedItems({
+      dayAssignments,
+      dayNotes: [],
+      dayTransports: getTransportForDay({
+        reservations, dayId: 21, dayAssignmentIds: dayAssignments.map(a => a.id), days: [d1],
+      }),
+      dayId: 21,
+    }).map(item => (item.type === 'place' ? item.data.place.name : item.data.title))
+
+    const seen = expected.map(name => html.indexOf(name))
+    for (const at of seen) expect(at).toBeGreaterThan(-1)
+    expect(seen).toEqual([...seen].sort((a, b) => a - b))
   })
 })

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { normalizePastedAmount } from './BudgetPanel.helpers'
 
 interface InlineEditCellProps {
   value: string | number | null | undefined
@@ -22,28 +23,14 @@ export default function InlineEditCell({ value, onSave, type = 'text', style = {
   const save = () => {
     setEditing(false)
     let v: string | number | null = editValue
-    if (type === 'number') { const p = parseFloat(String(editValue).replace(',', '.')); v = isNaN(p) ? null : p }
+    if (type === 'number') { const p = Number.parseFloat(String(editValue).replace(',', '.')); v = Number.isNaN(p) ? null : p }
     if (v !== value) onSave(v)
   }
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     if (type !== 'number') return
     e.preventDefault()
-    let text = e.clipboardData.getData('text').trim()
-    // Strip everything except digits, dots, commas, minus
-    text = text.replace(/[^\d.,-]/g, '')
-    // Remove all thousand separators (dots or commas before 3-digit groups), keep last separator as decimal
-    const lastComma = text.lastIndexOf(',')
-    const lastDot = text.lastIndexOf('.')
-    const decimalPos = Math.max(lastComma, lastDot)
-    if (decimalPos > -1) {
-      const intPart = text.substring(0, decimalPos).replace(/[.,]/g, '')
-      const decPart = text.substring(decimalPos + 1)
-      text = intPart + '.' + decPart
-    } else {
-      text = text.replace(/[.,]/g, '')
-    }
-    setEditValue(text)
+    setEditValue(normalizePastedAmount(e.clipboardData.getData('text')))
   }
 
   if (editing) {
@@ -58,14 +45,27 @@ export default function InlineEditCell({ value, onSave, type = 'text', style = {
     ? Number(value).toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
     : (value || '')
 
+  // Editable cells are real buttons so they can be tabbed to and pressed. A
+  // read-only cell renders no control at all rather than a disabled one: it is
+  // plain text, and a disabled button would be announced as an unavailable
+  // control that never becomes available. Same split the member chips use.
+  const cellStyle: React.CSSProperties = {
+    padding: '2px 4px', borderRadius: 4, minHeight: 22, display: 'flex', alignItems: 'center',
+    justifyContent: style?.textAlign === 'center' ? 'center' : 'flex-start', transition: 'background 0.15s',
+    color: display ? 'var(--text-primary)' : 'var(--text-faint)', fontSize: 'calc(13px * var(--fs-scale-body, 1))',
+    width: '100%', textAlign: 'left', ...style,
+  }
+  const content = display || placeholder || '-'
+
+  if (readOnly) return <div style={{ ...cellStyle, cursor: 'default' }}>{content}</div>
+
   return (
-    <div onClick={() => { if (readOnly) return; setEditValue(value ?? ''); setEditing(true) }} title={readOnly ? undefined : editTooltip}
-      style={{ cursor: readOnly ? 'default' : 'pointer', padding: '2px 4px', borderRadius: 4, minHeight: 22, display: 'flex', alignItems: 'center',
-        justifyContent: style?.textAlign === 'center' ? 'center' : 'flex-start', transition: 'background 0.15s',
-        color: display ? 'var(--text-primary)' : 'var(--text-faint)', fontSize: 'calc(13px * var(--fs-scale-body, 1))', ...style }}
-      onMouseEnter={e => { if (!readOnly) e.currentTarget.style.background = 'var(--bg-hover)' }}
-      onMouseLeave={e => { if (!readOnly) e.currentTarget.style.background = 'transparent' }}>
-      {display || placeholder || '-'}
-    </div>
+    <button type="button"
+      onClick={() => { setEditValue(value ?? ''); setEditing(true) }} title={editTooltip}
+      style={{ ...cellStyle, cursor: 'pointer' }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+      {content}
+    </button>
   )
 }

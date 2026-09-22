@@ -14,6 +14,8 @@ const inspector: TranslationStrings = {
   'inspector.confirmedRes': 'Bekräftad bokning',
   'inspector.pendingRes': 'Pendlande bokning',
   'inspector.google': 'Google Maps',
+  'inspector.navigation': 'Navigation',
+  'inspector.openWith': 'Öppna med',
   'inspector.openStreetMap': 'OpenStreetMap',
   'inspector.website': 'Öppna hemsida',
   'inspector.saveToCollection': 'Spara i samling',
@@ -22,5 +24,8 @@ const inspector: TranslationStrings = {
   'inspector.editRes': 'Redigera bokning',
   'inspector.participants': 'Deltagare',
   'inspector.trackStats': 'Spåra statistik',
+  'inspector.trackColor': 'Spårfärg',
+  'inspector.trackColorAuto': 'Automatisk färg',
+  'inspector.trackColorCustom': 'Välj egen färg',
 };
 export default inspector;

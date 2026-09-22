@@ -1,4 +1,4 @@
-import { encrypt_api_key } from '../services/apiKeyCrypto';
+import { encrypt_api_key } from '../nest/common/crypto/apiKeyCrypto';
 import { seedDocumentProviders } from './document-provider-seed';
 
 import Database from 'better-sqlite3';

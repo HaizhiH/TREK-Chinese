@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'Reizen',
   'oauth.scope.group.places': 'Plaatsen',
+  'oauth.scope.group.collections': 'Collecties',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': 'Paklijst',
   'oauth.scope.group.todos': 'Taken',
@@ -26,6 +27,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'Plaatsen, dagtoewijzingen, tags en categorieën lezen',
   'oauth.scope.places:write.label': 'Plaatsen beheren',
   'oauth.scope.places:write.description': 'Plaatsen, toewijzingen en tags aanmaken, bijwerken en verwijderen',
+  'oauth.scope.collections:read.label': 'Collecties bekijken',
+  'oauth.scope.collections:read.description':
+    'Collecties met opgeslagen plekken lezen, inclusief hun plekken, beoordelingen, labels en leden',
+  'oauth.scope.collections:write.label': 'Collecties beheren',
+  'oauth.scope.collections:write.description':
+    'Collecties maken/bewerken, plekken opslaan, beoordelen, labelen en kopiëren, en lijsten delen',
   'oauth.scope.atlas:read.label': 'Atlas bekijken',
   'oauth.scope.atlas:read.description': "Bezochte landen, regio's en bucketlist lezen",
   'oauth.scope.atlas:write.label': 'Atlas beheren',
@@ -89,5 +96,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'Bestanden',
+  'oauth.scope.group.settings': 'Instellingen',
+  'oauth.scope.files:read.label': 'Reisbestanden bekijken',
+  'oauth.scope.files:read.description': 'De documenten van een reis tonen: namen, groottes, wie ze heeft geüpload en waaraan ze gekoppeld zijn',
+  'oauth.scope.files:write.label': 'Reisbestanden beheren',
+  'oauth.scope.files:write.description': 'Bestanden hernoemen en beschrijven, koppelen aan boekingen en plaatsen, markeren en naar de prullenbak verplaatsen',
+  'oauth.scope.files:content.label': 'Bestandsinhoud lezen',
+  'oauth.scope.files:content.description': 'De inhoud van een geüpload document lezen, zoals een boekings-PDF of een ticket',
+  'oauth.scope.settings:read.label': 'Je voorkeuren bekijken',
+  'oauth.scope.settings:read.description': 'Eenheden, tijdnotatie, taal, standaardvaluta en startpagina lezen',
+  'oauth.scope.settings:write.label': 'Je voorkeuren wijzigen',
+  'oauth.scope.settings:write.description': 'Eenheden, tijdnotatie, taal, standaardvaluta en startpagina wijzigen. Nooit opgeslagen API-sleutels',
+  'oauth.scope.group.plugins': 'Plug-ins',
+  'oauth.scope.plugins:use.label': 'Plug-intools uitvoeren',
+  'oauth.scope.plugins:use.description': 'Laat deze client tools aanroepen die worden aangeboden door de plug-ins die een beheerder heeft geïnstalleerd en goedgekeurd. Elke plug-in handelt met de rechten die deze al had, niet met de scopes van dit token',
 };
 export default oauth;

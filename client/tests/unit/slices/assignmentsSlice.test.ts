@@ -98,6 +98,130 @@ describe('assignmentsSlice', () => {
       const result = await useTripStore.getState().assignPlaceToDay(1, 1, 999);
       expect(result).toBeUndefined();
     });
+
+    it('FE-ASSIGN-008: a day with no assignments entry yet is seeded from scratch', async () => {
+      const place = buildPlace({ id: 10, trip_id: 1 });
+      seedStore(useTripStore, { places: [place], assignments: {} });
+
+      server.use(
+        http.post('/api/trips/1/days/1/assignments', () =>
+          HttpResponse.json({ assignment: buildAssignment({ id: 999, day_id: 1, place_id: 10, place }) })
+        ),
+      );
+
+      await useTripStore.getState().assignPlaceToDay(1, 1, 10);
+      expect(useTripStore.getState().assignments['1'].map(a => a.id)).toEqual([999]);
+    });
+
+    it('FE-ASSIGN-009: a response without a nested place falls back to the store place', async () => {
+      const place = buildPlace({ id: 10, trip_id: 1, name: 'Louvre' });
+      seedStore(useTripStore, { places: [place], assignments: { '1': [] } });
+
+      const bare = { ...buildAssignment({ id: 999, day_id: 1, place_id: 10 }), place: undefined };
+      server.use(
+        http.post('/api/trips/1/days/1/assignments', () => HttpResponse.json({ assignment: bare })),
+      );
+
+      await useTripStore.getState().assignPlaceToDay(1, 1, 10);
+      expect(useTripStore.getState().assignments['1'][0].place?.name).toBe('Louvre');
+    });
+
+    it('FE-ASSIGN-010: inserting at a position keeps the other rows and reorders server-side', async () => {
+      const place = buildPlace({ id: 10, trip_id: 1 });
+      const existing = buildAssignment({ id: 1, day_id: 1, order_index: 0 });
+      const other = buildAssignment({ id: 2, day_id: 1, order_index: 1 });
+      seedStore(useTripStore, { places: [place], assignments: { '1': [existing, other] } });
+
+      let reorderBody: number[] | undefined;
+      server.use(
+        http.post('/api/trips/1/days/1/assignments', () =>
+          HttpResponse.json({ assignment: buildAssignment({ id: 999, day_id: 1, place_id: 10, place, order_index: 7 }) })
+        ),
+        http.put('/api/trips/1/days/1/assignments/reorder', async ({ request }) => {
+          const body = await request.json() as { orderedIds: number[] };
+          reorderBody = body.orderedIds;
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      await useTripStore.getState().assignPlaceToDay(1, 1, 10, 1);
+
+      const items = useTripStore.getState().assignments['1'];
+      expect(items.map(a => a.id)).toEqual([1, 999, 2]);
+      expect(items.map(a => a.order_index)).toEqual([0, 1, 2]);
+      expect(reorderBody).toEqual([1, 999, 2]);
+    });
+
+    it('FE-ASSIGN-011: a failing follow-up reorder keeps the optimistic order', async () => {
+      const place = buildPlace({ id: 10, trip_id: 1 });
+      seedStore(useTripStore, {
+        places: [place],
+        assignments: { '1': [buildAssignment({ id: 1, day_id: 1, order_index: 0 })] },
+      });
+
+      server.use(
+        http.post('/api/trips/1/days/1/assignments', () =>
+          HttpResponse.json({ assignment: buildAssignment({ id: 999, day_id: 1, place_id: 10, place }) })
+        ),
+        http.put('/api/trips/1/days/1/assignments/reorder', () =>
+          HttpResponse.json({ message: 'Error' }, { status: 500 })
+        ),
+      );
+
+      // The reorder failure is swallowed — the create itself already succeeded.
+      await expect(useTripStore.getState().assignPlaceToDay(1, 1, 10, 0)).resolves.toBeDefined();
+      expect(useTripStore.getState().assignments['1'].map(a => a.id)).toEqual([999, 1]);
+    });
+
+    it('FE-ASSIGN-023: the position counts in the day as sorted, not as the store happens to hold it', async () => {
+      // A row that came in over the socket sits at the end of the stored list whatever
+      // its order_index says, so the day the planner shows and the list the splice
+      // ran on disagreed and the new row landed behind the wrong neighbour.
+      const place = buildPlace({ id: 10, trip_id: 1 });
+      const later = buildAssignment({ id: 2, day_id: 1, order_index: 1 });
+      const first = buildAssignment({ id: 1, day_id: 1, order_index: 0 });
+      seedStore(useTripStore, { places: [place], assignments: { '1': [later, first] } });
+
+      let reorderBody: number[] | undefined;
+      server.use(
+        http.post('/api/trips/1/days/1/assignments', () =>
+          HttpResponse.json({ assignment: buildAssignment({ id: 999, day_id: 1, place_id: 10, place, order_index: 7 }) })
+        ),
+        http.put('/api/trips/1/days/1/assignments/reorder', async ({ request }) => {
+          const body = await request.json() as { orderedIds: number[] };
+          reorderBody = body.orderedIds;
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      await useTripStore.getState().assignPlaceToDay(1, 1, 10, 1);
+
+      const items = useTripStore.getState().assignments['1'];
+      expect(items.map(a => a.id)).toEqual([1, 999, 2]);
+      expect(items.map(a => a.order_index)).toEqual([0, 1, 2]);
+      expect(reorderBody).toEqual([1, 999, 2]);
+    });
+
+    it('FE-ASSIGN-012: no reorder call when the day holds no server-side ids', async () => {
+      const place = buildPlace({ id: 10, trip_id: 1 });
+      seedStore(useTripStore, { places: [place], assignments: { '1': [] } });
+
+      let reorderCalls = 0;
+      server.use(
+        // An unsynced (still negative) id echoed back by the offline replay path.
+        http.post('/api/trips/1/days/1/assignments', () =>
+          HttpResponse.json({ assignment: buildAssignment({ id: -42, day_id: 1, place_id: 10, place }) })
+        ),
+        http.put('/api/trips/1/days/1/assignments/reorder', () => {
+          reorderCalls += 1;
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      await useTripStore.getState().assignPlaceToDay(1, 1, 10, 0);
+      expect(reorderCalls).toBe(0);
+      expect(useTripStore.getState().assignments['1'].map(a => a.id)).toEqual([-42]);
+    });
   });
 
   describe('removeAssignment', () => {
@@ -175,6 +299,25 @@ describe('assignmentsSlice', () => {
       expect(dayAssignments.find(a => a.id === 1)?.order_index).toBe(0);
       expect(dayAssignments.find(a => a.id === 2)?.order_index).toBe(1);
     });
+
+    it('FE-ASSIGN-013: ids that are no longer on the day are dropped from the new order', async () => {
+      const a1 = buildAssignment({ id: 1, day_id: 5, order_index: 0 });
+      seedStore(useTripStore, { assignments: { '5': [a1] } });
+
+      await useTripStore.getState().reorderAssignments(1, 5, [999, 1]);
+
+      const dayAssignments = useTripStore.getState().assignments['5'];
+      expect(dayAssignments.map(a => a.id)).toEqual([1]);
+      expect(dayAssignments[0].order_index).toBe(1);
+    });
+
+    it('FE-ASSIGN-014: reordering a day with no assignments entry yields an empty list', async () => {
+      seedStore(useTripStore, { assignments: {} });
+
+      await useTripStore.getState().reorderAssignments(1, 5, [1, 2]);
+
+      expect(useTripStore.getState().assignments['5']).toEqual([]);
+    });
   });
 
   describe('moveAssignment', () => {
@@ -217,6 +360,126 @@ describe('assignmentsSlice', () => {
       expect(useTripStore.getState().assignments['1']).toHaveLength(1);
       expect(useTripStore.getState().assignments['1'][0].id).toBe(50);
       expect(useTripStore.getState().assignments['2']).toHaveLength(0);
+    });
+
+    it('FE-ASSIGN-015: an unknown assignment id is a no-op', async () => {
+      seedStore(useTripStore, { assignments: { '1': [buildAssignment({ id: 50, day_id: 1 })] } });
+
+      await useTripStore.getState().moveAssignment(1, 999, 1, 2);
+
+      expect(useTripStore.getState().assignments['1']).toHaveLength(1);
+      expect(useTripStore.getState().assignments['2']).toBeUndefined();
+    });
+
+    it('FE-ASSIGN-016: a source day with no assignments entry is a no-op', async () => {
+      seedStore(useTripStore, { assignments: {} });
+
+      await useTripStore.getState().moveAssignment(1, 50, 1, 2);
+
+      expect(useTripStore.getState().assignments).toEqual({});
+    });
+
+    it('FE-ASSIGN-017: dropping at an explicit index renumbers the target day and pushes the new order', async () => {
+      const moved = buildAssignment({ id: 50, day_id: 1, order_index: 0 });
+      const t1 = buildAssignment({ id: 60, day_id: 2, order_index: 1 });
+      const t2 = buildAssignment({ id: 61, day_id: 2, order_index: 0 });
+      seedStore(useTripStore, { assignments: { '1': [moved], '2': [t1, t2] } });
+
+      let reorderBody: number[] | undefined;
+      server.use(
+        http.put('/api/trips/1/days/2/assignments/reorder', async ({ request }) => {
+          const body = await request.json() as { orderedIds: number[] };
+          reorderBody = body.orderedIds;
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      await useTripStore.getState().moveAssignment(1, 50, 1, 2, 1);
+
+      const target = useTripStore.getState().assignments['2'];
+      // Target day is sorted by order_index first (61, 60), then the drop lands at index 1.
+      expect(target.map(a => a.id)).toEqual([61, 50, 60]);
+      expect(target.map(a => a.order_index)).toEqual([0, 1, 2]);
+      expect(target[1].day_id).toBe(2);
+      expect(reorderBody).toEqual([61, 50, 60]);
+    });
+
+    it('FE-ASSIGN-018: moving onto a day with no assignments entry skips the reorder call', async () => {
+      const moved = buildAssignment({ id: 50, day_id: 1, order_index: 0 });
+      seedStore(useTripStore, { assignments: { '1': [moved] } });
+
+      let reorderCalls = 0;
+      server.use(
+        http.put('/api/trips/1/days/2/assignments/reorder', () => {
+          reorderCalls += 1;
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      await useTripStore.getState().moveAssignment(1, 50, 1, 2);
+
+      expect(useTripStore.getState().assignments['2'].map(a => a.id)).toEqual([50]);
+      expect(reorderCalls).toBe(0);
+    });
+  });
+
+  describe('setAssignmentTimes', () => {
+    // The pool place still carries an End of its own, which the visit shows once its
+    // own override is gone, exactly as a fresh read of the day would.
+    const pool = () => buildPlace({ id: 10, trip_id: 1, place_time: null, end_time: '18:00' });
+    const visit = () => buildAssignment({
+      id: 5, day_id: 1, place_id: 10, assignment_time: '09:00', assignment_end_time: '14:00',
+      place: { ...pool(), place_time: '09:00', end_time: '14:00' },
+    });
+
+    it('FE-ASSIGN-020: clears the End at once, with the place End showing through, and keeps the Start', async () => {
+      seedStore(useTripStore, { places: [pool()], assignments: { '1': [visit()] } });
+      let seen: unknown;
+      server.use(
+        http.put('/api/trips/1/assignments/5/time', async ({ request }) => {
+          seen = await request.json();
+          const mid = useTripStore.getState().assignments['1'][0];
+          expect(mid).toMatchObject({ assignment_end_time: null, place: { end_time: '18:00', place_time: '09:00' } });
+          return HttpResponse.json({ assignment: { ...visit(), assignment_end_time: null, place: { ...pool(), place_time: '09:00' } } });
+        }),
+      );
+
+      await useTripStore.getState().setAssignmentTimes(1, 1, 5, { place_time: '09:00', end_time: null });
+
+      expect(seen).toEqual({ place_time: '09:00', end_time: null });
+      expect(useTripStore.getState().assignments['1'][0]).toMatchObject({
+        assignment_time: '09:00', assignment_end_time: null, place: { end_time: '18:00' },
+      });
+    });
+
+    it('FE-ASSIGN-021: a refused write puts the visit back as it was', async () => {
+      seedStore(useTripStore, { places: [pool()], assignments: { '1': [visit()] } });
+      server.use(http.put('/api/trips/1/assignments/5/time', () => HttpResponse.json({ error: 'no' }, { status: 403 })));
+
+      await expect(useTripStore.getState().setAssignmentTimes(1, 1, 5, { place_time: '09:00', end_time: null })).rejects.toBeTruthy();
+
+      expect(useTripStore.getState().assignments['1'][0]).toMatchObject({ assignment_end_time: '14:00', place: { end_time: '14:00' } });
+    });
+
+    it('FE-ASSIGN-022: a visit it cannot find, or one not yet saved, is left alone', async () => {
+      const unsaved = { ...visit(), id: -3 };
+      seedStore(useTripStore, { places: [pool()], assignments: { '1': [unsaved] } });
+
+      await useTripStore.getState().setAssignmentTimes(1, 1, 5, { place_time: null, end_time: null });
+      await useTripStore.getState().setAssignmentTimes(1, 1, -3, { place_time: null, end_time: null });
+
+      expect(useTripStore.getState().assignments['1'][0]).toEqual(unsaved);
+    });
+  });
+
+  describe('setAssignments', () => {
+    it('FE-ASSIGN-019: replaces the whole assignments map', () => {
+      seedStore(useTripStore, { assignments: { '1': [buildAssignment({ id: 1, day_id: 1 })] } });
+
+      const next = { '9': [buildAssignment({ id: 90, day_id: 9 })] };
+      useTripStore.getState().setAssignments(next);
+
+      expect(useTripStore.getState().assignments).toEqual(next);
     });
   });
 });

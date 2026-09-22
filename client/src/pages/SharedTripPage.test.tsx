@@ -1,25 +1,41 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '../../tests/helpers/render';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../tests/helpers/msw/server';
 import { resetAllStores, seedStore } from '../../tests/helpers/store';
 import { buildSettings } from '../../tests/helpers/factories';
 import { useSettingsStore } from '../store/settingsStore';
 import SharedTripPage from './SharedTripPage';
+import L from 'leaflet';
 
 // Mock react-leaflet (SharedTripPage renders a map)
 vi.mock('react-leaflet', () => ({
   MapContainer: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="map-container">{children}</div>
   ),
-  TileLayer: () => null,
+  TileLayer: ({ url }: { url: string }) => <div data-testid="raster-tiles" data-url={url} />,
   Marker: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  Polyline: () => <div data-testid="route-line" />,
   Tooltip: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   useMap: () => ({
     fitBounds: vi.fn(),
     getCenter: vi.fn(() => ({ lat: 0, lng: 0 })),
   }),
+}));
+
+// The real cluster group needs the map context the stubbed MapContainer lacks (#2343).
+vi.mock('react-leaflet-cluster', () => ({
+  default: ({ children }: { children?: React.ReactNode }) => (
+    <div data-testid="marker-cluster-group">{children}</div>
+  ),
+}));
+
+// The basemap is a MapLibre style now, and the real component reaches for
+// maplibre-gl through a dynamic import. The page test only cares that it is the
+// thing being rendered.
+vi.mock('../components/Map/VectorBasemap', () => ({
+  default: ({ style }: { style: string }) => <div data-testid="vector-basemap" data-style={style} />,
 }));
 
 vi.mock('leaflet', () => {
@@ -33,11 +49,6 @@ vi.mock('leaflet', () => {
   };
   return { default: L, ...L };
 });
-
-// Mock react-dom/server (used in createMarkerIcon)
-vi.mock('react-dom/server', () => ({
-  renderToStaticMarkup: vi.fn(() => '<svg></svg>'),
-}));
 
 // Helper: render SharedTripPage under the correct route so useParams works
 function renderSharedTrip(token: string) {
@@ -505,8 +516,13 @@ describe('SharedTripPage', () => {
       );
       renderSharedTrip('test-token');
       // The untitled day shows the German label "Tag 1", proving the hardcoded English
-      // "Day 1" was replaced by the i18n key t('dayplan.dayN').
-      await waitFor(() => expect(screen.getByText('Tag 1')).toBeInTheDocument());
+      // "Day 1" was replaced by the i18n key t('dayplan.dayN'). It appears twice since
+      // the day picker above the map was added (#1962): once as a chip, once on the card.
+      await waitFor(() => expect(screen.getAllByText('Tag 1')).toHaveLength(2));
+      const labels = screen.getAllByText('Tag 1');
+      // One of each: the picker chip carries aria-pressed, the day card's header aria-expanded.
+      expect(labels.filter((el) => el.closest('[aria-pressed]'))).toHaveLength(1);
+      expect(labels.filter((el) => el.closest('[aria-expanded]'))).toHaveLength(1);
     });
   });
 
@@ -570,6 +586,923 @@ describe('SharedTripPage', () => {
       await waitFor(() => expect(screen.getByText('Dinner')).toBeInTheDocument());
       // 100 EUR / 0.8 = 125.00 NZD once the rate resolves.
       await waitFor(() => expect(screen.getAllByText(/125\.00 NZD/).length).toBeGreaterThan(0));
+    });
+  });
+
+  // FE-PAGE-SHARED-021 to FE-PAGE-SHARED-037 drive the remaining render branches of
+  // the page: header variants, the permission-driven tab strip, and every item kind
+  // the day timeline, bookings, packing, costs and chat sections can produce.
+
+  const ALL_TABS = { share_bookings: true, share_packing: true, share_budget: true, share_collab: true };
+
+  function payload(over: Record<string, unknown> = {}) {
+    return {
+      trip: { id: 1, title: 'Shared Paris Trip' },
+      days: [],
+      assignments: {},
+      dayNotes: {},
+      places: [],
+      reservations: [],
+      accommodations: [],
+      packing: [],
+      budget: [],
+      categories: [],
+      permissions: { share_bookings: false, share_packing: false, share_budget: false, share_collab: false },
+      collab: [],
+      ...over,
+    };
+  }
+
+  /** Serve one payload for `token`; anything else falls through to the default handler. */
+  function serve(token: string, body: Record<string, unknown>) {
+    server.use(
+      http.get('/api/shared/:token', ({ params }) => (params.token === token ? HttpResponse.json(body) : undefined)),
+    );
+  }
+
+  async function open(token: string, body: Record<string, unknown>) {
+    serve(token, body);
+    renderSharedTrip(token);
+    await waitFor(() => expect(screen.getByText('Shared Paris Trip')).toBeInTheDocument());
+  }
+
+  function coverStyle(): string {
+    const layer = document.querySelector('div[style*="background-image"]') as HTMLElement | null;
+    return layer?.style.backgroundImage ?? '';
+  }
+
+  /** The page formats dates through the active locale (en-US in tests). */
+  const fmtDate = (iso: string, opts: Intl.DateTimeFormatOptions) =>
+    new Date(iso).toLocaleDateString('en-US', opts);
+
+  describe('FE-PAGE-SHARED-021: cover image, description and date range in the header', () => {
+    it('uses an absolute cover URL unchanged and renders the description', async () => {
+      await open('cover-http-token', payload({
+        trip: {
+          id: 1, title: 'Shared Paris Trip', description: 'Five days of pastry',
+          cover_image: 'https://cdn.example.com/a.jpg',
+        },
+      }));
+
+      expect(coverStyle()).toContain('https://cdn.example.com/a.jpg');
+      expect(screen.getByText('Five days of pastry')).toBeInTheDocument();
+      // Without start/end dates the date pill is skipped entirely.
+      expect(screen.queryByText(/days$/)).toBeNull();
+    });
+
+    it('keeps a root-relative cover path as-is', async () => {
+      await open('cover-abs-token', payload({
+        trip: { id: 1, title: 'Shared Paris Trip', cover_image: '/uploads/covers/b.jpg' },
+      }));
+
+      expect(coverStyle()).toContain('/uploads/covers/b.jpg');
+      expect(coverStyle()).not.toContain('/uploads//uploads/');
+    });
+
+    it('prefixes a bare filename with the uploads directory', async () => {
+      await open('cover-bare-token', payload({
+        trip: { id: 1, title: 'Shared Paris Trip', cover_image: 'c.jpg' },
+      }));
+
+      expect(coverStyle()).toContain('/uploads/c.jpg');
+    });
+
+    it('shows only the start date and no day count when the trip has no days', async () => {
+      await open('startonly-token', payload({
+        trip: { id: 1, title: 'Shared Paris Trip', start_date: '2026-07-01' },
+      }));
+
+      expect(
+        screen.getByText(fmtDate('2026-07-01T00:00:00Z', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/^\d+ days$/)).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-022: a payload without optional collections still renders', () => {
+    it('falls back to empty lists when places, reservations and permissions are missing', async () => {
+      await open('sparse-token', {
+        trip: { id: 1, title: 'Shared Paris Trip' },
+        days: [{ id: 1, trip_id: 1, day_number: 1, date: null, title: 'Lone day' }],
+        assignments: {},
+        dayNotes: {},
+      });
+
+      // share_map is undefined, so the Plan tab (the !== false branch) stays visible.
+      expect(screen.getByRole('button', { name: /plan/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /bookings/i })).toBeNull();
+      expect(screen.getByTestId('map-container')).toBeInTheDocument();
+      // The day card still renders even though reservations/accommodations are absent.
+      expect(screen.getByText('Lone day')).toBeInTheDocument();
+      expect(screen.getByText('0 places')).toBeInTheDocument();
+      expect(screen.getByText(/shared via/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-023: share_map=false hides the plan tab', () => {
+    it('lands on the first shared section instead of an empty map', async () => {
+      await open('nomap-token', payload({
+        permissions: { share_map: false, ...ALL_TABS },
+        packing: [{ id: 1, name: 'Passport', category: null, checked: false }],
+        reservations: [{ id: 1, title: 'Hotel Ibis', type: 'hotel', status: 'pending', metadata: null }],
+      }));
+
+      expect(screen.queryByRole('button', { name: /plan/i })).toBeNull();
+      // Bookings is the first shared section, so it is auto-selected and rendered.
+      await waitFor(() => expect(screen.getByText('Hotel Ibis')).toBeInTheDocument());
+      expect(screen.queryByTestId('map-container')).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-024: day header details', () => {
+    it('renders an accommodation badge, the place count and the undated fallback', async () => {
+      const day = { id: 5, trip_id: 1, day_number: 1, date: null, title: null };
+      await open('accom-token', payload({
+        days: [day],
+        accommodations: [{ id: 3, place_name: 'Hotel Lutetia', start_day_id: 5, end_day_id: 5 }],
+      }));
+
+      // Twice since the day picker landed (#1962): the chip above the map and the card.
+      const dayLabels = screen.getAllByText('Day 1');
+      expect(dayLabels).toHaveLength(2);
+      // One of each: the picker chip carries aria-pressed, the day card's header aria-expanded.
+      expect(dayLabels.filter((el) => el.closest('[aria-pressed]'))).toHaveLength(1);
+      expect(dayLabels.filter((el) => el.closest('[aria-expanded]'))).toHaveLength(1);
+      expect(screen.getByText('Hotel Lutetia')).toBeInTheDocument();
+      expect(screen.getByText('0 places')).toBeInTheDocument();
+      // No date row for an undated day.
+      expect(screen.queryByText(/2026/)).toBeNull();
+    });
+
+    it('sorts days by day_number regardless of payload order', async () => {
+      await open('order-token', payload({
+        days: [
+          { id: 2, trip_id: 1, day_number: 2, date: null, title: 'Second' },
+          { id: 1, trip_id: 1, day_number: 1, date: null, title: 'First' },
+        ],
+      }));
+
+      const titles = Array.from(document.querySelectorAll('div')).map((d) => d.textContent);
+      expect(screen.getByText('First')).toBeInTheDocument();
+      expect(screen.getByText('Second')).toBeInTheDocument();
+      expect(titles.join('|').indexOf('First')).toBeLessThan(titles.join('|').lastIndexOf('Second'));
+    });
+  });
+
+  describe('FE-PAGE-SHARED-025: expanded day renders every place variant', () => {
+    const day = { id: 7, trip_id: 1, day_number: 1, date: '2026-07-01', title: 'Day One' };
+    const withImage = {
+      id: 201, name: 'Louvre', lat: 48.86, lng: 2.33, category_id: 4,
+      image_url: '/uploads/places/louvre.jpg', address: 'Rue de Rivoli', place_time: '09:00', end_time: '11:00',
+    };
+    const withDescription = {
+      id: 202, name: 'Seine Walk', lat: null, lng: null, category_id: null,
+      image_url: null, address: null, description: 'Along the river', place_time: '12:00', end_time: null,
+    };
+    const bare = { id: 203, name: 'Mystery Stop', lat: null, lng: null, category_id: 99, image_url: null };
+
+    it('shows the photo, the category colour, the address/description fallback and the time range', async () => {
+      await open('places-token', payload({
+        days: [day],
+        places: [withImage, withDescription, bare],
+        categories: [{ id: 4, name: 'Museum', color: '#ff0000', icon: 'landmark' }],
+        assignments: {
+          '7': [
+            { id: 301, day_id: 7, place_id: 201, order_index: 0, place: withImage },
+            { id: 302, day_id: 7, place_id: 202, order_index: 1, place: withDescription },
+            { id: 303, day_id: 7, place_id: 203, order_index: 2, place: bare },
+            // A dangling assignment whose place was deleted must not crash the timeline.
+            { id: 304, day_id: 7, place_id: 999, order_index: 3, place: null },
+          ],
+        },
+      }));
+
+      // The count matches the rendered rows — the assignment whose place is gone is left out.
+      expect(screen.getByText('3 places')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Day One'));
+
+      await waitFor(() => expect(screen.getByText('Rue de Rivoli')).toBeInTheDocument());
+      expect((document.querySelector('img[src="/uploads/places/louvre.jpg"]') as HTMLImageElement)).toBeInTheDocument();
+      // A place with no address falls back to its description.
+      expect(screen.getByText('Along the river')).toBeInTheDocument();
+      // The bare place shows neither line and no time badge.
+      expect(screen.getByText('Mystery Stop')).toBeInTheDocument();
+      expect(screen.getByText(/09:00 – 11:00/)).toBeInTheDocument();
+      expect(screen.getByText(/^12:00$/)).toBeInTheDocument();
+    });
+
+    it('only maps the selected day and refits the map to it', async () => {
+      await open('mapday-token', payload({
+        days: [day],
+        places: [withImage, withDescription],
+        assignments: { '7': [{ id: 301, day_id: 7, place_id: 201, order_index: 0, place: withImage }] },
+      }));
+
+      // Unselected: both places are candidates, but only the geocoded one has a marker.
+      expect(screen.getAllByText('Louvre')).toHaveLength(1);
+      expect(screen.queryByText('Seine Walk')).toBeNull();
+
+      fireEvent.click(screen.getByText('Day One'));
+      await waitFor(() => expect(screen.getAllByText('Louvre')).toHaveLength(2));
+
+      // Collapsing again restores the trip-wide marker set.
+      fireEvent.click(screen.getByText('Day One'));
+      await waitFor(() => expect(screen.getAllByText('Louvre')).toHaveLength(1));
+    });
+  });
+
+  // ── Day order, route line and the day picker at the map (#1962) ────────────
+  describe('FE-PAGE-SHARED-038: day markers carry their order and a connecting line', () => {
+    const day = { id: 7, trip_id: 1, day_number: 1, date: '2026-07-02', title: 'Day One' };
+    const louvre = { id: 201, name: 'Louvre', lat: 48.86, lng: 2.33, category: { id: 1, name: 'Sight', color: '#ff0000', icon: 'landmark' } };
+    const orsay = { id: 202, name: 'Orsay', lat: 48.85, lng: 2.32, category: null };
+    const notre = { id: 203, name: 'Notre-Dame', lat: 48.853, lng: 2.35, category: null };
+
+    // Every divIcon call the last render produced, as raw html strings.
+    const iconHtml = () => (L.divIcon as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c: any[]) => String(c[0].html));
+
+    beforeEach(() => (L.divIcon as unknown as ReturnType<typeof vi.fn>).mockClear());
+
+    it('numbers the stops by order_index, not by payload order', async () => {
+      await open('order-map-token', payload({
+        days: [day],
+        places: [louvre, orsay, notre],
+        assignments: {
+          '7': [
+            { id: 302, day_id: 7, place_id: 202, order_index: 1, place: orsay },
+            { id: 303, day_id: 7, place_id: 203, order_index: 2, place: notre },
+            { id: 301, day_id: 7, place_id: 201, order_index: 0, place: louvre },
+          ],
+        },
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Day 1' }));
+      await waitFor(() => expect(iconHtml().some((h: string) => h.includes('>1<'))).toBe(true));
+
+      const html = iconHtml();
+      // Louvre is order_index 0 and therefore 1, regardless of where it sat in the payload.
+      expect(html.filter((h: string) => h.includes('>1<'))).toHaveLength(1);
+      expect(html.filter((h: string) => h.includes('>2<'))).toHaveLength(1);
+      expect(html.filter((h: string) => h.includes('>3<'))).toHaveLength(1);
+    });
+
+    it('shows both positions once for a stop the day visits twice, and renders it once', async () => {
+      await open('twice-token', payload({
+        days: [day],
+        places: [louvre, orsay],
+        assignments: {
+          '7': [
+            { id: 301, day_id: 7, place_id: 201, order_index: 0, place: louvre },
+            { id: 302, day_id: 7, place_id: 202, order_index: 1, place: orsay },
+            { id: 303, day_id: 7, place_id: 201, order_index: 2, place: louvre },
+          ],
+        },
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Day 1' }));
+      await waitFor(() => expect(iconHtml().some((h: string) => h.includes('1 \u00b7 3'))).toBe(true));
+      // One marker for the repeated place, not two with the same React key.
+      expect(iconHtml().filter((h: string) => h.includes('1 \u00b7 3'))).toHaveLength(1);
+    });
+
+    it('leaves the trip-wide pool unnumbered, since it has no order to show', async () => {
+      await open('nonum-token', payload({
+        days: [day],
+        places: [louvre, orsay],
+        assignments: { '7': [{ id: 301, day_id: 7, place_id: 201, order_index: 0, place: louvre }] },
+      }));
+
+      await waitFor(() => expect(iconHtml().length).toBeGreaterThan(0));
+      expect(iconHtml().some((h: string) => h.includes('border-radius:8px'))).toBe(false);
+    });
+
+    it('draws the connecting line only for a day with more than one stop', async () => {
+      await open('line-token', payload({
+        days: [day],
+        places: [louvre, orsay],
+        assignments: {
+          '7': [
+            { id: 301, day_id: 7, place_id: 201, order_index: 0, place: louvre },
+            { id: 302, day_id: 7, place_id: 202, order_index: 1, place: orsay },
+          ],
+        },
+      }));
+
+      // No day selected: no line, even though the trip has two geocoded places.
+      expect(screen.queryByTestId('route-line')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Day 1' }));
+      await waitFor(() => expect(screen.getByTestId('route-line')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('button', { name: 'All' }));
+      await waitFor(() => expect(screen.queryByTestId('route-line')).toBeNull());
+    });
+
+    it('does not draw a line for a day with a single stop', async () => {
+      await open('single-token', payload({
+        days: [day],
+        places: [louvre],
+        assignments: { '7': [{ id: 301, day_id: 7, place_id: 201, order_index: 0, place: louvre }] },
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Day 1' }));
+      await waitFor(() => expect(screen.getAllByText('Louvre').length).toBeGreaterThan(1));
+      expect(screen.queryByTestId('route-line')).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-039: the day picker sits at the map and agrees with the day card', () => {
+    const day = { id: 7, trip_id: 1, day_number: 1, date: '2026-07-02', title: 'Day One' };
+    const louvre = { id: 201, name: 'Louvre', lat: 48.86, lng: 2.33, category: null };
+    const orsay = { id: 202, name: 'Orsay', lat: 48.85, lng: 2.32, category: null };
+
+    it('narrows the markers to one day and back again', async () => {
+      await open('picker-token', payload({
+        days: [day],
+        places: [louvre, orsay],
+        assignments: { '7': [{ id: 301, day_id: 7, place_id: 201, order_index: 0, place: louvre }] },
+      }));
+
+      // All: both geocoded places are on the map, so Orsay's tooltip is present.
+      expect(screen.getByText('Orsay')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Day 1' }));
+      await waitFor(() => expect(screen.queryByText('Orsay')).toBeNull());
+
+      fireEvent.click(screen.getByRole('button', { name: 'All' }));
+      await waitFor(() => expect(screen.getByText('Orsay')).toBeInTheDocument());
+    });
+
+    it('marks the active chip for assistive tech', async () => {
+      await open('pressed-token', payload({ days: [day], places: [louvre], assignments: {} }));
+
+      expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(screen.getByRole('button', { name: 'Day 1' }));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Day 1' })).toHaveAttribute('aria-pressed', 'true'),
+      );
+      expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false');
+    });
+  });
+
+  describe('FE-PAGE-SHARED-041: a share link visitor gets a basemap that needs no key', () => {
+    const louvre = { id: 201, name: 'Louvre', lat: 48.86, lng: 2.33, category: null };
+
+    it('draws the OpenFreeMap style rather than raster tiles', async () => {
+      // A visitor has no settings of their own, so the map falls back to the app
+      // default. CARTO stamps "API KEY REQUIRED" over keyless tiles since
+      // 26.08.2026, and a share link is exactly where nobody has a key.
+      await open('basemap-token', payload({ days: [], places: [louvre], assignments: {} }));
+
+      expect(screen.getByTestId('vector-basemap')).toHaveAttribute(
+        'data-style',
+        'https://tiles.openfreemap.org/styles/positron',
+      );
+      expect(screen.queryByTestId('raster-tiles')).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-040: trip-wide markers keep their category colour', () => {
+    // The payload nests the category on a day's assignments but sends it flat on the
+    // trip-wide pool, so reading only the nested shape painted every marker indigo.
+    it('reads the flat category_color the trip pool sends', async () => {
+      (L.divIcon as unknown as ReturnType<typeof vi.fn>).mockClear();
+      await open('flatcat-token', payload({
+        days: [],
+        places: [{ id: 201, name: 'Louvre', lat: 48.86, lng: 2.33, category_color: '#ff8800', category_icon: 'landmark' }],
+        assignments: {},
+      }));
+
+      await waitFor(() => expect((L.divIcon as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0));
+      const html = (L.divIcon as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c: any[]) => String(c[0].html));
+      expect(html.some((h: string) => h.includes('#ff8800'))).toBe(true);
+      expect(html.some((h: string) => h.includes('#6366f1'))).toBe(false);
+    });
+  });
+
+  describe('FE-PAGE-SHARED-026: expanded day renders notes and single-leg transports', () => {
+    const day = { id: 9, trip_id: 1, day_number: 1, date: '2026-07-02', title: 'Day One' };
+
+    it('renders timed and untimed notes plus flight, train and fallback transport rows', async () => {
+      await open('transport-token', payload({
+        days: [day],
+        dayNotes: {
+          '9': [
+            { id: 41, day_id: 9, text: 'Buy museum pass', time: '08:30', sort_order: 0 },
+            { id: 42, day_id: 9, text: 'Anything goes', time: null, sort_order: 1 },
+          ],
+        },
+        reservations: [
+          {
+            id: 51, title: 'Flight home', type: 'flight', status: 'confirmed', day_id: 9, end_day_id: 9,
+            reservation_time: '2026-07-02T18:00:00', reservation_end_time: '2026-07-02T20:30:00',
+            // Already-parsed metadata (not a JSON string) must work too.
+            metadata: { airline: 'Air France', flight_number: 'AF1', departure_airport: 'CDG', arrival_airport: 'TXL' },
+          },
+          {
+            id: 52, title: 'ICE 599', type: 'train', status: 'confirmed', day_id: 9, end_day_id: 9,
+            reservation_time: '2026-07-02T09:15:00', reservation_end_time: null,
+            metadata: JSON.stringify({ train_number: 'ICE 599', platform: '7' }),
+          },
+          {
+            id: 53, title: 'Harbour ferry', type: 'ferry', status: 'pending', day_id: 9, end_day_id: 9,
+            reservation_time: null, reservation_end_time: null, metadata: '',
+          },
+        ],
+      }));
+
+      fireEvent.click(screen.getByText('Day One'));
+
+      await waitFor(() => expect(screen.getByText('Buy museum pass')).toBeInTheDocument());
+      expect(screen.getByText('08:30')).toBeInTheDocument();
+      expect(screen.getByText('Anything goes')).toBeInTheDocument();
+
+      expect(screen.getByText('Air France · AF1 · CDG → TXL')).toBeInTheDocument();
+      expect(screen.getByText(/Flight home · 18:00–20:30/)).toBeInTheDocument();
+      expect(screen.getByText('ICE 599 · Gl. 7')).toBeInTheDocument();
+      expect(screen.getByText(/^ICE 599 · 09:15$/)).toBeInTheDocument();
+      // An unmapped transport type falls back to the generic ticket row with no subtitle.
+      expect(screen.getByText('Harbour ferry')).toBeInTheDocument();
+    });
+
+    it('leaves the subtitle empty when the metadata carries no route at all', async () => {
+      await open('nometa-token', payload({
+        days: [day],
+        reservations: [
+          {
+            id: 61, title: 'Bus 100', type: 'bus', status: 'confirmed', day_id: 9, end_day_id: 9,
+            reservation_time: '2026-07-02T07:00:00', metadata: null,
+          },
+          {
+            id: 62, title: 'Regio', type: 'train', status: 'confirmed', day_id: 9, end_day_id: 9,
+            reservation_time: '2026-07-02T08:00:00', metadata: JSON.stringify({}),
+          },
+          {
+            id: 63, title: 'Shuttle', type: 'flight', status: 'confirmed', day_id: 9, end_day_id: 9,
+            reservation_time: '2026-07-02T10:00:00', metadata: JSON.stringify({ airline: 'KLM' }),
+          },
+        ],
+      }));
+
+      fireEvent.click(screen.getByText('Day One'));
+
+      await waitFor(() => expect(screen.getByText(/Bus 100 · 07:00/)).toBeInTheDocument());
+      expect(screen.getByText(/Regio · 08:00/)).toBeInTheDocument();
+      // Only the airline is known, so no airport pair is appended.
+      expect(screen.getByText('KLM')).toBeInTheDocument();
+    });
+
+    it('renders each leg of a multi-leg train with its own train number and platform', async () => {
+      await open('trainlegs-token', payload({
+        days: [day],
+        reservations: [
+          {
+            id: 71, title: 'Rail to Milan', type: 'train', status: 'confirmed', day_id: 9, end_day_id: 9,
+            reservation_time: '2026-07-02T06:00:00', reservation_end_time: '2026-07-02T18:00:00',
+            metadata: JSON.stringify({
+              legs: [
+                { from: 'Berlin', to: 'Basel', train_number: 'ICE 73', platform: '3', dep_day_id: 9, dep_time: '06:00', arr_day_id: 9, arr_time: '12:00' },
+                { train_number: 'EC 51', dep_day_id: 9, dep_time: '12:30', arr_day_id: 9, arr_time: '18:00' },
+              ],
+            }),
+          },
+        ],
+      }));
+
+      fireEvent.click(screen.getByText('Day One'));
+
+      await waitFor(() => expect(screen.getByText('ICE 73 · Gl. 3 · Berlin → Basel')).toBeInTheDocument());
+      // The second leg has neither platform nor stations, so only its number shows.
+      expect(screen.getByText('EC 51')).toBeInTheDocument();
+    });
+
+    it('drops the route from a flight leg that has no airports of its own', async () => {
+      await open('flightlegs-token', payload({
+        days: [day],
+        reservations: [
+          {
+            id: 72, title: 'Long haul', type: 'flight', status: 'confirmed', day_id: 9, end_day_id: 9,
+            reservation_time: '2026-07-02T06:00:00', reservation_end_time: '2026-07-02T22:00:00',
+            metadata: JSON.stringify({
+              legs: [
+                { from: 'FRA', to: 'DXB', airline: 'Emirates', flight_number: 'EK46', dep_day_id: 9, dep_time: '06:00', arr_day_id: 9, arr_time: '14:00' },
+                { airline: 'Emirates', flight_number: 'EK350', dep_day_id: 9, dep_time: '16:00', arr_day_id: 9, arr_time: '22:00' },
+              ],
+            }),
+          },
+        ],
+      }));
+
+      fireEvent.click(screen.getByText('Day One'));
+
+      await waitFor(() => expect(screen.getByText('Emirates · EK46 · FRA → DXB')).toBeInTheDocument());
+      expect(screen.getByText('Emirates · EK350')).toBeInTheDocument();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-027: bookings tab detail rows', () => {
+    it('shows date, time and location only when present and marks the status', async () => {
+      await open('bookingmeta-token', payload({
+        permissions: { share_bookings: true, share_packing: false, share_budget: false, share_collab: false },
+        reservations: [
+          {
+            id: 81, title: 'Museum entry', type: 'ticket', status: 'pending',
+            reservation_time: '2026-07-03T14:00:00', location: 'Louvre', metadata: '{}',
+          },
+          {
+            id: 82, title: 'Rental car', type: 'car', status: 'confirmed',
+            reservation_time: null, location: null, metadata: { airline: 'Sixt', flight_number: 'X9' },
+          },
+          {
+            id: 83, title: 'Night bus', type: 'bus', status: 'confirmed',
+            reservation_time: null, location: null, metadata: null,
+          },
+          {
+            id: 84, title: 'Coach', type: 'car', status: 'confirmed',
+            reservation_time: null, location: null, metadata: { airline: 'Flixbus' },
+          },
+        ],
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /bookings/i }));
+
+      await waitFor(() => expect(screen.getByText('Museum entry')).toBeInTheDocument());
+      expect(
+        screen.getByText(fmtDate('2026-07-03T00:00:00Z', { day: 'numeric', month: 'short', timeZone: 'UTC' })),
+      ).toBeInTheDocument();
+      expect(screen.getByText('14:00')).toBeInTheDocument();
+      expect(screen.getByText('Louvre')).toBeInTheDocument();
+      expect(screen.getByText('Pending')).toBeInTheDocument();
+
+      // No date/time/location for the car — only the metadata airline line survives.
+      expect(screen.getByText('Sixt X9')).toBeInTheDocument();
+      expect(screen.getAllByText('Confirmed')).toHaveLength(3);
+      // Metadata-less bookings render the title only, no meta line.
+      expect(screen.getByText('Night bus')).toBeInTheDocument();
+      // An airline without a flight number appends nothing after it.
+      expect(screen.getByText('Flixbus')).toBeInTheDocument();
+    });
+
+    it('lists train legs with platform labels in the bookings tab', async () => {
+      await open('bookingtrain-token', payload({
+        permissions: { share_bookings: true, share_packing: false, share_budget: false, share_collab: false },
+        reservations: [
+          {
+            id: 91, title: 'Rail pass', type: 'train', status: 'confirmed',
+            reservation_time: '2026-07-04', metadata: JSON.stringify({
+              legs: [
+                { from: 'Bern', to: 'Zurich', train_number: 'IC 8', platform: '12' },
+                { train_number: 'S3' },
+              ],
+            }),
+          },
+        ],
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /bookings/i }));
+
+      await waitFor(() => expect(screen.getByText('IC 8 Platform 12 Bern → Zurich')).toBeInTheDocument());
+      expect(screen.getByText('S3')).toBeInTheDocument();
+      // A bare date without a time renders the date chip only.
+      expect(
+        screen.getByText(fmtDate('2026-07-04T00:00:00Z', { day: 'numeric', month: 'short', timeZone: 'UTC' })),
+      ).toBeInTheDocument();
+    });
+
+    it('omits the route of a flight leg without airports', async () => {
+      await open('bookingflight-token', payload({
+        permissions: { share_bookings: true, share_packing: false, share_budget: false, share_collab: false },
+        reservations: [
+          {
+            id: 92, title: 'Long haul', type: 'flight', status: 'confirmed', reservation_time: null,
+            metadata: JSON.stringify({
+              legs: [
+                { from: 'FRA', to: 'DXB', airline: 'Emirates', flight_number: 'EK46' },
+                { airline: 'Emirates', flight_number: 'EK350' },
+              ],
+            }),
+          },
+        ],
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /bookings/i }));
+
+      await waitFor(() => expect(screen.getByText('Emirates EK46 FRA → DXB')).toBeInTheDocument());
+      expect(screen.getByText('Emirates EK350')).toBeInTheDocument();
+    });
+
+    it('renders no booking list at all when the trip has none', async () => {
+      await open('nobookings-token', payload({
+        permissions: { share_bookings: true, share_packing: false, share_budget: false, share_collab: false },
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /bookings/i }));
+
+      expect(screen.queryByText('Confirmed')).toBeNull();
+      expect(screen.queryByTestId('map-container')).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-028: packing list grouping', () => {
+    it('groups by category, falls back to Other and strikes through checked items', async () => {
+      await open('packinggroup-token', payload({
+        permissions: { share_bookings: false, share_packing: true, share_budget: false, share_collab: false },
+        packing: [
+          { id: 1, name: 'Toothbrush', category: 'Bathroom', checked: true },
+          { id: 2, name: 'Towel', category: 'Bathroom', checked: false },
+          { id: 3, name: 'Charger', category: null, checked: false },
+        ],
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /packing/i }));
+
+      await waitFor(() => expect(screen.getByText('Bathroom')).toBeInTheDocument());
+      expect(screen.getByText('Other')).toBeInTheDocument();
+      expect(screen.getByText('Toothbrush')).toHaveStyle({ textDecoration: 'line-through' });
+      expect(screen.getByText('Towel')).toHaveStyle({ textDecoration: 'none' });
+    });
+
+    it('renders nothing when the packing list is empty', async () => {
+      await open('packingempty-token', payload({
+        permissions: { share_bookings: false, share_packing: true, share_budget: false, share_collab: false },
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /packing/i }));
+      expect(screen.queryByText('Other')).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-029: costs tab fallbacks', () => {
+    it('uses the trip currency for rows without one and dashes out priceless items', async () => {
+      server.use(http.get('https://api.frankfurter.dev/v2/rates', () => HttpResponse.json([])));
+      await open('costfallback-token', payload({
+        trip: { id: 1, title: 'Shared Paris Trip', currency: 'GBP' },
+        permissions: { share_bookings: false, share_packing: false, share_budget: true, share_collab: false },
+        budget: [
+          { id: 1, name: 'Hostel', total_price: '80', category: 'Stay', currency: null },
+          { id: 2, name: 'Museum pass', total_price: null, category: null, currency: null },
+        ],
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /costs/i }));
+
+      await waitFor(() => expect(screen.getByText('Hostel')).toBeInTheDocument());
+      expect(screen.getByText('Stay')).toBeInTheDocument();
+      expect(screen.getByText('Other')).toBeInTheDocument();
+      expect(screen.getByText('—')).toBeInTheDocument();
+      // The priceless row contributes 0, so the total equals the single priced row.
+      expect(screen.getAllByText('80.00 GBP').length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('falls back to the payload base currency and treats an unparsable price as zero', async () => {
+      server.use(http.get('https://api.frankfurter.dev/v2/rates', () => HttpResponse.json([])));
+      await open('costbase-token', payload({
+        // Neither the trip nor the rows name a currency, so curOf() lands on the base.
+        trip: { id: 1, title: 'Shared Paris Trip' },
+        baseCurrency: 'SEK',
+        permissions: { share_bookings: false, share_packing: false, share_budget: true, share_collab: false },
+        budget: [{ id: 1, name: 'Tips', total_price: 'free', category: 'Misc', currency: null }],
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /costs/i }));
+
+      await waitFor(() => expect(screen.getByText('Tips')).toBeInTheDocument());
+      expect(screen.getAllByText('0.00 SEK').length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('renders nothing when there are no expenses', async () => {
+      await open('costempty-token', payload({
+        permissions: { share_bookings: false, share_packing: false, share_budget: true, share_collab: false },
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /costs/i }));
+      expect(screen.queryByText('Total Costs')).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-030: chat tab message rendering', () => {
+    it('prints one date separator per day and falls back to an initial without an avatar', async () => {
+      await open('chatgroup-token', payload({
+        permissions: { share_bookings: false, share_packing: false, share_budget: false, share_collab: true },
+        collab: [
+          { id: 1, username: 'alice', text: 'Morning', created_at: '2026-07-01T08:00:00Z', avatar: 'a.png' },
+          { id: 2, username: 'bob', text: 'Afternoon', created_at: '2026-07-01T14:00:00Z', avatar: null },
+          { id: 3, username: null, text: 'Next day', created_at: '2026-07-02T09:00:00Z', avatar: null },
+        ],
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /chat/i }));
+
+      await waitFor(() => expect(screen.getByText('Morning')).toBeInTheDocument());
+      expect(screen.getByText(/Chat · 3 messages/)).toBeInTheDocument();
+      // Two distinct days -> exactly one separator each, none for the second message
+      // of day one.
+      const sep = (iso: string) => fmtDate(iso, { weekday: 'short', day: 'numeric', month: 'short' });
+      expect(screen.getAllByText(sep('2026-07-01T08:00:00Z'))).toHaveLength(1);
+      expect(screen.getAllByText(sep('2026-07-02T09:00:00Z'))).toHaveLength(1);
+      expect(document.querySelector('img[src*="a.png"]')).toBeInTheDocument();
+      expect(screen.getByText('B')).toBeInTheDocument();
+      // A message without a username renders the "?" placeholder.
+      expect(screen.getByText('?')).toBeInTheDocument();
+    });
+
+    it('renders nothing when the chat is empty', async () => {
+      await open('chatempty-token', payload({
+        permissions: { share_bookings: false, share_packing: false, share_budget: false, share_collab: true },
+      }));
+
+      fireEvent.click(screen.getByRole('button', { name: /chat/i }));
+      expect(screen.queryByText(/messages/)).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-031: language options highlight on hover', () => {
+    it('paints and clears the hover background of a language entry', async () => {
+      await open('langhover-token', payload());
+
+      fireEvent.click(screen.getByRole('button', { name: /english/i }));
+      const option = screen.getByRole('button', { name: /deutsch/i });
+
+      fireEvent.mouseEnter(option);
+      expect(option.style.background).toBe('var(--bg-hover)');
+      fireEvent.mouseLeave(option);
+      expect(option.style.background).toBe('none');
+    });
+  });
+
+  describe('FE-PAGE-SHARED-037: a multi-day parking only shows on its drop-off and pickup day (#1937)', () => {
+    const days = [
+      { id: 9, trip_id: 1, day_number: 1, date: '2026-07-01', title: 'Day One' },
+      { id: 10, trip_id: 1, day_number: 2, date: '2026-07-02', title: 'Day Two' },
+      { id: 11, trip_id: 1, day_number: 3, date: '2026-07-03', title: 'Day Three' },
+    ];
+
+    it('skips the days in between and leaves that day collapsed', async () => {
+      await open('parking-token', payload({
+        days,
+        reservations: [
+          {
+            id: 81, title: 'Airport Parking', type: 'parking', status: 'confirmed', day_id: 9, end_day_id: 11,
+            reservation_time: '2026-07-01T05:30:00', reservation_end_time: '2026-07-03T19:00:00', metadata: null,
+          },
+        ],
+      }));
+
+      // Only one day is expanded at a time, so each day is checked on its own.
+      fireEvent.click(screen.getByText('Day One'));
+      await waitFor(() => expect(screen.getByText(/Airport Parking/)).toBeInTheDocument());
+
+      fireEvent.click(screen.getByText('Day Two'));
+      await waitFor(() => expect(screen.queryByText(/Airport Parking/)).toBeNull());
+
+      fireEvent.click(screen.getByText('Day Three'));
+      await waitFor(() => expect(screen.getByText(/Airport Parking/)).toBeInTheDocument());
+    });
+  });
+
+  describe('FE-PAGE-SHARED-037b: a booked night is not listed twice on a shared day', () => {
+    // Booking a night puts its hotel on the check-in day as a stop, because road trip
+    // mode drives to it. A shared link has no road trip view and already shows the
+    // booking as its own chip on the day, so that stop would be the same hotel again.
+    const days = [{ id: 41, trip_id: 1, day_number: 1, date: '2026-07-01', title: 'Day One' }];
+    // The address is the tell: the list row prints it, the map marker's tooltip does not,
+    // so it says whether the row rendered rather than whether the place exists at all.
+    const place = (id: number, name: string, address: string) => ({
+      id, name, description: null, address, lat: 48.86, lng: 2.34, category_id: null,
+      price: null, place_time: null, end_time: null, duration_minutes: null, notes: null,
+      website: null, phone: null, image_url: null, transport_mode: null, category: null, tags: [],
+    });
+
+    it('leaves out the stop the booking wrote and keeps the one the traveller placed', async () => {
+      await open('stay-token', payload({
+        days,
+        assignments: {
+          41: [
+            { id: 401, day_id: 41, order_index: 0, notes: null, accommodation_id: null, place: place(601, 'Musee Rodin', '77 Rue de Varenne') },
+            { id: 402, day_id: 41, order_index: 1, notes: null, accommodation_id: 7, place: place(602, 'Hotel Adlon', 'Unter den Linden 77') },
+          ],
+        },
+        accommodations: [{ id: 7, place_id: 602, start_day_id: 41, end_day_id: 41, place_name: 'Hotel Adlon' }],
+      }));
+
+      fireEvent.click(screen.getByText('Day One'));
+      // The stop the traveller placed is listed, address and all.
+      await waitFor(() => expect(screen.getByText('77 Rue de Varenne')).toBeInTheDocument());
+      // The booked night is not: it is already on the day as its own chip.
+      expect(screen.queryByText('Unter den Linden 77')).toBeNull();
+    });
+  });
+
+  // ── #2320: the richer read-only detail ─────────────────────────────────
+
+  describe('FE-PAGE-SHARED-038: a stop shows its address, description, both notes, duration and contact (#2320)', () => {
+    const days = [{ id: 21, trip_id: 1, day_number: 1, date: '2026-07-01', title: 'Day One' }];
+    const assignments = {
+      21: [
+        {
+          id: 301, day_id: 21, order_index: 0, notes: 'go early, before the coaches',
+          place: {
+            id: 501, name: 'Louvre', description: 'The big one', address: 'Rue de Rivoli, Paris',
+            lat: 48.86, lng: 2.34, category_id: null, price: null, place_time: '09:00', end_time: null,
+            duration_minutes: 150, notes: 'Skip the pyramid queue', website: 'https://louvre.fr',
+            phone: '+33 1 40 20 50 50', image_url: null, transport_mode: 'walking', category: null, tags: [],
+          },
+        },
+      ],
+    };
+
+    it('renders every field the owner filled, as separate lines', async () => {
+      await open('detail-token', payload({ days, assignments }));
+      fireEvent.click(screen.getByText('Day One'));
+      // The name is also on the map marker's tooltip, so the list row is the one with the address under it.
+      await waitFor(() => expect(screen.getByText('Rue de Rivoli, Paris')).toBeInTheDocument());
+      expect(screen.getAllByText('Louvre').length).toBeGreaterThan(0);
+
+      expect(screen.getByText('The big one')).toBeInTheDocument();
+      expect(screen.getByText('go early, before the coaches')).toBeInTheDocument();
+      expect(screen.getByText('Skip the pyramid queue')).toBeInTheDocument();
+      expect(screen.getByText('2 h 30 min')).toBeInTheDocument();
+
+      const website = screen.getByRole('link', { name: /website/i });
+      expect(website).toHaveAttribute('href', 'https://louvre.fr');
+      expect(website).toHaveAttribute('target', '_blank');
+      expect(website).toHaveAttribute('rel', 'noopener noreferrer');
+
+      const maps = screen.getByRole('link', { name: /google maps/i });
+      expect(maps.getAttribute('href')).toContain('google.com/maps/search/');
+      expect(maps.getAttribute('href')).toContain(encodeURIComponent('Louvre, Rue de Rivoli, Paris'));
+      expect(maps).toHaveAttribute('rel', 'noopener noreferrer');
+
+      const phone = screen.getByRole('link', { name: '+33 1 40 20 50 50' });
+      expect(phone).toHaveAttribute('href', 'tel:+33140205050');
+    });
+
+    it('leaves out what is empty and never renders a link that is not http(s)', async () => {
+      const bare = {
+        21: [{
+          id: 302, day_id: 21, order_index: 0, notes: null,
+          place: {
+            id: 502, name: 'Somewhere', description: null, address: null, lat: null, lng: null,
+            duration_minutes: 0, notes: '   ', website: 'javascript:alert(1)', phone: null,
+            category_id: null, price: null, place_time: null, end_time: null, image_url: null,
+            transport_mode: 'walking', category: null, tags: [],
+          },
+        }],
+      };
+      await open('bare-token', payload({ days, assignments: bare }));
+      fireEvent.click(screen.getByText('Day One'));
+      await waitFor(() => expect(screen.getByText('Somewhere')).toBeInTheDocument());
+
+      expect(screen.queryByRole('link', { name: /website/i })).toBeNull();
+      expect(screen.queryByRole('link', { name: /google maps/i })).toBeNull();
+      expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+      expect(screen.queryByText(/min$/)).toBeNull();
+    });
+  });
+
+  describe('FE-PAGE-SHARED-039: a booking shows its note and its link, and nothing that is not http(s) (#2320)', () => {
+    it('renders the note and a link labelled by its host', async () => {
+      await open('booking-token', payload({
+        permissions: { share_bookings: true, share_packing: false, share_budget: false, share_collab: false },
+        reservations: [
+          {
+            id: 91, title: 'Night train', type: 'train', status: 'confirmed', day_id: null, end_day_id: null,
+            reservation_time: '2026-07-01T21:00:00', reservation_end_time: null, metadata: null,
+            notes: 'Meet at the north entrance', url: 'https://www.bahn.example/booking/abc',
+          },
+          {
+            id: 92, title: 'Sketchy', type: 'other', status: 'pending', day_id: null, end_day_id: null,
+            reservation_time: null, reservation_end_time: null, metadata: null,
+            notes: null, url: 'javascript:alert(1)',
+          },
+        ],
+      }));
+      fireEvent.click(screen.getByText('Bookings'));
+      await waitFor(() => expect(screen.getByText('Night train')).toBeInTheDocument());
+
+      expect(screen.getByText('Meet at the north entrance')).toBeInTheDocument();
+      const link = screen.getByRole('link', { name: 'bahn.example' });
+      expect(link).toHaveAttribute('href', 'https://www.bahn.example/booking/abc');
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+
+      expect(screen.getByText('Sketchy')).toBeInTheDocument();
+      expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+    });
+  });
+
+  // ── #2345: the header has to clip the decoration it bleeds ──────────────
+
+  describe('FE-PAGE-SHARED-042: the header clips the circles it bleeds (#2345)', () => {
+    it('does not let them widen the page', async () => {
+      await open('overflow-token', payload({}));
+
+      // Both circles sit outside the header on purpose, so the page only stays
+      // as wide as the viewport if the header itself is the clip. The header is
+      // the first gradient panel on the page and carries the trip title.
+      const header = document.querySelector<HTMLElement>('div[style*="linear-gradient(135deg"]');
+      expect(header?.textContent).toContain('Shared Paris Trip');
+      expect(header?.style.overflow).toBe('hidden');
     });
   });
 });

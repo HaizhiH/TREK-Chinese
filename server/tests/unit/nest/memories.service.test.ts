@@ -10,10 +10,11 @@ const unified = vi.hoisted(() => ({
   createTripAlbumLink: vi.fn(() => ({ data: {} })),
   removeAlbumLink: vi.fn(() => ({ data: {} })),
   addTripPhotos: vi.fn(async () => ({ data: { added: 0 } })),
+  syncImmichAlbum: vi.fn(async () => ({ success: true, added: 0, total: 0 })),
+  syncSynologyAlbum: vi.fn(async () => ({ success: true, data: { added: 0, total: 0 } })),
   removeTripPhoto: vi.fn(() => ({ data: {} })),
   setTripPhotoSharing: vi.fn(async () => ({ data: {} })),
 }));
-vi.mock('../../../src/services/memories/unifiedService', () => unified);
 
 const immich = vi.hoisted(() => ({
   getConnectionSettings: vi.fn(() => ({})),
@@ -26,11 +27,10 @@ const immich = vi.hoisted(() => ({
   streamImmichAsset: vi.fn(async () => undefined),
   listAlbums: vi.fn(async () => ({ albums: [] })),
   getAlbumPhotos: vi.fn(async () => ({ assets: [] })),
-  syncAlbumAssets: vi.fn(async () => ({ added: 0, total: 0 })),
+  collectAlbumSelection: vi.fn(async () => ({ selection: { provider: 'immich', asset_ids: [] }, total: 0 })),
   getAssetInfo: vi.fn(async () => ({ data: {} })),
   isValidAssetId: vi.fn(() => true),
 }));
-vi.mock('../../../src/services/memories/immichService', () => immich);
 
 const synology = vi.hoisted(() => ({
   getSynologySettings: vi.fn(async () => ({ success: true, data: {} })),
@@ -39,20 +39,23 @@ const synology = vi.hoisted(() => ({
   testSynologyConnection: vi.fn(async () => ({ success: true, data: {} })),
   listSynologyAlbums: vi.fn(async () => ({ success: true, data: {} })),
   getSynologyAlbumPhotos: vi.fn(async () => ({ success: true, data: {} })),
-  syncSynologyAlbumLink: vi.fn(async () => ({ success: true, data: {} })),
+  collectSynologyAlbumSelection: vi.fn(async () => ({ success: true, data: { selection: { provider: 'synologyphotos', asset_ids: [] }, total: 0 } })),
   searchSynologyPhotos: vi.fn(async () => ({ success: true, data: {} })),
   getSynologyAssetInfo: vi.fn(async () => ({ success: true, data: {} })),
   streamSynologyAsset: vi.fn(async () => undefined),
 }));
-vi.mock('../../../src/services/memories/synologyService', () => synology);
 
 const helpers = vi.hoisted(() => ({ canAccessUserPhoto: vi.fn(() => true) }));
-vi.mock('../../../src/services/memories/helpersService', () => helpers);
 
 const ws = vi.hoisted(() => ({ broadcast: vi.fn() }));
 vi.mock('../../../src/websocket', () => ws);
 
 import { MemoriesService } from '../../../src/nest/memories/memories.service';
+import { RealtimeService } from '../../../src/nest/realtime/realtime.service';
+import type { UnifiedMemoriesService } from '../../../src/nest/memories/unified-memories.service';
+import type { ImmichService } from '../../../src/nest/memories/immich.service';
+import type { SynologyService } from '../../../src/nest/memories/synology.service';
+import type { MemoriesAccessService } from '../../../src/nest/memories/memories-access.service';
 
 const res = {} as import('express').Response;
 
@@ -61,7 +64,13 @@ describe('MemoriesService (delegation wrapper over services/memories/*)', () => 
 
   beforeEach(() => {
     vi.clearAllMocks();
-    svc = new MemoriesService();
+    svc = new MemoriesService(
+      new RealtimeService(),
+      unified as unknown as UnifiedMemoriesService,
+      immich as unknown as ImmichService,
+      synology as unknown as SynologyService,
+      helpers as unknown as MemoriesAccessService,
+    );
   });
 
   it('access check + broadcast forward verbatim', () => {
@@ -145,7 +154,7 @@ describe('MemoriesService (delegation wrapper over services/memories/*)', () => 
     expect(immich.getAlbumPhotos).toHaveBeenCalledWith(7, 'al1');
 
     await svc.immichSyncAlbumAssets('5', 'l1', 7, 'sock');
-    expect(immich.syncAlbumAssets).toHaveBeenCalledWith('5', 'l1', 7, 'sock');
+    expect(unified.syncImmichAlbum).toHaveBeenCalledWith('5', 'l1', 7, 'sock');
   });
 
   it('synology methods delegate', async () => {
@@ -165,10 +174,15 @@ describe('MemoriesService (delegation wrapper over services/memories/*)', () => 
     expect(synology.listSynologyAlbums).toHaveBeenCalledWith(7);
 
     await svc.synologySyncAlbumLink(7, '5', 'l1', 'sock');
-    expect(synology.syncSynologyAlbumLink).toHaveBeenCalledWith(7, '5', 'l1', 'sock');
+    expect(unified.syncSynologyAlbum).toHaveBeenCalledWith(7, '5', 'l1', 'sock');
 
     await svc.synologySearchPhotos(7, 'f', 't', 0, 100);
-    expect(synology.searchSynologyPhotos).toHaveBeenCalledWith(7, 'f', 't', 0, 100);
+    expect(synology.searchSynologyPhotos).toHaveBeenCalledWith(7, 'f', 't', 0, 100, 0);
+
+    // The zone the days are meant in has to reach the provider, and it is a
+    // different thing from the pagination offset sitting next to it (#2336).
+    await svc.synologySearchPhotos(7, 'f', 't', 0, 100, 600);
+    expect(synology.searchSynologyPhotos).toHaveBeenLastCalledWith(7, 'f', 't', 0, 100, 600);
   });
 
   it('synology album-photos forwards a passphrase when present and omits it when absent', async () => {

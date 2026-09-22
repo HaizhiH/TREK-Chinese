@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import ReactDOM from 'react-dom'
+import { createPortal } from 'react-dom'
 import { EMOJI_CATEGORIES } from './CollabChat.constants'
 import { TwemojiImg } from './CollabChatTwemojiImg'
 
@@ -37,7 +37,7 @@ export function EmojiPicker({ onSelect, onClose, anchorRef, containerRef }: Emoj
     return () => document.removeEventListener('mousedown', close)
   }, [onClose, anchorRef])
 
-  return ReactDOM.createPortal(
+  return createPortal(
     <div ref={ref} style={{
       position: 'fixed', bottom: pos.bottom, left: pos.left, zIndex: 10000,
       background: 'var(--bg-card)', border: '1px solid var(--border-faint)', borderRadius: 16,
@@ -46,7 +46,7 @@ export function EmojiPicker({ onSelect, onClose, anchorRef, containerRef }: Emoj
       {/* Category tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-faint)', padding: '6px 8px', gap: 2 }}>
         {Object.keys(EMOJI_CATEGORIES).map(c => (
-          <button key={c} onClick={() => setCat(c)} style={{
+          <button type="button" key={c} onClick={() => setCat(c)} style={{
             flex: 1, padding: '4px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
             background: cat === c ? 'var(--bg-hover)' : 'transparent',
             color: 'var(--text-primary)', fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 600, fontFamily: 'inherit',
@@ -58,7 +58,7 @@ export function EmojiPicker({ onSelect, onClose, anchorRef, containerRef }: Emoj
       {/* Emoji grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 2, padding: 8 }}>
         {EMOJI_CATEGORIES[cat].map((emoji, i) => (
-          <button key={i} onClick={() => onSelect(emoji)} style={{
+          <button type="button" key={i} onClick={() => onSelect(emoji)} style={{
             width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6,
             padding: 2, transition: 'transform 0.1s',

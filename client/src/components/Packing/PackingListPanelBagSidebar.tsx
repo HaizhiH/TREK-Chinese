@@ -1,13 +1,21 @@
 import { Plus } from 'lucide-react'
 import type { PackingState } from './usePackingListPanel'
-import { itemWeight } from './packingListPanel.helpers'
+import { bagFillPct, bagTotalWeight, countsTowardsMyLoad, unassignedTotalWeight } from './packingListPanel.helpers'
 import { BagCard } from './PackingListPanelBagCard'
 
 export function BagSidebar(S: PackingState) {
   const {
-    t, bags, items, tripId, tripMembers, canEdit, handleDeleteBag, handleUpdateBag, handleSetBagMembers,
-    showAddBag, setShowAddBag, newBagName, setNewBagName, handleCreateBag,
+    t, bags, items, tripId, tripMembers, canEdit, currentUserId, handleDeleteBag, handleUpdateBag, handleSetBagMembers,
+    showAddBag, setShowAddBag, newBagName, setNewBagName, handleCreateBag, unassignedWeightGrams, serverWeightsFresh,
   } = S
+  // The ITEM LISTS still describe what you are carrying — an item someone shared
+  // with you stays in your list, but they are the one bringing it (#1767).
+  const myItems = items.filter(i => countsTowardsMyLoad(i, currentUserId))
+  // The WEIGHTS no longer do: a bag's load is the bag's, whoever packed it (#2191).
+  const bagWeightOf = (bag: typeof bags[number]) =>
+    bagTotalWeight(bag, myItems.filter(i => i.bag_id === bag.id), serverWeightsFresh)
+  // Reference for bags without a limit of their own — computed once instead of per bag.
+  const heaviestBagWeight = Math.max(...bags.map(bagWeightOf), 1)
   return (
     <div className="hidden xl:block" style={{ width: 260, marginLeft: 16, borderLeft: '1px solid var(--border-secondary)', overflowY: 'auto', padding: 16, flexShrink: 0 }}>
       <div style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-faint)', marginBottom: 12 }}>
@@ -15,10 +23,9 @@ export function BagSidebar(S: PackingState) {
       </div>
 
       {bags.map(bag => {
-        const bagItems = items.filter(i => i.bag_id === bag.id)
-        const totalWeight = bagItems.reduce((sum, i) => sum + itemWeight(i), 0)
-        const maxWeight = bag.weight_limit_grams || Math.max(...bags.map(b => items.filter(i => i.bag_id === b.id).reduce((s, i) => s + itemWeight(i), 0)), 1)
-        const pct = Math.min(100, Math.round((totalWeight / maxWeight) * 100))
+        const bagItems = myItems.filter(i => i.bag_id === bag.id)
+        const totalWeight = bagWeightOf(bag)
+        const pct = bagFillPct(totalWeight, bag.weight_limit_grams, heaviestBagWeight)
         return (
           <BagCard key={bag.id} bag={bag} bagItems={bagItems} totalWeight={totalWeight} pct={pct} tripId={tripId} tripMembers={tripMembers} canEdit={canEdit} onDelete={() => handleDeleteBag(bag.id)} onUpdate={handleUpdateBag} onSetMembers={handleSetBagMembers} t={t} compact />
         )
@@ -26,9 +33,11 @@ export function BagSidebar(S: PackingState) {
 
       {/* Unassigned */}
       {(() => {
-        const unassigned = items.filter(i => !i.bag_id)
-        const unassignedWeight = unassigned.reduce((s, i) => s + itemWeight(i), 0)
-        if (unassigned.length === 0) return null
+        const unassigned = myItems.filter(i => !i.bag_id)
+        const unassignedWeight = unassignedTotalWeight(unassignedWeightGrams, unassigned, serverWeightsFresh)
+        // Shown whenever there is weight to account for, even with no visible
+        // items — the grand total counts it either way (#2191).
+        if (unassigned.length === 0 && unassignedWeight === 0) return null
         return (
           <div style={{ marginBottom: 14, opacity: 0.6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -47,7 +56,12 @@ export function BagSidebar(S: PackingState) {
       <div style={{ borderTop: '1px solid var(--border-secondary)', paddingTop: 10, marginTop: 6 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 700, color: 'var(--text-primary)' }}>
           <span>{t('packing.totalWeight')}</span>
-          <span>{(() => { const w = items.reduce((s, i) => s + itemWeight(i), 0); return w >= 1000 ? `${(w / 1000).toFixed(1)} kg` : `${w} g` })()}</span>
+          <span>{(() => {
+            // Same rule as the rows above it (#2191).
+            const w = bags.reduce((s, b) => s + bagWeightOf(b), 0)
+              + unassignedTotalWeight(unassignedWeightGrams, myItems.filter(i => !i.bag_id), serverWeightsFresh)
+            return w >= 1000 ? `${(w / 1000).toFixed(1)} kg` : `${w} g`
+          })()}</span>
         </div>
       </div>
 
@@ -58,12 +72,12 @@ export function BagSidebar(S: PackingState) {
             onKeyDown={e => { if (e.key === 'Enter') handleCreateBag(); if (e.key === 'Escape') { setShowAddBag(false); setNewBagName('') } }}
             placeholder={t('packing.bagName')}
             style={{ flex: 1, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border-primary)', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontFamily: 'inherit', outline: 'none' }} />
-          <button onClick={handleCreateBag} style={{ padding: '4px 8px', borderRadius: 8, border: 'none', background: 'var(--text-primary)', color: 'var(--bg-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+          <button type="button" onClick={handleCreateBag} style={{ padding: '4px 8px', borderRadius: 8, border: 'none', background: 'var(--text-primary)', color: 'var(--bg-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
             <Plus size={12} />
           </button>
         </div>
       ) : (
-        <button onClick={() => setShowAddBag(true)}
+        <button type="button" onClick={() => setShowAddBag(true)}
           style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 12, padding: '5px 8px', borderRadius: 8, border: '1px dashed var(--border-primary)', background: 'none', cursor: 'pointer', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', fontFamily: 'inherit', width: '100%' }}>
           <Plus size={11} /> {t('packing.addBag')}
         </button>

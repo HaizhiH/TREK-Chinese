@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': 'Reisen',
   'oauth.scope.group.places': 'Orte',
+  'oauth.scope.group.collections': 'Sammlungen',
   'oauth.scope.group.atlas': 'Atlas',
   'oauth.scope.group.packing': 'Packliste',
   'oauth.scope.group.todos': 'Aufgaben',
@@ -26,6 +27,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': 'Orte, Tageszuweisungen, Tags und Kategorien lesen',
   'oauth.scope.places:write.label': 'Orte verwalten',
   'oauth.scope.places:write.description': 'Orte, Zuweisungen und Tags erstellen, aktualisieren und löschen',
+  'oauth.scope.collections:read.label': 'Sammlungen ansehen',
+  'oauth.scope.collections:read.description':
+    'Sammlungen gespeicherter Orte, ihre Orte, Bewertungen, Labels und Mitglieder lesen',
+  'oauth.scope.collections:write.label': 'Sammlungen verwalten',
+  'oauth.scope.collections:write.description':
+    'Sammlungen erstellen/bearbeiten, Orte speichern, bewerten, labeln und kopieren, Listen teilen',
   'oauth.scope.atlas:read.label': 'Atlas anzeigen',
   'oauth.scope.atlas:read.description': 'Besuchte Länder, Regionen und Wunschliste lesen',
   'oauth.scope.atlas:write.label': 'Atlas verwalten',
@@ -90,5 +97,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'Dateien',
+  'oauth.scope.group.settings': 'Einstellungen',
+  'oauth.scope.files:read.label': 'Reisedateien ansehen',
+  'oauth.scope.files:read.description': 'Dokumente einer Reise auflisten: Namen, Größen, wer sie hochgeladen hat und woran sie hängen',
+  'oauth.scope.files:write.label': 'Reisedateien verwalten',
+  'oauth.scope.files:write.description': 'Dateien umbenennen und beschreiben, mit Buchungen und Orten verknüpfen, markieren und in den Papierkorb legen',
+  'oauth.scope.files:content.label': 'Dateiinhalte lesen',
+  'oauth.scope.files:content.description': 'Den Inhalt eines hochgeladenen Dokuments lesen, etwa ein Buchungs-PDF oder ein Ticket',
+  'oauth.scope.settings:read.label': 'Einstellungen ansehen',
+  'oauth.scope.settings:read.description': 'Einheiten, Zeitformat, Sprache, Standardwährung und Startseite lesen',
+  'oauth.scope.settings:write.label': 'Einstellungen ändern',
+  'oauth.scope.settings:write.description': 'Einheiten, Zeitformat, Sprache, Standardwährung und Startseite ändern. Niemals gespeicherte API-Schlüssel',
+  'oauth.scope.group.plugins': 'Plugins',
+  'oauth.scope.plugins:use.label': 'Plugin-Tools ausführen',
+  'oauth.scope.plugins:use.description': 'Erlaubt diesem Client, Tools aufzurufen, die von den durch einen Administrator installierten und freigegebenen Plugins bereitgestellt werden. Jedes Plugin handelt mit den ihm bereits erteilten Rechten, nicht mit den Berechtigungen dieses Tokens',
 };
 export default oauth;

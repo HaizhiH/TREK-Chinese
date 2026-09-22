@@ -51,6 +51,7 @@ yarn-error.log*
 
 # Coverage
 coverage
+coverage-*/
 *.lcov
 .nyc_output
 
@@ -63,6 +64,9 @@ coverage
 
 .scannerwork
 test-data
+
+# Live-MinIO/AIStor manual test license key — never commit, operators obtain their own free key
+minio-licence.key
 
 .run
 .full-review

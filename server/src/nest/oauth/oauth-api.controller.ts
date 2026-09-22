@@ -1,14 +1,15 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpException, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { OauthService } from './oauth.service';
-import { RateLimitService } from '../auth/rate-limit.service';
+import { RateLimitService } from '../common/rate-limit.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CookieAuthGuard } from '../auth/cookie-auth.guard';
 import { OptionalJwtGuard } from '../auth/optional-jwt.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { getClientIp } from '../../services/auditLog';
+import { getClientIp } from '../audit/client-ip';
 import type { User } from '../../types';
-import type { AuthorizeParams } from '../../services/oauthService';
+import type { AuthorizeParams } from './oauth.service';
+import { OauthClientCreateDto, OauthConsentDto } from './oauth.dto';
 
 const MIN = 60_000;
 
@@ -67,20 +68,10 @@ export class OauthApiController {
   @Post('authorize')
   @HttpCode(200) // Express answers consent with res.json (200), not the POST-default 201.
   @UseGuards(CookieAuthGuard)
-  authorize(@CurrentUser() user: User, @Body() body: {
-    client_id: string; redirect_uri: string; scope: string; state?: string;
-    code_challenge: string; code_challenge_method: string; approved: boolean; resource?: string;
-  }, @Req() req: Request) {
+  authorize(@CurrentUser() user: User, @Body() body: OauthConsentDto, @Req() req: Request) {
     const ip = getClientIp(req);
     if (!this.oauth.mcpEnabled()) {
       throw new HttpException({ error: 'MCP is not enabled' }, 403);
-    }
-    if (!body.approved) {
-      const url = new URL(body.redirect_uri);
-      url.searchParams.set('error', 'access_denied');
-      url.searchParams.set('error_description', 'User denied the authorization request');
-      if (body.state) url.searchParams.set('state', body.state);
-      return { redirect: url.toString() };
     }
     const params: AuthorizeParams = {
       response_type: 'code',
@@ -92,9 +83,20 @@ export class OauthApiController {
       code_challenge_method: body.code_challenge_method,
       resource: body.resource,
     };
+    // Validate before branching on approved: the deny path builds a redirect out
+    // of body.redirect_uri too, and only validateAuthorizeRequest checks it
+    // against the client's registered URIs. A string that is not a URL at all
+    // would additionally throw out of `new URL()` as a 500.
     const validation = this.oauth.validateAuthorizeRequest(params, user.id);
     if (!validation.valid) {
       throw new HttpException({ error: validation.error, error_description: validation.error_description }, 400);
+    }
+    if (!body.approved) {
+      const url = new URL(body.redirect_uri);
+      url.searchParams.set('error', 'access_denied');
+      url.searchParams.set('error_description', 'User denied the authorization request');
+      if (body.state) url.searchParams.set('state', body.state);
+      return { redirect: url.toString() };
     }
     const scopes = validation.scopes!;
     this.oauth.saveConsent(body.client_id, user.id, scopes, ip);
@@ -126,7 +128,7 @@ export class OauthApiController {
   @Post('clients')
   @HttpCode(201)
   @UseGuards(CookieAuthGuard)
-  createClient(@CurrentUser() user: User, @Body() body: { name: string; redirect_uris?: string[]; allowed_scopes: string[]; allows_client_credentials?: boolean }, @Req() req: Request) {
+  createClient(@CurrentUser() user: User, @Body() body: OauthClientCreateDto, @Req() req: Request) {
     this.requireMcp403();
     const result = this.oauth.createOAuthClient(user.id, body.name, body.redirect_uris ?? [], body.allowed_scopes, getClientIp(req), { allowsClientCredentials: body.allows_client_credentials });
     if (result.error) {

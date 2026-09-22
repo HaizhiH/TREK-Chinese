@@ -32,7 +32,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByText('No budget created yet');
+    expect(await screen.findByText('No budget created yet')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-002: shows empty state text body', async () => {
@@ -40,7 +40,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByText(/Create categories and entries/i);
+    expect(await screen.findByText(/Create categories and entries/i)).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-003: shows category input in empty state when user can edit', async () => {
@@ -48,7 +48,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByPlaceholderText('Enter category name...');
+    expect(await screen.findByPlaceholderText('Enter category name...')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-004: renders budget items from store after load', async () => {
@@ -57,7 +57,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [item] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByText('Hotel Paris');
+    expect(await screen.findByText('Hotel Paris')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-005: renders category section header', async () => {
@@ -87,7 +87,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [item] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByText('Budget');
+    expect(await screen.findByText('Budget')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-008: shows CSV export button', async () => {
@@ -96,7 +96,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [item] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByText('CSV');
+    expect(await screen.findByText('CSV')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-009: add item row visible in table', async () => {
@@ -105,7 +105,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [item] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByPlaceholderText('New Entry');
+    expect(await screen.findByPlaceholderText('New Entry')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-010: adding new item via form calls POST and shows item', async () => {
@@ -124,7 +124,7 @@ describe('BudgetPanel', () => {
     await user.type(nameInput, 'Restaurant Dinner');
     const addBtn = screen.getByTitle('Add Reservation');
     await user.click(addBtn);
-    await screen.findByText('Restaurant Dinner');
+    expect(await screen.findByText('Restaurant Dinner')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-011: delete button present for items when user can edit', async () => {
@@ -161,7 +161,7 @@ describe('BudgetPanel', () => {
     );
     render(<BudgetPanel tripId={1} />);
     await screen.findByText('Hotel A');
-    await screen.findByText('Hotel B');
+    expect(await screen.findByText('Hotel B')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-014: items from different categories render separate sections', async () => {
@@ -183,7 +183,7 @@ describe('BudgetPanel', () => {
     );
     render(<BudgetPanel tripId={1} />);
     // Component renders even in empty state
-    await screen.findByText('No budget created yet');
+    expect(await screen.findByText('No budget created yet')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-016: trip currency EUR is shown in header for item rows', async () => {
@@ -193,7 +193,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [item] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByText('Misc');
+    expect(await screen.findByText('Misc')).toBeInTheDocument();
     // Row exists - EUR formatting would appear in values
   });
 
@@ -233,7 +233,7 @@ describe('BudgetPanel', () => {
     render(<BudgetPanel tripId={1} />);
     const nameInput = await screen.findByPlaceholderText('New Entry');
     await user.type(nameInput, 'Pizza{Enter}');
-    await screen.findByText('Pizza');
+    expect(await screen.findByText('Pizza')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-020: component renders without crashing with empty tripMembers', async () => {
@@ -241,7 +241,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] }))
     );
     render(<BudgetPanel tripId={1} tripMembers={[]} />);
-    await screen.findByText('No budget created yet');
+    expect(await screen.findByText('No budget created yet')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-021: inline edit name cell — clicking a name cell makes it editable', async () => {
@@ -342,7 +342,7 @@ describe('BudgetPanel', () => {
       http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] }))
     );
     render(<BudgetPanel tripId={1} />);
-    await screen.findByPlaceholderText('Enter category name...');
+    expect(await screen.findByPlaceholderText('Enter category name...')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-028: creating a new category via input calls POST and adds a section', async () => {
@@ -356,7 +356,7 @@ describe('BudgetPanel', () => {
     render(<BudgetPanel tripId={1} />);
     const input = await screen.findByPlaceholderText('Enter category name...');
     await user.type(input, 'Souvenirs{Enter}');
-    await screen.findByText('Souvenirs');
+    expect(await screen.findByText('Souvenirs')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-029: settlement section renders flows with usernames', async () => {
@@ -371,7 +371,7 @@ describe('BudgetPanel', () => {
             { user_id: 2, username: 'bob', balance: 10, avatar_url: null },
           ],
           flows: [
-            { from: { username: 'alice', avatar_url: null }, to: { username: 'bob', avatar_url: null }, amount: 10 },
+            { from: { user_id: 1, username: 'alice', avatar_url: null }, to: { user_id: 2, username: 'bob', avatar_url: null }, amount: 10 },
           ],
         })
       )
@@ -387,7 +387,7 @@ describe('BudgetPanel', () => {
     await user.click(settlementBtn);
     // alice and bob should appear in balances section
     await screen.findByText('alice');
-    await screen.findByText('bob');
+    expect(await screen.findByText('bob')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-030: per-person summary renders usernames', async () => {
@@ -408,7 +408,7 @@ describe('BudgetPanel', () => {
     ];
     render(<BudgetPanel tripId={1} tripMembers={tripMembers} />);
     await screen.findByText('Shared Dinner');
-    await screen.findByText('testuser');
+    expect(await screen.findByText('testuser')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-032: grand total row shows sum across all categories', async () => {
@@ -451,7 +451,7 @@ describe('BudgetPanel', () => {
     render(<BudgetPanel tripId={1} />);
     await screen.findByText('Train');
     // expense_date is rendered as plain text in read-only mode
-    await screen.findByText('2025-06-15');
+    expect(await screen.findByText('2025-06-15')).toBeInTheDocument();
   });
 
   it('FE-COMP-BUDGET-035: settlement section with avatar renders user avatar image', async () => {
@@ -465,7 +465,7 @@ describe('BudgetPanel', () => {
             { user_id: 1, username: 'alice', avatar_url: '/uploads/avatars/alice.jpg', balance: -30 },
             { user_id: 2, username: 'bob', avatar_url: null, balance: 30 },
           ],
-          flows: [{ from: { username: 'alice', avatar_url: '/uploads/avatars/alice.jpg' }, to: { username: 'bob', avatar_url: null }, amount: 30 }]
+          flows: [{ from: { user_id: 1, username: 'alice', avatar_url: '/uploads/avatars/alice.jpg' }, to: { user_id: 2, username: 'bob', avatar_url: null }, amount: 30 }]
         })
       ),
       http.get('/api/trips/1/budget/per-person', () => HttpResponse.json({ summary: [] })),

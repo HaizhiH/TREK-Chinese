@@ -1,4 +1,5 @@
 import type { AxiosProgressEvent } from 'axios'
+import { randomId } from './randomId'
 
 export interface UploadProgress {
   done: number
@@ -22,6 +23,10 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 function isRetryable(err: unknown): boolean {
   if (err && typeof err === 'object' && 'response' in err) {
     const status = (err as { response?: { status?: number } }).response?.status
+    // 408/425/429: timeout / too-early / rate-limited. TREK's own upload routes
+    // do not send them, but a proxy in front of a self-hosted instance does, and
+    // dropping the file for one of those loses a photo we could have re-sent.
+    if (status === 408 || status === 425 || status === 429) return true
     if (status !== undefined && status >= 400 && status < 500) return false
   }
   return true
@@ -62,12 +67,19 @@ export async function uploadFilesResilient<T>(
       const i = idx++
       if (i >= files.length) break
       const file = files[i]
-      const idempotencyKey = crypto.randomUUID()
+      const idempotencyKey = randomId()
       loadedMap.set(i, 0)
 
       let items: T[] | null = null
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        if (attempt > 0) await sleep(400 * attempt)
+        if (attempt > 0) {
+          // The aborted attempt's bytes never landed, so drop them before the
+          // retry starts reporting its own — otherwise they'd be counted twice
+          // until the first onUploadProgress of the new attempt arrives.
+          loadedMap.set(i, 0)
+          emitProgress()
+          await sleep(400 * attempt)
+        }
         try {
           items = await uploadOne(file, {
             idempotencyKey,

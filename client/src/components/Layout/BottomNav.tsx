@@ -1,4 +1,4 @@
-import { useNavigate, useLocation, useMatch } from 'react-router-dom'
+import { useNavigate, useLocation, useMatch } from 'react-router'
 import { useAddonStore } from '../../store/addonStore'
 import { usePluginStore } from '../../store/pluginStore'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -6,6 +6,8 @@ import { useTranslation } from '../../i18n'
 import { LayoutGrid, CalendarDays, Globe, Compass, Bookmark, Plus } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { resolvePluginIcon } from '../shared/PluginIcon'
+import { useAuthStore } from '../../store/authStore'
+import { visibleManagedNavItems } from '../../managed'
 
 const ADDON_NAV: Record<string, { icon: LucideIcon; labelKey: string }> = {
   vacay:       { icon: CalendarDays, labelKey: 'admin.addons.catalog.vacay.name' },
@@ -59,6 +61,7 @@ export default function BottomNav() {
   const pagePlugins = usePluginStore(s => s.plugins).filter(p => p.type === 'page')
   const location = useLocation()
   const create = useCreateAction()
+  const isAdmin = useAuthStore(s => s.user?.role === 'admin')
 
   const items: NavItem[] = [
     { to: '/dashboard', label: t('nav.myTrips'), icon: LayoutGrid },
@@ -67,6 +70,8 @@ export default function BottomNav() {
       return nav ? [{ to: `/${addon.id}`, label: t(nav.labelKey), icon: nav.icon }] : []
     }),
     ...pagePlugins.map(p => ({ to: `/plugins/${p.id}`, label: p.name, icon: resolvePluginIcon(p.icon) })),
+    // Empty in this repository — see client/src/managed.
+    ...visibleManagedNavItems(isAdmin).map(m => ({ to: m.path, label: m.label, icon: m.Icon })),
   ]
   // Split the items so the raised "+" sits dead centre.
   const splitAt = Math.ceil(items.length / 2)
@@ -79,7 +84,7 @@ export default function BottomNav() {
   const renderItem = ({ to, label, icon: Icon }: NavItem) => {
     const active = isActive(to)
     return (
-      <button
+      <button type="button"
         key={to}
         onClick={() => navigate(to)}
         className="flex flex-col items-center gap-1 py-1 px-1 min-w-0"
@@ -110,7 +115,7 @@ export default function BottomNav() {
     >
       <div className="flex flex-1 items-center justify-around min-w-0">{left.map(renderItem)}</div>
 
-      <button
+      <button type="button"
         onClick={create.run}
         aria-label={create.label}
         className="flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"

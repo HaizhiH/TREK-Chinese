@@ -3,6 +3,7 @@ import type { TranslationStrings } from '../types';
 const oauth: TranslationStrings = {
   'oauth.scope.group.trips': '旅行',
   'oauth.scope.group.places': '場所',
+  'oauth.scope.group.collections': 'コレクション',
   'oauth.scope.group.atlas': '地図',
   'oauth.scope.group.packing': '持ち物',
   'oauth.scope.group.todos': 'ToDo',
@@ -26,6 +27,12 @@ const oauth: TranslationStrings = {
   'oauth.scope.places:read.description': '場所、日への割り当て、タグ、カテゴリを閲覧',
   'oauth.scope.places:write.label': '場所を管理',
   'oauth.scope.places:write.description': '場所、割り当て、タグの作成・更新・削除',
+  'oauth.scope.collections:read.label': 'コレクションを表示',
+  'oauth.scope.collections:read.description':
+    '保存した場所のコレクションと、その中の場所、評価、ラベル、メンバーを読み取る',
+  'oauth.scope.collections:write.label': 'コレクションを管理',
+  'oauth.scope.collections:write.description':
+    'コレクションの作成・編集、場所の保存・評価・ラベル付け・コピー、リストの共有',
   'oauth.scope.atlas:read.label': '地図を表示',
   'oauth.scope.atlas:read.description': '訪問した国・地域、バケットリストを閲覧',
   'oauth.scope.atlas:write.label': '地図を管理',
@@ -87,5 +94,20 @@ const oauth: TranslationStrings = {
   'oauth.authorize.alwaysIncluded': 'Always included', // en-fallback
   'oauth.authorize.alwaysTool.listTrips': 'List your trips so the AI can discover trip IDs', // en-fallback
   'oauth.authorize.alwaysTool.getTripSummary': 'Read a trip overview needed to use any other tool', // en-fallback
+  'oauth.scope.group.files': 'ファイル',
+  'oauth.scope.group.settings': '設定',
+  'oauth.scope.files:read.label': '旅行のファイルを表示',
+  'oauth.scope.files:read.description': '旅行の書類を一覧表示します。名前、サイズ、アップロードした人、リンク先',
+  'oauth.scope.files:write.label': '旅行のファイルを管理',
+  'oauth.scope.files:write.description': 'ファイルの名前と説明の変更、予約や場所への紐付け、スターとゴミ箱への移動',
+  'oauth.scope.files:content.label': 'ファイルの中身を読む',
+  'oauth.scope.files:content.description': 'アップロードされた書類の中身を読みます。予約PDFやチケットなど',
+  'oauth.scope.settings:read.label': '環境設定を表示',
+  'oauth.scope.settings:read.description': '単位、時刻表示、言語、既定通貨、開始ページの読み取り',
+  'oauth.scope.settings:write.label': '環境設定を変更',
+  'oauth.scope.settings:write.description': '単位、時刻表示、言語、既定通貨、開始ページの変更。保存されたAPIキーは対象外',
+  'oauth.scope.group.plugins': 'プラグイン',
+  'oauth.scope.plugins:use.label': 'プラグインのツールを実行',
+  'oauth.scope.plugins:use.description': '管理者がインストールして承認したプラグインが公開するツールを、このクライアントから呼び出せるようにします。各プラグインは、このトークンのスコープではなく、すでに付与されている権限で動作します',
 };
 export default oauth;

@@ -3,6 +3,7 @@ import { Plane, Save } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
 import { airtrailApi } from '../../api/client'
+import AirTrailIcon from '../shared/AirTrailIcon'
 import Section from './Section'
 import ToggleSwitch from './ToggleSwitch'
 
@@ -78,7 +79,7 @@ export default function AirTrailConnectionSection(): React.ReactElement {
   const canSave = !!url.trim() && (connected || !!apiKey.trim())
 
   return (
-    <Section title={t('settings.airtrail.title')} icon={Plane}>
+    <Section title={t('settings.airtrail.title')} icon={AirTrailIcon}>
       <div className="space-y-3">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1.5">{t('settings.airtrail.url')}</label>
@@ -118,14 +119,14 @@ export default function AirTrailConnectionSection(): React.ReactElement {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
+          <button type="button"
             onClick={handleSave}
             disabled={saving || loading || !canSave}
             className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700 disabled:bg-slate-400"
           >
             <Save className="w-4 h-4" /> {t('common.save')}
           </button>
-          <button
+          <button type="button"
             onClick={handleTest}
             disabled={testing || loading || !url.trim()}
             className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"

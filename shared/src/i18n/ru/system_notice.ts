@@ -54,5 +54,38 @@ const system_notice: TranslationStrings = {
   'system_notice.v3014_whitespace_collision.title': 'Требуется действие: конфликт учётных записей',
   'system_notice.v3014_whitespace_collision.body':
     'Обновление 3.0.14 обнаружило один или несколько конфликтов имён пользователей или адресов электронной почты, вызванных ведущими или завершающими пробелами в сохранённых значениях. Затронутые учётные записи были автоматически переименованы. Проверьте логи сервера на строки, начинающиеся с **[migration] WHITESPACE COLLISION**, чтобы определить учётные записи, требующие проверки.',
+  // The release modal. One stable set of keys: each big release swaps the copy in place.
+  'system_notice.release_notes.eyebrow': 'Обновление установлено',
+  'system_notice.release_notes.headline': 'Четыре вещи, которые TREK теперь делает сам.',
+  'system_notice.release_notes.intro': 'Собственный API мест, автопутешествия от начала до конца, ваша история местоположений в ваших руках, и ваши документы в синхронизации.',
+  'system_notice.release_notes.features_label': 'Главные новинки',
+  'system_notice.release_notes.features_aside': 'И это далеко не всё',
+  'system_notice.release_notes.feature_places_title': 'TREK Places API',
+  'system_notice.release_notes.feature_places_body': 'Первый планировщик путешествий с открытым кодом и собственным API мест. 73,6 миллиона мест, без ключа и квот.',
+  'system_notice.release_notes.feature_roadtrip_title': 'Дополнение «Автопутешествие»',
+  'system_notice.release_notes.feature_roadtrip_body': 'Планирует поездку сам: маршрут, расстояние, часы и остановки. Выключено, пока админ не включит.',
+  'system_notice.release_notes.feature_dawarich_title': 'Интеграция с Dawarich',
+  'system_notice.release_notes.feature_dawarich_body': 'Альтернатива Google Timeline на вашем собственном сервере, и теперь её данные видны прямо в TREK. TREK читает, и только читает.',
+  'system_notice.release_notes.footnote': 'Плюс длинный список небольших изменений во всём остальном TREK.',
+  'system_notice.release_notes.notes_label': 'Заметки к релизу',
+  'system_notice.release_notes.note_eyebrow': 'Слово от мейнтейнера',
+  'system_notice.release_notes.note_title': 'Именно ради вас я продолжаю развивать TREK.',
+  'system_notice.release_notes.note_body':
+    'TREK начинался как маленький инструмент для моих собственных поездок: я писал его после работы, потому что хотел планировать их удобнее. С тех пор он, по сути, так и не перестал расти. Почти всё, чем вы пользуетесь, создано поздно ночью, по выходным, в поездах, параллельно с основной работой, и было немало вечеров, когда я тихо сомневался, откроет ли его вообще хоть кто-нибудь.',
+  'system_notice.release_notes.promise_label': 'Обещание',
+  'system_notice.release_notes.promise_lead': 'TREK остаётся бесплатным навсегда.',
+  'system_notice.release_notes.promise_text':
+    'Все функции и все обновления, для всех. Никаких платных тарифов, никаких подписок, никаких подвохов.',
+  'system_notice.release_notes.note_body_after':
+    'А потом его открыли вы. За несколько месяцев вас стали тысячи: звёзды, отчёты об ошибках, переводы на языки, которыми я не владею, пул-реквесты от людей, с которыми я ни разу не встречался. Я до сих пор каждое утро первым делом заглядываю в репозиторий, и мне всё ещё не до конца верится, что это происходит.',
+  'system_notice.release_notes.note_closing': 'Спасибо, что вы здесь. Ваш Maurice.',
+  'system_notice.release_notes.support_lead':
+    'TREK бесплатен и таким останется, а вот серверы, домены и бесконечные поздние вечера бесплатными не бывают.',
+  'system_notice.release_notes.support_text':
+    'Если TREK заслужил место в ваших поездках, угостите меня кофе и помогите выпустить следующий релиз.',
+  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+  'system_notice.release_notes.cta_kofi': 'Поддержать на Ko-fi',
+  'system_notice.release_notes.feature_docsync_title': 'Синхронизация документов',
+  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud и Synology Drive. Документы поездки идут в обе стороны с хранилищем, которое у вас уже есть.',
 };
 export default system_notice;

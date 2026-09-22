@@ -1,16 +1,29 @@
 import bcrypt from 'bcryptjs';
 import Database from 'better-sqlite3';
+import { readEnv } from '../app-config';
+import { DEMO_PASS } from '../nest/common/demo';
+// Static like in demo-reset.job.ts: the module top is inert, everything that
+// touches the database happens inside the functions.
+import { saveBaseline, hasBaseline } from './demo-reset';
 
 function seedDemoData(db: Database.Database): { adminId: number; demoId: number } {
-  const ADMIN_USER = process.env.DEMO_ADMIN_USER || 'admin';
-  const ADMIN_EMAIL = process.env.DEMO_ADMIN_EMAIL || 'admin@trek.app';
-  const ADMIN_PASS = process.env.DEMO_ADMIN_PASS || 'admin12345';
+  const ADMIN_USER = readEnv().demo.adminUser;
+  const ADMIN_EMAIL = readEnv().demo.adminEmailRaw || 'admin@trek.app';
+  const ADMIN_PASS = readEnv().demo.adminPass;
   const DEMO_EMAIL = 'demo@trek.app';
-  const DEMO_PASS = 'demo12345';
 
   // Create admin user if not exists
   let admin = db.prepare('SELECT id FROM users WHERE email = ?').get(ADMIN_EMAIL) as { id: number } | undefined;
   if (!admin) {
+    if (!readEnv().demo.adminPassSet) {
+      // The default is published in the docs and in this file, so an operator who
+      // never set DEMO_ADMIN_PASS is handing out an admin account. Say so loudly;
+      // changing the default would lock out every existing demo instance.
+      console.warn(
+        `[Demo] SECURITY: DEMO_ADMIN_PASS is not set. The admin account ${ADMIN_EMAIL} is being created ` +
+          'with the public default password. Set DEMO_ADMIN_PASS before exposing this instance.',
+      );
+    }
     const hash = bcrypt.hashSync(ADMIN_PASS, 10);
     const r = db.prepare('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)').run(ADMIN_USER, ADMIN_EMAIL, hash, 'admin');
     admin = { id: Number(r.lastInsertRowid) };
@@ -45,7 +58,6 @@ function seedDemoData(db: Database.Database): { adminId: number; demoId: number 
   seedExampleTrips(db, admin.id, demo.id);
 
   // Auto-save baseline after first seed
-  const { saveBaseline, hasBaseline } = require('./demo-reset');
   if (!hasBaseline()) {
     saveBaseline();
   }
@@ -145,9 +157,11 @@ function seedExampleTrips(db: Database.Database, adminId: number, demoId: number
   insertBudget.run(t1, 'Food', 'Daily food budget', 52500, 2, 'Approx. 7,500 JPY/day');
   insertBudget.run(t1, 'Activities', 'Temple entries & experiences', 18000, 2, null);
 
-  // Reservations
-  insertReservation.run(t1, t1days[0], 'Hotel Shinjuku Check-in', '15:00', 'SG-2026-78432', 'confirmed', 'hotel', 'Shinjuku, Tokyo');
-  insertReservation.run(t1, t1days[3], 'Shinkansen Tokyo → Kyoto', '08:30', 'JR-NOZOMI-445', 'confirmed', 'transport', 'Tokyo Station');
+  // Reservations. reservation_time carries the full date, the way the booking
+  // form writes it: a bare clock time is a different shape, and readers that
+  // compare the column against a timestamp cannot tell the two apart (#1934).
+  insertReservation.run(t1, t1days[0], 'Hotel Shinjuku Check-in', '2026-04-15T15:00', 'SG-2026-78432', 'confirmed', 'hotel', 'Shinjuku, Tokyo');
+  insertReservation.run(t1, t1days[3], 'Shinkansen Tokyo → Kyoto', '2026-04-18T08:30', 'JR-NOZOMI-445', 'confirmed', 'transport', 'Tokyo Station');
 
   insertMember.run(t1, demoId, adminId);
 
@@ -201,7 +215,7 @@ function seedExampleTrips(db: Database.Database, adminId: number, demoId: number
   insertBudget.run(t2, 'Food', 'Restaurants & tapas', 300, 2, 'Approx. 75 EUR/day');
   insertBudget.run(t2, 'Activities', 'Sagrada Familia + Park Guell + Casa Batllo', 95, 2, 'Online tickets');
 
-  insertReservation.run(t2, t2days[1], 'Sagrada Familia Entry', '10:00', 'SF-2026-11234', 'confirmed', 'activity', 'Eixample, Barcelona');
+  insertReservation.run(t2, t2days[1], 'Sagrada Familia Entry', '2026-05-22T10:00', 'SF-2026-11234', 'confirmed', 'activity', 'Eixample, Barcelona');
 
   insertMember.run(t2, demoId, adminId);
 
@@ -267,9 +281,9 @@ function seedExampleTrips(db: Database.Database, adminId: number, demoId: number
   insertBudget.run(t3, 'Activities', 'Statue of Liberty + Empire State + Top of the Rock + Met', 180, 2, 'CityPASS');
   insertBudget.run(t3, 'Entertainment', 'Broadway show tickets', 300, 2, 'Hamilton or Wicked');
 
-  insertReservation.run(t3, t3days[0], 'The Plaza Hotel Check-in', '15:00', 'PZ-2026-55891', 'confirmed', 'hotel', '768 5th Ave, New York');
-  insertReservation.run(t3, t3days[0], 'Broadway Show', '20:00', 'BW-HAM-2026-1192', 'pending', 'activity', 'Richard Rodgers Theatre');
-  insertReservation.run(t3, t3days[1], 'Statue of Liberty Ferry', '08:30', 'SOL-2026-3347', 'confirmed', 'transport', 'Battery Park');
+  insertReservation.run(t3, t3days[0], 'The Plaza Hotel Check-in', '2026-09-18T15:00', 'PZ-2026-55891', 'confirmed', 'hotel', '768 5th Ave, New York');
+  insertReservation.run(t3, t3days[0], 'Broadway Show', '2026-09-18T20:00', 'BW-HAM-2026-1192', 'pending', 'activity', 'Richard Rodgers Theatre');
+  insertReservation.run(t3, t3days[1], 'Statue of Liberty Ferry', '2026-09-19T08:30', 'SOL-2026-3347', 'confirmed', 'transport', 'Battery Park');
 
   insertMember.run(t3, demoId, adminId);
 

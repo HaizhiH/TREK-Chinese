@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { Public } from '../auth/public.decorator';
 import {
   getWikiIndex,
   getWikiPage,
@@ -8,14 +9,15 @@ import {
   WikiNotFound,
   type WikiPage,
   type WikiNavSection,
-} from '../../services/wikiService';
+} from './wiki';
 
 /**
  * /api/help — embedded TREK wiki, served from the `wiki/` directory that ships
- * with the app (see wikiService for the GitHub fallback). Content is public docs,
+ * with the app (see wiki.ts for the GitHub fallback). Content is public docs,
  * so these endpoints are unauthenticated; that also lets <img> tags load the
  * proxied assets without sending credentials.
  */
+@Public('help assets are loaded by <img> and <a>, which cannot send credentials')
 @Controller('api/help')
 export class HelpController {
   @Get('index')

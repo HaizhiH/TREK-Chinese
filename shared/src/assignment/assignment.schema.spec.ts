@@ -1,10 +1,20 @@
 import {
   assignmentCreateRequestSchema,
+  assignmentEndDayRequestSchema,
   assignmentMoveRequestSchema,
   assignmentParticipantsRequestSchema,
+  assignmentTransportRequestSchema,
 } from './assignment.schema';
 
 import { describe, it, expect } from 'vitest';
+
+it('requires a boolean for an explicit day end', () => {
+  expect(assignmentEndDayRequestSchema.parse({ end_day: true })).toEqual({ end_day: true });
+  expect(assignmentEndDayRequestSchema.parse({ end_day: false })).toEqual({ end_day: false });
+  for (const end_day of [1, 'true', null, undefined]) {
+    expect(assignmentEndDayRequestSchema.safeParse({ end_day }).success).toBe(false);
+  }
+});
 
 describe('assignmentCreateRequestSchema', () => {
   it('requires a place_id; notes optional/nullable', () => {
@@ -15,10 +25,21 @@ describe('assignmentCreateRequestSchema', () => {
 });
 
 describe('assignmentMoveRequestSchema', () => {
-  it('requires new_day_id; order_index optional', () => {
+  it('requires new_day_id; order_index optional/nullable', () => {
     expect(assignmentMoveRequestSchema.safeParse({ new_day_id: 4 }).success).toBe(true);
     expect(assignmentMoveRequestSchema.safeParse({ new_day_id: 4, order_index: 0 }).success).toBe(true);
+    // The client api sends `order_index: null` when no insert position is given.
+    expect(assignmentMoveRequestSchema.safeParse({ new_day_id: 4, order_index: null }).success).toBe(true);
     expect(assignmentMoveRequestSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('assignmentTransportRequestSchema', () => {
+  it('accepts a mode, an explicit null, and an absent key (legacy `?? null`)', () => {
+    expect(assignmentTransportRequestSchema.safeParse({ transport_mode: 'cycling' }).success).toBe(true);
+    expect(assignmentTransportRequestSchema.safeParse({ transport_mode: null }).success).toBe(true);
+    expect(assignmentTransportRequestSchema.safeParse({}).success).toBe(true);
+    expect(assignmentTransportRequestSchema.safeParse({ transport_mode: 5 }).success).toBe(false);
   });
 });
 

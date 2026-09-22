@@ -48,22 +48,21 @@ vi.mock('../../src/config', () => ({
 }));
 vi.mock('../../src/websocket', () => ({ broadcast: vi.fn(), broadcastToUser: vi.fn() }));
 
-// Partially mock collabService to make fetchLinkPreview controllable
-vi.mock('../../src/services/collabService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/services/collabService')>();
-  return {
-    ...actual,
-    fetchLinkPreview: vi.fn().mockResolvedValue({ title: null, description: null, image: null, url: '' }),
-  };
-});
-
 import { buildApp } from '../../src/bootstrap';
 import { createTables } from '../../src/db/schema';
 import { runMigrations } from '../../src/db/migrations';
 import { resetTestDb, resetRateLimits } from '../helpers/test-db';
 import { createUser, createTrip, addTripMember } from '../helpers/factories';
 import { authCookie, generateToken } from '../helpers/auth';
-import * as collabService from '../../src/services/collabService';
+import { CollabService } from '../../src/nest/collab/collab.service';
+
+// Spy on the DI-native service's linkPreview so the SSRF-guarded fetch never
+// runs; the rest of CollabService exercises its real SQL through the container.
+// The original is kept so the guard cases below can put it back for one call —
+// mockRestore would drop the spy for every test declared after them.
+const realLinkPreview = CollabService.prototype.linkPreview;
+const linkPreviewSpy = vi.spyOn(CollabService.prototype, 'linkPreview')
+  .mockResolvedValue({ title: null, description: null, image: null, url: '' });
 
 let nestApp: INestApplication;
 let app: Application;
@@ -266,6 +265,81 @@ describe('Collab notes', () => {
       .set('Cookie', authCookie(user.id));
     expect(del.status).toBe(200);
     expect(del.body.success).toBe(true);
+  });
+
+  it('COLLAB-P01 — attachment filename is stored bare (category + name; no files/ prefix)', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const create = await request(app)
+      .post(`/api/trips/${trip.id}/collab/notes`)
+      .set('Cookie', authCookie(user.id))
+      .send({ title: 'Bare name' });
+    const noteId = create.body.note.id;
+
+    const upload = await request(app)
+      .post(`/api/trips/${trip.id}/collab/notes/${noteId}/files`)
+      .set('Cookie', authCookie(user.id))
+      .attach('file', FIXTURE_PDF);
+    expect(upload.status).toBe(201);
+
+    const list = await request(app)
+      .get(`/api/trips/${trip.id}/collab/notes`)
+      .set('Cookie', authCookie(user.id));
+    const note = list.body.notes.find((n: any) => n.id === noteId);
+    expect(note.attachments[0].filename).toMatch(/^[0-9a-f-]{36}\.pdf$/);
+    expect(note.attachments[0].url).toMatch(/^\/api\/trips\/\d+\/files\/\d+\/download$/);
+    // The bytes live in uploads/files under the bare name.
+    expect(fs.existsSync(path.join(uploadsDir, note.attachments[0].filename))).toBe(true);
+  });
+
+  it('COLLAB-P02 — deleting a note file removes its bytes from uploads/files', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const create = await request(app)
+      .post(`/api/trips/${trip.id}/collab/notes`)
+      .set('Cookie', authCookie(user.id))
+      .send({ title: 'Delete file bytes' });
+    const noteId = create.body.note.id;
+
+    const upload = await request(app)
+      .post(`/api/trips/${trip.id}/collab/notes/${noteId}/files`)
+      .set('Cookie', authCookie(user.id))
+      .attach('file', FIXTURE_PDF);
+    const fileId = upload.body.file.id;
+    const diskName = path.basename(upload.body.file.filename);
+    expect(fs.existsSync(path.join(uploadsDir, diskName))).toBe(true);
+
+    const del = await request(app)
+      .delete(`/api/trips/${trip.id}/collab/notes/${noteId}/files/${fileId}`)
+      .set('Cookie', authCookie(user.id));
+    expect(del.status).toBe(200);
+    expect(fs.existsSync(path.join(uploadsDir, diskName))).toBe(false);
+  });
+
+  it('COLLAB-P03 — deleting a note removes its attachments’ bytes from uploads/files', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const create = await request(app)
+      .post(`/api/trips/${trip.id}/collab/notes`)
+      .set('Cookie', authCookie(user.id))
+      .send({ title: 'Delete note bytes' });
+    const noteId = create.body.note.id;
+
+    const upload = await request(app)
+      .post(`/api/trips/${trip.id}/collab/notes/${noteId}/files`)
+      .set('Cookie', authCookie(user.id))
+      .attach('file', FIXTURE_PDF);
+    const diskName = path.basename(upload.body.file.filename);
+    expect(fs.existsSync(path.join(uploadsDir, diskName))).toBe(true);
+
+    const del = await request(app)
+      .delete(`/api/trips/${trip.id}/collab/notes/${noteId}`)
+      .set('Cookie', authCookie(user.id));
+    expect(del.status).toBe(200);
+    expect(fs.existsSync(path.join(uploadsDir, diskName))).toBe(false);
   });
 
   it('COLLAB-028 — uploaded note file URL uses authenticated download path, not /uploads/', async () => {
@@ -666,11 +740,26 @@ describe('Collab validation', () => {
       .send({ question: 'Only one option?', options: ['Option A'] });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/2 options/i);
+    // The Zod pipe's standard envelope replaced the bespoke 'At least 2 options
+    // are required' string when the collab bodies adopted DTOs.
+    expect(res.body.error).toMatch(/options/i);
   });
 });
 
 describe('Link preview', () => {
+  it('COLLAB-025 — GET /collab/link-preview as a non-member returns 404 (trip-access check added post-migration)', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: outsider } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/collab/link-preview?url=https://example.com`)
+      .set('Cookie', authCookie(outsider.id));
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Trip not found' });
+  });
+
   it('COLLAB-025 — GET /collab/link-preview without url returns 400', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
@@ -687,7 +776,7 @@ describe('Link preview', () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
 
-    vi.mocked(collabService.fetchLinkPreview).mockResolvedValueOnce({
+    linkPreviewSpy.mockResolvedValueOnce({
       title: 'Example Domain',
       description: 'A test page',
       image: null,
@@ -706,7 +795,7 @@ describe('Link preview', () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
 
-    vi.mocked(collabService.fetchLinkPreview).mockResolvedValueOnce({
+    linkPreviewSpy.mockResolvedValueOnce({
       title: null,
       description: null,
       image: null,
@@ -722,11 +811,36 @@ describe('Link preview', () => {
     expect(res.body.error).toBeDefined();
   });
 
+  // Every case above mocks linkPreview out, so the SSRF guard, the redirect
+  // refusal and the pinned dispatcher are unproven over HTTP: swapping
+  // checkSsrf(url, true) for checkSsrf(url) would leave this file green. These
+  // two put the real implementation back for one call each. No traffic leaves
+  // the machine — the guard refuses both targets before any fetch.
+  it.each([
+    ['loopback', 'http://127.0.0.1:9/'],
+    // The unspecified address routes to loopback when connected to, and used to
+    // pass the guard: it is not '::1', and it does not start with '0.'.
+    ['the unspecified address', 'http://[::]:9/'],
+  ])('COLLAB-032 — GET /collab/link-preview refuses %s (%s) through the real guard', async (_label, url) => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    linkPreviewSpy.mockImplementationOnce(realLinkPreview);
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/collab/link-preview?url=${encodeURIComponent(url)}`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(400);
+    // One constant reason. The guard knows three, and telling them apart would
+    // map out the internal DNS of the server one guessed hostname at a time.
+    expect(res.body).toEqual({ error: 'URL not allowed' });
+  });
+
   it('COLLAB-027 — GET /collab/link-preview catches thrown errors and returns fallback', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
 
-    vi.mocked(collabService.fetchLinkPreview).mockRejectedValueOnce(new Error('Unexpected error'));
+    linkPreviewSpy.mockRejectedValueOnce(new Error('Unexpected error'));
 
     const res = await request(app)
       .get(`/api/trips/${trip.id}/collab/link-preview?url=https://example.com`)

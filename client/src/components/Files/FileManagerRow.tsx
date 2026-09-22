@@ -34,10 +34,13 @@ export function FileRow(p: FileManagerState & { file: TripFile; isTrash?: boolea
       className="group"
     >
       {/* Icon or thumbnail */}
-      <div
+      <button
+        type="button"
+        disabled={isTrash}
+        aria-label={file.original_name}
         onClick={() => !isTrash && openFile(file)}
         style={{
-          flexShrink: 0, width: 36, height: 36, borderRadius: 8,
+          flexShrink: 0, width: 36, height: 36, borderRadius: 8, padding: 0,
           background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: isTrash ? 'default' : 'pointer', overflow: 'hidden',
         }}
@@ -48,13 +51,13 @@ export function FileRow(p: FileManagerState & { file: TripFile; isTrash?: boolea
               const ext = (file.original_name || '').split('.').pop()?.toUpperCase() || '?'
               const isPdf = file.mime_type === 'application/pdf'
               return (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', background: isPdf ? '#ef44441a' : 'var(--bg-tertiary)' }}>
+                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', background: isPdf ? '#ef44441a' : 'var(--bg-tertiary)' }}>
                   <span style={{ fontSize: 'calc(9px * var(--fs-scale-caption, 1))', fontWeight: 700, color: isPdf ? '#ef4444' : 'var(--text-muted)', letterSpacing: 0.3 }}>{ext}</span>
-                </div>
+                </span>
               )
             })()
         }
-      </div>
+      </button>
 
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -63,12 +66,14 @@ export function FileRow(p: FileManagerState & { file: TripFile; isTrash?: boolea
             <AvatarChip name={file.uploaded_by_name} avatarUrl={file.uploaded_by_avatar} size={20} />
           )}
           {!isTrash && file.starred ? <Star size={12} fill="#facc15" color="#facc15" style={{ flexShrink: 0 }} /> : null}
-          <span
+          <button
+            type="button"
+            disabled={isTrash}
             onClick={() => !isTrash && openFile(file)}
-            style={{ fontWeight: 500, fontSize: 'calc(13px * var(--fs-scale-body, 1))', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: isTrash ? 'default' : 'pointer' }}
+            style={{ fontWeight: 500, fontSize: 'calc(13px * var(--fs-scale-body, 1))', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: isTrash ? 'default' : 'pointer', textAlign: 'left', minWidth: 0 }}
           >
             {file.original_name}
-          </span>
+          </button>
         </div>
 
         {file.description && (
@@ -76,7 +81,7 @@ export function FileRow(p: FileManagerState & { file: TripFile; isTrash?: boolea
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-          {file.file_size && <span style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)' }}>{formatSize(file.file_size)}</span>}
+          {!!file.file_size && <span style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)' }}>{formatSize(file.file_size)}</span>}
           <span style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)' }}>{formatDateWithLocale(file.created_at, locale)}</span>
 
           {linkedPlaces.map(p => (
@@ -87,7 +92,7 @@ export function FileRow(p: FileManagerState & { file: TripFile; isTrash?: boolea
               ? <SourceBadge key={r.id} icon={transportIcon(r.type)} label={`${t('files.sourceTransport')} · ${r.title || t('files.sourceTransport')}`} />
               : <SourceBadge key={r.id} icon={Ticket} label={`${t('files.sourceBooking')} · ${r.title || t('files.sourceBooking')}`} />
           ))}
-          {file.note_id && (
+          {!!file.note_id && (
             <SourceBadge icon={StickyNote} label={t('files.sourceCollab') || 'Collab Notes'} />
           )}
         </div>
@@ -97,34 +102,34 @@ export function FileRow(p: FileManagerState & { file: TripFile; isTrash?: boolea
       <div className="file-actions" style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
         {isTrash ? (
           <>
-            {can('file_delete', trip) && <button onClick={() => handleRestore(file.id)} title={t('files.restore') || 'Restore'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
+            {can('file_delete', trip) && <button type="button" onClick={() => handleRestore(file.id)} title={t('files.restore') || 'Restore'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = '#22c55e'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               <RotateCcw size={14} />
             </button>}
-            {can('file_delete', trip) && <button onClick={() => handlePermanentDelete(file.id)} title={t('common.delete')} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
+            {can('file_delete', trip) && <button type="button" onClick={() => handlePermanentDelete(file.id)} title={t('common.delete')} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = '#ef4444'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               <Trash2 size={14} />
             </button>}
           </>
         ) : (
           <>
-            <button onClick={() => handleStar(file.id)} title={file.starred ? t('files.unstar') || 'Unstar' : t('files.star') || 'Star'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: file.starred ? '#facc15' : 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
+            <button type="button" onClick={() => handleStar(file.id)} title={file.starred ? t('files.unstar') || 'Unstar' : t('files.star') || 'Star'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: file.starred ? '#facc15' : 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
               onMouseEnter={e => { if (!file.starred) e.currentTarget.style.color = '#facc15' }} onMouseLeave={e => { if (!file.starred) e.currentTarget.style.color = 'var(--text-faint)' }}>
               <Star size={14} fill={file.starred ? '#facc15' : 'none'} />
             </button>
-            {can('file_edit', trip) && <button onClick={() => setAssignFileId(file.id)} title={t('files.assign') || 'Assign'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
+            {can('file_edit', trip) && <button type="button" onClick={() => setAssignFileId(file.id)} title={t('files.assign') || 'Assign'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               <Pencil size={14} />
             </button>}
-            <button onClick={() => openFile(file)} title={t('common.open')} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
+            <button type="button" onClick={() => openFile(file)} title={t('common.open')} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               <ExternalLink size={14} />
             </button>
-            <button onClick={() => triggerDownload(file.url, file.original_name)} title={t('files.download') || 'Download'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
+            <button type="button" onClick={() => triggerDownload(file.url, file.original_name)} title={t('files.download') || 'Download'} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               <Download size={14} />
             </button>
-            {can('file_delete', trip) && <button onClick={() => handleDelete(file.id)} title={t('common.delete')} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
+            {can('file_delete', trip) && <button type="button" onClick={() => handleDelete(file.id)} title={t('common.delete')} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', borderRadius: 6, display: 'flex' }}
               onMouseEnter={e => e.currentTarget.style.color = '#ef4444'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
               <Trash2 size={14} />
             </button>}

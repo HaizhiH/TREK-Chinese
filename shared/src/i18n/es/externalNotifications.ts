@@ -28,6 +28,10 @@ const es: NotificationLocale = {
       title: 'Invitación Vacay Fusion',
       body: `${p.actor} te invitó a fusionar planes de vacaciones. Abre TREK para aceptar o rechazar.`,
     }),
+    vacay_share: (p) => ({
+      title: 'Calendario Vacay compartido',
+      body: `${p.actor} compartió su calendario de vacaciones contigo. Abre TREK para verlo.`,
+    }),
     collection_invite: (p) => ({
       title: 'Invitación a colección',
       body: `${p.actor} te invitó a compartir una colección. Abre TREK para aceptar o rechazar.`,
@@ -47,6 +51,12 @@ const es: NotificationLocale = {
     version_available: (p) => ({
       title: 'Nueva versión de TREK disponible',
       body: `TREK ${p.version} ya está disponible. Visita el panel de administración para actualizar.`,
+    }),
+    replica_failure: (p) => ({
+      title: 'Fallo de réplica de almacenamiento',
+      body:
+        `Error al escribir en la réplica '${p.backend}': ${p.op} de ${p.key} — ${p.error}.` +
+        (p.suppressed !== '0' ? ` Se suprimieron ${p.suppressed} errores más desde la última notificación.` : ''),
     }),
     synology_session_cleared: () => ({
       title: 'Sesión de Synology cerrada',

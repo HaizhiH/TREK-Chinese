@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react'
-import ReactDOM from 'react-dom'
+import { useState, useMemo, useEffect, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { useTripStore } from '../../store/tripStore'
 import { useCanDo } from '../../store/permissionsStore'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -8,20 +8,26 @@ import { useTranslation } from '../../i18n'
 import {
   Plane, Hotel, Utensils, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, Ticket, FileText, MapPin,
   Calendar, Hash, CheckCircle2, Circle, Pencil, Trash2, Plus, ChevronDown, ChevronRight, Users,
-  ExternalLink, BookMarked, Lightbulb, Link2, Clock, ArrowRight, AlertCircle, Download,
-  TramFront, Footprints, StickyNote,
+  ExternalLink, Lightbulb, Link2, Clock, ArrowRight, AlertCircle, Download,
+  TramFront, Footprints, StickyNote, ParkingSquare,
 } from 'lucide-react'
 import { openFile } from '../../utils/fileDownload'
+import { safeExternalHref } from '../../utils/safeUrl'
 import { TransitTitle, TransitLegChips, TransitMetaBadges, fmtTransitDuration } from './transitDisplay'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import { markdownLinkComponents } from '../shared/markdownLink'
 import type { Reservation, Day, TripFile, AssignmentsMap } from '../../types'
 import type { ViewContribution } from '../../api/client'
 import { usePluginViewContributions, PluginCardFooter } from '../Plugins/PluginContributions'
 import { usePluginStore, type ActivePlugin } from '../../store/pluginStore'
 import PluginFrame from '../Plugins/PluginFrame'
-import { splitReservationDateTime, formatTime } from '../../utils/formatters'
+import { splitReservationDateTime, formatTime, cleanAmountText } from '../../utils/formatters'
+import { getFlightLegs, getTrainLegs } from '../../utils/flightLegs'
+import EmptyState from '../shared/EmptyState'
+import { TravelerAvatarRow, TravelerFilterAvatars } from './TravelerPicker'
+import type { TripMember } from '../Budget/BudgetPanelMemberChips'
 
 interface AssignmentLookupEntry {
   dayNumber: number
@@ -47,6 +53,7 @@ const TYPE_OPTIONS = [
   { value: 'transport_other', labelKey: 'reservations.type.transport_other', Icon: Route, color: '#6b7280' },
   { value: 'event',       labelKey: 'reservations.type.event',       Icon: Ticket, color: '#f59e0b' },
   { value: 'tour',        labelKey: 'reservations.type.tour',        Icon: Users, color: '#10b981' },
+  { value: 'parking',     labelKey: 'reservations.type.parking',     Icon: ParkingSquare, color: '#2563eb' },
   { value: 'other',       labelKey: 'reservations.type.other',       Icon: FileText, color: '#6b7280' },
 ]
 
@@ -70,6 +77,35 @@ function buildAssignmentLookup(days, assignments) {
 const fieldLabelClass = 'text-[10px] font-semibold uppercase tracking-[0.08em] text-content-faint mb-[5px]'
 const fieldValueClass = 'text-[13px] font-medium text-content px-[10px] py-[8px] bg-surface-tertiary rounded-[10px]'
 
+// A booking code is only a control while the blur setting is on: then it lifts on
+// hover and toggles on click or Enter. With blurring off it is plain text, so it
+// stays a plain element instead of a button that can never do anything.
+function ConfirmationCode({ code, blurred, revealed, onReveal }: {
+  code: React.ReactNode
+  blurred: boolean
+  revealed: boolean
+  onReveal: (next: boolean | ((v: boolean) => boolean)) => void
+}) {
+  const codeStyle: CSSProperties = {
+    fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace', fontSize: 'calc(12.5px * var(--fs-scale-body, 1))',
+    filter: blurred && !revealed ? 'blur(5px)' : 'none',
+    transition: 'filter 0.2s',
+  }
+  if (!blurred) return <div className={`${fieldValueClass} text-center`} style={{ ...codeStyle, cursor: 'default' }}>{code}</div>
+  return (
+    <button
+      type="button"
+      className={`${fieldValueClass} text-center`}
+      style={{ ...codeStyle, cursor: 'pointer', width: '100%' }}
+      onMouseEnter={() => onReveal(true)}
+      onMouseLeave={() => onReveal(false)}
+      onClick={() => onReveal(v => !v)}
+    >
+      {code}
+    </button>
+  )
+}
+
 interface ReservationCardProps {
   r: Reservation
   tripId: number
@@ -86,7 +122,6 @@ interface ReservationCardProps {
 }
 
 function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateToFiles, assignmentLookup, canEdit, days = [], contributions = [], detailPlugins = [] }: ReservationCardProps) {
-  const { toggleReservationStatus } = useTripStore()
   const toast = useToast()
   const { t, locale } = useTranslation()
   const timeFormat = useSettingsStore(s => s.settings.time_format) || '24h'
@@ -95,14 +130,28 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
   const typeInfo = getType(r.type)
   const TypeIcon = typeInfo.Icon
   const confirmed = r.status === 'confirmed'
+  // A multi-leg AirTrail import is detached from sync *by design* — AirTrail has
+  // no single flight to round-trip a layover chain to, so it's created with
+  // sync_enabled=0 (#1535). Distinguish it from a flight that was removed
+  // upstream so the badge doesn't falsely claim it "was removed in AirTrail" (#1646).
+  // Mirror the server's hasLocalMultiLegShape (airtrailSync.ts): a metadata legs
+  // array of length > 1, OR — for a flight grown into multiple legs locally, which
+  // carries no legs array — more than two endpoints. Both are detached, not removed.
+  const airtrailMultiLeg = r.external_source === 'airtrail' && !r.sync_enabled && (() => {
+    try {
+      const m = typeof r.metadata === 'string' ? JSON.parse(r.metadata || '{}') : (r.metadata || {})
+      if (Array.isArray(m?.legs) && m.legs.length > 1) return true
+    } catch { /* malformed metadata — fall through to the endpoint count */ }
+    return (r.endpoints || []).length > 2
+  })()
   const attachedFiles = files.filter(f => f.reservation_id === r.id || (f.linked_reservation_ids || []).includes(r.id))
   const linked = r.assignment_id ? assignmentLookup[r.assignment_id] : null
+  // A booking link is deliberately free-form - people paste bare hosts and long
+  // provider deep links - so this refuses the schemes that execute in this
+  // origin and leaves everything else linkable.
+  const bookingUrl = safeExternalHref(r.url)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-  const handleToggle = async () => {
-    try { await toggleReservationStatus(tripId, r.id) }
-    catch { toast.error(t('reservations.toast.updateError')) }
-  }
   const handleDelete = async () => {
     setShowDeleteConfirm(false)
     try { await onDelete(r.id) } catch { toast.error(t('reservations.toast.deleteError')) }
@@ -194,12 +243,12 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
           ) : null}
           {r.external_source === 'airtrail' ? (
             <span
-              className={r.sync_enabled ? 'text-[#2563eb] bg-[rgba(59,130,246,0.12)]' : 'text-content-faint bg-surface-tertiary'}
+              className={r.sync_enabled || airtrailMultiLeg ? 'text-[#2563eb] bg-[rgba(59,130,246,0.12)]' : 'text-content-faint bg-surface-tertiary'}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600, padding: '3px 8px', borderRadius: 6 }}
-              title={r.sync_enabled ? t('reservations.airtrail.syncedHint') : t('reservations.airtrail.notSyncedHint')}
+              title={r.sync_enabled ? t('reservations.airtrail.syncedHint') : airtrailMultiLeg ? t('reservations.airtrail.layoverHint') : t('reservations.airtrail.notSyncedHint')}
             >
               <Plane size={11} />
-              {r.sync_enabled ? t('reservations.airtrail.synced') : t('reservations.airtrail.notSynced')}
+              {r.sync_enabled || airtrailMultiLeg ? t('reservations.airtrail.synced') : t('reservations.airtrail.notSynced')}
             </span>
           ) : null}
         </div>
@@ -209,7 +258,7 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
             maxWidth: 140, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>{r.title}</span>
           {canEdit && (
-            <button onClick={() => onEdit(r)} title={t('common.edit')} className="bg-transparent text-content-faint" style={{
+            <button type="button" onClick={() => onEdit(r)} title={t('common.edit')} className="bg-transparent text-content-faint" style={{
               appearance: 'none', border: 'none',
               width: 26, height: 26, borderRadius: 6, display: 'grid', placeItems: 'center',
               cursor: 'pointer', flexShrink: 0,
@@ -220,7 +269,7 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
             </button>
           )}
           {canEdit && (
-            <button onClick={() => setShowDeleteConfirm(true)} title={t('common.delete')} className="bg-transparent text-content-faint" style={{
+            <button type="button" onClick={() => setShowDeleteConfirm(true)} title={t('common.delete')} className="bg-transparent text-content-faint" style={{
               appearance: 'none', border: 'none',
               width: 26, height: 26, borderRadius: 6, display: 'grid', placeItems: 'center',
               cursor: 'pointer', flexShrink: 0,
@@ -278,20 +327,7 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
         {hasCode && (
           <div>
             <div className={fieldLabelClass}>{t('reservations.confirmationCode')}</div>
-            <div
-              onMouseEnter={() => blurCodes && setCodeRevealed(true)}
-              onMouseLeave={() => blurCodes && setCodeRevealed(false)}
-              onClick={() => blurCodes && setCodeRevealed(v => !v)}
-              className={`${fieldValueClass} text-center`}
-              style={{
-                fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace', fontSize: 'calc(12.5px * var(--fs-scale-body, 1))',
-                filter: blurCodes && !codeRevealed ? 'blur(5px)' : 'none',
-                cursor: blurCodes ? 'pointer' : 'default',
-                transition: 'filter 0.2s',
-              }}
-            >
-              {r.confirmation_number}
-            </div>
+            <ConfirmationCode code={r.confirmation_number} blurred={!!blurCodes} revealed={codeRevealed} onReveal={setCodeRevealed} />
           </div>
         )}
 
@@ -315,6 +351,28 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
           )
         })()}
 
+        {/* Per-segment booking codes (#1943). A stopover booking can carry its own
+            reference per leg, and the cell above only ever shows the booking's own.
+            The reveal is shared with that cell on purpose: uncovering the codes is
+            one gesture per card, not one per segment. */}
+        {(() => {
+          if (r.type !== 'flight' && r.type !== 'train') return null
+          const legs = r.type === 'flight' ? getFlightLegs(r) : getTrainLegs(r)
+          if (legs.length < 2) return null
+          const coded = legs.filter(l => l.confirmation_number)
+          if (coded.length === 0) return null
+          return (
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: coded.length > 1 ? `repeat(${Math.min(coded.length, 3)}, 1fr)` : '1fr' }}>
+              {coded.map((l, i) => (
+                <div key={i}>
+                  <div className={fieldLabelClass}>{[l.from, l.to].filter(Boolean).join(' → ') || t('reservations.confirmationCode')}</div>
+                  <ConfirmationCode code={l.confirmation_number} blurred={!!blurCodes} revealed={codeRevealed} onReveal={setCodeRevealed} />
+                </div>
+              ))}
+            </div>
+          )
+        })()}
+
         {/* Type-specific metadata */}
         {(() => {
           const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata || '{}') : (r.metadata || {})
@@ -328,7 +386,7 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
           if (meta.train_number) cells.push({ label: t('reservations.meta.trainNumber'), value: meta.train_number })
           if (meta.platform) cells.push({ label: t('reservations.meta.platform'), value: meta.platform })
           if (meta.seat) cells.push({ label: t('reservations.meta.seat'), value: meta.seat + (meta.class ? ` · ${meta.class}` : '') })
-          if (meta.price != null && meta.price !== '') cells.push({ label: t('reservations.price'), value: `${meta.price}${meta.priceCurrency ? ' ' + meta.priceCurrency : ''}` })
+          if (meta.price != null && meta.price !== '') cells.push({ label: t('reservations.price'), value: `${cleanAmountText(meta.price)}${meta.priceCurrency ? ' ' + meta.priceCurrency : ''}` })
           if (meta.check_in_time) cells.push({ label: t('reservations.meta.checkIn'), value: formatTime(meta.check_in_time, locale, timeFormat) + (meta.check_in_end_time ? ` – ${formatTime(meta.check_in_end_time, locale, timeFormat)}` : '') })
           if (meta.check_out_time) cells.push({ label: t('reservations.meta.checkOut'), value: formatTime(meta.check_out_time, locale, timeFormat) })
           if (cells.length === 0) return null
@@ -382,8 +440,12 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
             <div className={fieldLabelClass}>{t('reservations.urlLabel')}</div>
             <div className={fieldValueClass} style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 400 }}>
               <ExternalLink size={13} className="text-content-faint" style={{ flexShrink: 0 }} />
-              <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline"
-                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</a>
+              {bookingUrl ? (
+                <a href={bookingUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline"
+                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookingUrl}</a>
+              ) : (
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</span>
+              )}
             </div>
           </div>
         )}
@@ -393,7 +455,7 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
           <div>
             <div className={fieldLabelClass}>{t('reservations.notes')}</div>
             <div className={`collab-note-md ${fieldValueClass}`} style={{ fontWeight: 400, lineHeight: 1.5, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{r.notes}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{r.notes}</Markdown>
             </div>
           </div>
         )}
@@ -404,11 +466,20 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
             <div className={fieldLabelClass}>{t('files.title')}</div>
             <div className={fieldValueClass} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 10px' }}>
               {attachedFiles.map(f => (
-                <a key={f.id} href="#" onClick={(e) => { e.preventDefault(); openFile(f.url).catch(() => {}) }} style={{ display: 'flex', alignItems: 'center', gap: 5, textDecoration: 'none', cursor: 'pointer' }}>
+                <button key={f.id} type="button" onClick={() => { openFile(f.url).catch(() => {}) }} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left', fontFamily: 'inherit' }}>
                   <FileText size={11} className="text-content-faint" style={{ flexShrink: 0 }} />
                   <span style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: 'var(--text-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_name}</span>
-                </a>
+                </button>
               ))}
+            </div>
+          </div>
+        )}
+        {/* Travelers assigned to this booking — read-only; assignment lives in the edit/create modal (#1517). */}
+        {r.travelers && r.travelers.length > 0 && (
+          <div>
+            <div className={fieldLabelClass}>{t('reservations.travelers.label')}</div>
+            <div className={fieldValueClass}>
+              <TravelerAvatarRow travelers={r.travelers} />
             </div>
           </div>
         )}
@@ -421,20 +492,20 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 14px 14px' }}>
           {detailPlugins.map(p => (
             <div key={p.id} className="bg-surface-hover" style={{ borderRadius: 10, overflow: 'hidden' }}>
-              <PluginFrame pluginId={p.id} tripId={String(tripId)} reservationId={String(r.id)} title={p.name} />
+              <PluginFrame pluginId={p.id} tripId={String(tripId)} reservationId={String(r.id)} title={p.name} surface="detail-slot" />
             </div>
           ))}
         </div>
       )}
 
       {/* Delete confirmation */}
-      {showDeleteConfirm && ReactDOM.createPortal(
-        <div className="bg-[rgba(0,0,0,0.3)]" style={{
+      {showDeleteConfirm && createPortal(
+        <div className="bg-[rgba(0,0,0,0.3)]" role="presentation" style={{
           position: 'fixed', inset: 0, zIndex: 1000,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           backdropFilter: 'blur(3px)',
         }} onClick={() => setShowDeleteConfirm(false)}>
-          <div className="bg-surface-card" style={{
+          <div className="bg-surface-card" role="presentation" style={{
             width: 340, borderRadius: 16,
             boxShadow: '0 16px 48px rgba(0,0,0,0.22)', padding: '22px 22px 18px',
             display: 'flex', flexDirection: 'column', gap: 12,
@@ -454,11 +525,11 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
               {t('reservations.confirm.deleteBody', { name: r.title })}
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button onClick={() => setShowDeleteConfirm(false)} className="text-content-muted" style={{
+              <button type="button" onClick={() => setShowDeleteConfirm(false)} className="text-content-muted" style={{
                 fontSize: 'calc(12px * var(--fs-scale-body, 1))', background: 'none', border: '1px solid var(--border-primary)',
                 borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontFamily: 'inherit',
               }}>{t('common.cancel')}</button>
-              <button onClick={handleDelete} className="bg-[#ef4444] text-white" style={{
+              <button type="button" onClick={handleDelete} className="bg-[#ef4444] text-white" style={{
                 fontSize: 'calc(12px * var(--fs-scale-body, 1))',
                 border: 'none', borderRadius: 8, padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit',
               }}>{t('common.confirm')}</button>
@@ -493,7 +564,7 @@ function Section({ title, count, children, defaultOpen = true, accent, storageKe
   }, [open, storageKey])
   return (
     <div style={{ marginBottom: 28 }}>
-      <button onClick={() => setOpen(o => !o)} style={{
+      <button type="button" onClick={() => setOpen(o => !o)} style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
         background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', marginBottom: 12, fontFamily: 'inherit',
         userSelect: 'none',
@@ -542,6 +613,12 @@ function TransitJourneyCard({ r, days, onOpen, onDelete, canEdit, tripId, contri
     <div
       className="bg-surface-card"
       onClick={() => onOpen(r)}
+      role="button"
+      // No press-scale on the card — it would shift the nested controls out
+      // from under the pointer mid-click (#2158).
+      data-no-press
+      tabIndex={0}
+      onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen(r) } }}
       style={{ borderRadius: 12, border: '1px solid rgba(124,58,237,0.22)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9, cursor: 'pointer', transition: 'box-shadow 0.15s ease' }}
       onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)'}
       onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
@@ -564,7 +641,7 @@ function TransitJourneyCard({ r, days, onOpen, onDelete, canEdit, tripId, contri
           </div>
         </div>
         {canEdit && (
-          <button
+          <button type="button"
             onClick={e => { e.stopPropagation(); setConfirmOpen(true) }}
             title={t('common.delete')}
             className="bg-transparent text-content-faint"
@@ -589,26 +666,31 @@ function TransitJourneyCard({ r, days, onOpen, onDelete, canEdit, tripId, contri
           </span>
         </div>
       )}
+      {r.travelers && r.travelers.length > 0 && (
+        <div style={{ paddingLeft: 44 }} role="presentation" onClick={e => e.stopPropagation()}>
+          <TravelerAvatarRow travelers={r.travelers} />
+        </div>
+      )}
       <PluginCardFooter items={contributions} tripId={tripId} />
       {/* Reservation-detail plugin slots: sandboxed, scoped to this journey. The
           card itself is clickable, so keep frame interactions from opening it. */}
       {detailPlugins.length > 0 && (
-        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div role="presentation" onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {detailPlugins.map(p => (
             <div key={p.id} className="bg-surface-hover" style={{ borderRadius: 10, overflow: 'hidden' }}>
-              <PluginFrame pluginId={p.id} tripId={String(tripId)} reservationId={String(r.id)} title={p.name} />
+              <PluginFrame pluginId={p.id} tripId={String(tripId)} reservationId={String(r.id)} title={p.name} surface="detail-slot" />
             </div>
           ))}
         </div>
       )}
-      {confirmOpen && ReactDOM.createPortal(
-        <div className="bg-[rgba(0,0,0,0.35)]" style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { e.stopPropagation(); setConfirmOpen(false) }}>
-          <div className="bg-surface-card" style={{ borderRadius: 14, padding: 20, width: 340, boxShadow: '0 16px 48px rgba(0,0,0,0.22)' }} onClick={e => e.stopPropagation()}>
+      {confirmOpen && createPortal(
+        <div className="bg-[rgba(0,0,0,0.35)]" role="presentation" style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { e.stopPropagation(); setConfirmOpen(false) }}>
+          <div className="bg-surface-card" role="presentation" style={{ borderRadius: 14, padding: 20, width: 340, boxShadow: '0 16px 48px rgba(0,0,0,0.22)' }} onClick={e => e.stopPropagation()}>
             <div className="text-content" style={{ fontWeight: 600, fontSize: 'calc(14px * var(--fs-scale-body, 1))', marginBottom: 6 }}>{t('reservations.confirm.deleteTitle')}</div>
             <div className="text-content-muted" style={{ fontSize: 'calc(12.5px * var(--fs-scale-body, 1))', marginBottom: 14 }}>{t('reservations.confirm.deleteBody', { name: r.title })}</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button onClick={e => { e.stopPropagation(); setConfirmOpen(false) }} className="text-content-muted" style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit' }}>{t('common.cancel')}</button>
-              <button onClick={e => { e.stopPropagation(); setConfirmOpen(false); onDelete(r.id) }} style={{ padding: '7px 14px', borderRadius: 9, border: 'none', background: '#ef4444', color: '#fff', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{t('common.delete')}</button>
+              <button type="button" onClick={e => { e.stopPropagation(); setConfirmOpen(false) }} className="text-content-muted" style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit' }}>{t('common.cancel')}</button>
+              <button type="button" onClick={e => { e.stopPropagation(); setConfirmOpen(false); onDelete(r.id) }} style={{ padding: '7px 14px', borderRadius: 9, border: 'none', background: '#ef4444', color: '#fff', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{t('common.delete')}</button>
             </div>
           </div>
         </div>,
@@ -637,9 +719,19 @@ interface ReservationsPanelProps {
   /** Which plugin view this panel represents — the transports tab is its own
    * contribution view, the bookings tab stays 'reservations'. */
   contributionView?: 'reservations' | 'transports'
+  /** Trip members + guests, forwarded to each card's traveler picker (#1517). */
+  tripMembers?: TripMember[]
 }
 
-export default function ReservationsPanel({ tripId, reservations, days, assignments, files = [], onAdd, onImport, bookingImportAvailable, onAirTrailImport, airTrailAvailable, onEdit, onDelete, onNavigateToFiles, titleKey = 'reservations.title', addManualKey = 'reservations.addManual', contributionView = 'reservations' }: ReservationsPanelProps) {
+/** The empty state's call-to-action buttons — same shape as the toolbar's. */
+const CTA_STYLE: CSSProperties = {
+  appearance: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '9px 14px', borderRadius: 10,
+  fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500,
+}
+
+export default function ReservationsPanel({ tripId, reservations, days, assignments, files = [], onAdd, onImport, bookingImportAvailable, onAirTrailImport, airTrailAvailable, onEdit, onDelete, onNavigateToFiles, titleKey = 'reservations.title', addManualKey = 'reservations.addManual', contributionView = 'reservations', tripMembers = [] }: ReservationsPanelProps) {
   const { t, locale } = useTranslation()
   const can = useCanDo()
   const trip = useTripStore((s) => s.trip)
@@ -669,11 +761,31 @@ export default function ReservationsPanel({ tripId, reservations, days, assignme
     })
   }
 
+  // Filter by assigned traveler (#1517, #1557), persisted alongside the type filter.
+  const [travelerFilters, setTravelerFilters] = useState<Set<number>>(() => {
+    try {
+      const saved = sessionStorage.getItem(`${storageKey}-travelers`)
+      return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>()
+    } catch { return new Set<number>() }
+  })
+  const toggleTravelerFilter = (userId: number) => {
+    setTravelerFilters(prev => {
+      const next = new Set(prev)
+      if (next.has(userId)) next.delete(userId); else next.add(userId)
+      sessionStorage.setItem(`${storageKey}-travelers`, JSON.stringify([...next]))
+      return next
+    })
+  }
+
   const assignmentLookup = useMemo(() => buildAssignmentLookup(days, assignments), [days, assignments])
 
-  const filtered = useMemo(() =>
-    typeFilters.size === 0 ? reservations : reservations.filter(r => typeFilters.has(r.type)),
-  [reservations, typeFilters])
+  const filtered = useMemo(() => {
+    let list = typeFilters.size === 0 ? reservations : reservations.filter(r => typeFilters.has(r.type))
+    if (travelerFilters.size > 0) {
+      list = list.filter(r => (r.travelers || []).some(tv => travelerFilters.has(tv.user_id)))
+    }
+    return list
+  }, [reservations, typeFilters, travelerFilters])
 
   // Chronological order (#1507): day-linked transports often carry no date in
   // reservation_time, so resolve each entry to an effective departure datetime —
@@ -734,7 +846,7 @@ export default function ReservationsPanel({ tripId, reservations, days, assignme
             <>
               <div className="hidden md:block" style={{ width: 1, height: 22, background: 'var(--border-faint)', flexShrink: 0 }} />
               <div className="hidden md:inline-flex" style={{ gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
-                <button
+                <button type="button"
                   onClick={() => { setTypeFilters(new Set()); sessionStorage.removeItem(storageKey) }}
                   className={typeFilters.size === 0 ? 'bg-surface-card text-content' : 'bg-transparent text-content-muted'}
                   style={{
@@ -756,7 +868,7 @@ export default function ReservationsPanel({ tripId, reservations, days, assignme
                   const active = typeFilters.has(opt.value)
                   const Icon = opt.Icon
                   return (
-                    <button
+                    <button type="button"
                       key={opt.value}
                       onClick={() => toggleTypeFilter(opt.value)}
                       className={active ? 'bg-surface-card text-content' : 'bg-transparent text-content-muted'}
@@ -782,10 +894,18 @@ export default function ReservationsPanel({ tripId, reservations, days, assignme
             </>
           )}
 
+          {/* Filter by traveler — members/guests assigned to bookings (#1517/#1557). */}
+          {tripMembers.length > 1 && reservations.some(r => (r.travelers || []).length > 0) && (
+            <>
+              <div className="hidden md:block" style={{ width: 1, height: 22, background: 'var(--border-faint)', flexShrink: 0 }} />
+              <TravelerFilterAvatars members={tripMembers} active={travelerFilters} onToggle={toggleTravelerFilter} label={t('reservations.travelers.label')} />
+            </>
+          )}
+
           {canEdit && (
             <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
               {onImport && bookingImportAvailable && (
-                <button onClick={onImport} className="bg-surface-card text-content" style={{
+                <button type="button" onClick={onImport} className="bg-surface-card text-content" style={{
                   appearance: 'none', border: '1px solid var(--border-primary)', cursor: 'pointer', fontFamily: 'inherit',
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   padding: '8px 13px', borderRadius: 10, fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500,
@@ -800,7 +920,7 @@ export default function ReservationsPanel({ tripId, reservations, days, assignme
                 </button>
               )}
               {onAirTrailImport && airTrailAvailable && (
-                <button onClick={onAirTrailImport} className="bg-surface-secondary text-content" style={{
+                <button type="button" onClick={onAirTrailImport} className="bg-surface-secondary text-content" style={{
                   appearance: 'none', border: '1px solid var(--border-primary)', cursor: 'pointer', fontFamily: 'inherit',
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   padding: '8px 14px', borderRadius: 10, fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, boxSizing: 'border-box',
@@ -814,7 +934,7 @@ export default function ReservationsPanel({ tripId, reservations, days, assignme
                   <span className="hidden sm:inline">{t('reservations.airtrail.cta')}</span>
                 </button>
               )}
-              <button onClick={onAdd} className="bg-accent text-accent-text" style={{
+              <button type="button" onClick={onAdd} className="bg-accent text-accent-text" style={{
                 appearance: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 padding: '9px 14px', borderRadius: 10, fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500,
@@ -834,11 +954,32 @@ export default function ReservationsPanel({ tripId, reservations, days, assignme
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px 80px' }} className="max-md:!px-4 max-md:!pt-4">
         {total === 0 && reservations.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-            <BookMarked size={36} className="text-content-faint" style={{ display: 'block', margin: '0 auto 12px' }} />
-            <p className="text-content-secondary" style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 600, margin: '0 0 4px' }}>{t('reservations.empty')}</p>
-            <p className="text-content-faint" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', margin: 0 }}>{t('reservations.emptyHint')}</p>
-          </div>
+          <EmptyState
+            scene={contributionView === 'transports' ? 'transport' : 'bookings'}
+            title={t('reservations.empty')}
+            // On a fresh trip the toolbar controls sit far right above an empty
+            // page, so the import in particular went unnoticed (#2007).
+            action={canEdit ? (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                <button type="button" onClick={onAdd} className="bg-accent text-accent-text" style={CTA_STYLE}>
+                  <Plus size={14} strokeWidth={2} />
+                  {t(addManualKey)}
+                </button>
+                {onImport && bookingImportAvailable && (
+                  <button type="button" onClick={onImport} className="bg-surface-card text-content" style={{ ...CTA_STYLE, border: '1px solid var(--border-primary)' }}>
+                    <Download size={14} strokeWidth={2} />
+                    {t('reservations.import.cta')}
+                  </button>
+                )}
+                {onAirTrailImport && airTrailAvailable && (
+                  <button type="button" onClick={onAirTrailImport} className="bg-surface-secondary text-content" style={{ ...CTA_STYLE, border: '1px solid var(--border-primary)' }}>
+                    <Plane size={14} strokeWidth={2} />
+                    {t('reservations.airtrail.cta')}
+                  </button>
+                )}
+              </div>
+            ) : undefined}
+          />
         ) : total === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px' }}>
             <p className="text-content-faint" style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))' }}>{t('places.noneFound')}</p>

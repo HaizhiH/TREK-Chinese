@@ -1,10 +1,12 @@
 import React from 'react'
-import { Trash2, Reply, ChevronUp, MessageCircle } from 'lucide-react'
+import { Trash2, Reply, ChevronUp } from 'lucide-react'
 import { URL_REGEX } from './CollabChat.constants'
 import { formatTime, formatDateSeparator, shouldShowDateSeparator } from './CollabChat.helpers'
 import { MessageText } from './CollabChatMessageText'
+import { CollabChatAttachment } from './CollabChatAttachment'
 import { LinkPreview } from './CollabChatLinkPreview'
 import { ReactionBadge } from './CollabChatReactionBadge'
+import EmptyState from '../shared/EmptyState'
 
 export function ChatMessages(props: any) {
   const { currentUser, tripId, t, is12h, can, trip, canEdit, messages, setMessages, loading, setLoading, hasMore, setHasMore, loadingMore, setLoadingMore, text, setText, replyTo, setReplyTo, hoveredId, setHoveredId, sending, setSending, showEmoji, setShowEmoji, reactMenu, setReactMenu, deletingIds, setDeletingIds, deleteTimersRef, containerRef, messagesRef, scrollRef, textareaRef, emojiBtnRef, isAtBottom, scrollToBottom, checkAtBottom, handleLoadMore, handleTextChange, handleSend, handleKeyDown, handleDelete, handleReact, handleEmojiSelect, isOwn, isEmojiOnly } = props
@@ -12,11 +14,10 @@ export function ChatMessages(props: any) {
     <>
       {/* Messages */}
       {messages.length === 0 ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--text-faint)', padding: 32, textAlign: 'center' }}>
-          <MessageCircle size={40} strokeWidth={1.2} style={{ opacity: 0.4 }} />
-          <span style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 600 }}>{t('collab.chat.empty')}</span>
-          <span style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', opacity: 0.6, fontFamily: 'var(--font-subtext)' }}>{t('collab.chat.emptyDesc') || ''}</span>
-        </div>
+        // flex-1, like the message list it stands in for: without it the empty
+        // state was only as tall as its own content and the composer rode up to
+        // sit right under the mascot, with the rest of the panel left blank.
+        <EmptyState scene="chat" title={t('collab.chat.empty')} className="min-h-0 flex-1" />
       ) : (
         <div ref={scrollRef} onScroll={checkAtBottom} className="chat-scroll" style={{
           flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 14px 4px', WebkitOverflowScrolling: 'touch',
@@ -24,7 +25,7 @@ export function ChatMessages(props: any) {
         }}>
           {hasMore && (
             <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0 10px' }}>
-              <button onClick={handleLoadMore} disabled={loadingMore} style={{
+              <button type="button" onClick={handleLoadMore} disabled={loadingMore} style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600,
                 color: 'var(--text-muted)', background: 'var(--bg-secondary)', border: '1px solid var(--border-faint)',
                 borderRadius: 99, padding: '5px 14px', cursor: 'pointer', fontFamily: 'inherit',
@@ -166,6 +167,7 @@ export function ChatMessages(props: any) {
                           {hasReply ? (
                             <div style={{ padding: '0 10px 4px' }}><MessageText text={msg.text} /></div>
                           ) : <MessageText text={msg.text} />}
+                          {msg.attachments?.map((attachment: any) => <CollabChatAttachment key={attachment.id} attachment={attachment} />)}
                           {(msg.text.match(URL_REGEX) || []).slice(0, 1).map(url => (
                             <LinkPreview key={url} url={url} tripId={tripId} own={own} onLoad={() => { if (isAtBottom.current) setTimeout(() => scrollToBottom('smooth'), 50) }} />
                           ))}
@@ -181,7 +183,7 @@ export function ChatMessages(props: any) {
                         transition: 'opacity .1s',
                         ...(own ? { left: -6 } : { right: -6 }),
                       }}>
-                        <button onClick={() => setReplyTo(msg)} title={t('collab.chat.reply')} style={{
+                        <button type="button" onClick={() => setReplyTo(msg)} title={t('collab.chat.reply')} style={{
                           width: 24, height: 24, borderRadius: '50%', border: 'none',
                           background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'pointer', color: 'var(--accent-text)', padding: 0,
@@ -193,7 +195,7 @@ export function ChatMessages(props: any) {
                           <Reply size={11} />
                         </button>
                         {own && canEdit && (
-                          <button onClick={() => handleDelete(msg.id)} title={t('common.delete')} style={{
+                          <button type="button" onClick={() => handleDelete(msg.id)} title={t('common.delete')} style={{
                             width: 24, height: 24, borderRadius: '50%', border: 'none',
                             background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             cursor: 'pointer', color: 'var(--accent-text)', padding: 0,
@@ -221,12 +223,9 @@ export function ChatMessages(props: any) {
                           borderRadius: 99, background: 'var(--bg-card)',
                           boxShadow: '0 1px 6px rgba(0,0,0,0.12)', border: '1px solid var(--border-faint)',
                         }}>
-                          {msg.reactions.map(r => {
-                            const myReaction = r.users.some(u => String(u.user_id) === String(currentUser.id))
-                            return (
-                              <ReactionBadge key={r.emoji} reaction={r} currentUserId={currentUser.id} onReact={() => { if (canEdit) handleReact(msg.id, r.emoji) }} />
-                            )
-                          })}
+                          {msg.reactions.map(r => (
+                            <ReactionBadge key={r.emoji} reaction={r} currentUserId={currentUser.id} onReact={() => { if (canEdit) handleReact(msg.id, r.emoji) }} />
+                          ))}
                         </div>
                       </div>
                     )}

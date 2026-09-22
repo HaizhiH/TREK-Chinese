@@ -133,6 +133,57 @@ describe('Upload file', () => {
     }
   });
 
+  it('FILE-P01 — stored filename is a bare uuid name and the bytes land in uploads/files', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const res = await uploadFile(trip.id, user.id, FIXTURE_PDF);
+    expect(res.status).toBe(201);
+    expect(res.body.file.filename).toMatch(/^[0-9a-f-]{36}\.pdf$/);
+    expect(fs.existsSync(path.join(uploadsDir, res.body.file.filename))).toBe(true);
+    // Nothing left behind in the spool after a successful commit.
+    const spoolDir = path.join(__dirname, '../../uploads/.tmp');
+    if (fs.existsSync(spoolDir)) {
+      expect(fs.readdirSync(spoolDir)).not.toContain(res.body.file.filename);
+    }
+  });
+
+  it('FILE-P02 — non-video over 50 MB is rejected with no bytes left anywhere', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const BIG = 51 * 1024 * 1024;
+    // Other suites share the real uploads/ tree when the whole tier runs in
+    // parallel, so the residue checks key on this upload's unique size rather
+    // than comparing whole-directory listings.
+    const bigFilesIn = (dir: string) =>
+      fs.existsSync(dir)
+        ? fs.readdirSync(dir).filter((f) => {
+            try { return fs.statSync(path.join(dir, f)).size === BIG; } catch { return false; }
+          })
+        : [];
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/files`)
+      .set('Cookie', authCookie(user.id))
+      .attach('file', Buffer.alloc(BIG), { filename: 'big.pdf', contentType: 'application/pdf' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('File is too large');
+    expect(bigFilesIn(uploadsDir)).toEqual([]);
+    expect(bigFilesIn(path.join(__dirname, '../../uploads/.tmp'))).toEqual([]);
+  });
+
+  it('FILE-P03 — non-ASCII original filenames are preserved (defParamCharset utf8)', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/files`)
+      .set('Cookie', authCookie(user.id))
+      .attach('file', Buffer.from('utf8 name test'), { filename: 'résumé.pdf', contentType: 'application/pdf' });
+    expect(res.status).toBe(201);
+    expect(res.body.file.original_name).toBe('résumé.pdf');
+  });
+
   it('FILE-021 — non-member cannot upload file', async () => {
     const { user: owner } = createUser(testDb);
     const { user: other } = createUser(testDb);
@@ -513,5 +564,65 @@ describe('File download', () => {
       .get(`/api/trips/${trip.id}/files/${fileId}/download`)
       .set('Cookie', `trek_session=${token}`);
     expect(dl.status).toBe(200);
+  });
+
+  it('FILE-P04 — download serves the exact bytes with Content-Type, ETag, and Range support', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const upload = await uploadFile(trip.id, user.id, FIXTURE_PDF);
+    const fileId = upload.body.file.id;
+    const fixtureBytes = fs.readFileSync(FIXTURE_PDF);
+
+    const dl = await request(app)
+      .get(`/api/trips/${trip.id}/files/${fileId}/download`)
+      .set('Cookie', authCookie(user.id));
+    expect(dl.status).toBe(200);
+    expect(dl.headers['content-type']).toBe('application/pdf');
+    expect(dl.headers.etag).toMatch(/^W\/"[0-9a-f]+-[0-9a-f]+"$/);
+    expect(Buffer.from(dl.body).equals(fixtureBytes)).toBe(true);
+
+    const ranged = await request(app)
+      .get(`/api/trips/${trip.id}/files/${fileId}/download`)
+      .set('Cookie', authCookie(user.id))
+      .set('Range', 'bytes=0-3');
+    expect(ranged.status).toBe(206);
+    expect(ranged.headers['content-range']).toBe(`bytes 0-3/${fixtureBytes.length}`);
+  });
+
+  it('FILE-P05 — Apple Wallet passes are served inline with the canonical MIME types', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    for (const [ext, mime] of [
+      ['pkpass', 'application/vnd.apple.pkpass'],
+      ['pkpasses', 'application/vnd.apple.pkpasses'],
+    ] as const) {
+      const upload = await request(app)
+        .post(`/api/trips/${trip.id}/files`)
+        .set('Cookie', authCookie(user.id))
+        .attach('file', Buffer.from('PK-wallet-bytes'), `pass.${ext}`);
+      expect(upload.status).toBe(201);
+
+      const dl = await request(app)
+        .get(`/api/trips/${trip.id}/files/${upload.body.file.id}/download`)
+        .set('Cookie', authCookie(user.id));
+      expect(dl.status).toBe(200);
+      expect(dl.headers['content-type']).toBe(mime);
+      expect(dl.headers['content-disposition']).toBe(`inline; filename="pass.${ext}"`);
+    }
+  });
+
+  it('FILE-P06 — a DB row whose bytes are gone answers 404 File not found', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const upload = await uploadFile(trip.id, user.id, FIXTURE_PDF);
+    const fileId = upload.body.file.id;
+    fs.rmSync(path.join(uploadsDir, upload.body.file.filename), { force: true });
+
+    const dl = await request(app)
+      .get(`/api/trips/${trip.id}/files/${fileId}/download`)
+      .set('Cookie', authCookie(user.id));
+    expect(dl.status).toBe(404);
+    expect(dl.body).toEqual({ error: 'File not found' });
   });
 });

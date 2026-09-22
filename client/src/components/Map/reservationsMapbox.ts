@@ -7,16 +7,20 @@
 // renderers produce the same visual result on the globe or a flat projection.
 
 import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderIconMarkup } from '../../utils/iconMarkup'
 import type mapboxgl from 'mapbox-gl'
 import { Plane, Train, Ship, Car, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront } from 'lucide-react'
 import { getTransitMapSegments } from './transitGeometry'
 import { geodesicArcs } from './flightGeodesy'
+import { cleanEndpointName } from './reservationName'
+import { hopIsVisible, labelFloorPx } from '../../utils/reservationRoutes'
 import { escapeHtml } from '@trek/shared'
 import type { Reservation, ReservationEndpoint } from '../../types'
 
 export const RESERVATION_SOURCE_ID = 'trek-reservations'
 export const RESERVATION_LINE_LAYER_ID = 'trek-reservations-lines'
+/** Sits under the coloured transit lines; named here so teardown can find it. */
+export const TRANSIT_CASING_LAYER_ID = `${RESERVATION_LINE_LAYER_ID}-transit-casing`
 
 export type TransportType = 'flight' | 'train' | 'cruise' | 'car' | 'bus' | 'taxi' | 'bicycle' | 'ferry' | 'transit' | 'transport_other'
 const TRANSPORT_TYPES: TransportType[] = ['flight', 'train', 'cruise', 'car', 'bus', 'taxi', 'bicycle', 'ferry', 'transit', 'transport_other']
@@ -51,6 +55,11 @@ function parseInTz(isoLocal: string, tz: string): number {
   const [y, mo, d] = datePart.split('-').map(Number)
   const [h, mi] = (timePart || '00:00').split(':').map(Number)
   const guess = Date.UTC(y, mo - 1, d, h, mi)
+  // A malformed date/time (e.g. an imported booking whose time is missing its
+  // minutes) makes Date.UTC NaN; bail before formatToParts, which throws on a
+  // non-finite date and would blank the whole trip. computeDuration's finiteness
+  // check then drops the duration cleanly.
+  if (!Number.isFinite(guess)) return Number.NaN
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: tz, hour12: false,
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -87,8 +96,6 @@ function computeDuration(from: ReservationEndpoint, to: ReservationEndpoint, fal
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-const cleanName = (name: string) => name.replace(/\s*\([^)]*\)/g, '').trim()
-
 // ── item building ─────────────────────────────────────────────────────────
 export interface TransportItem {
   res: Reservation
@@ -97,7 +104,9 @@ export interface TransportItem {
   waypoints: ReservationEndpoint[]
   type: TransportType
   arcs: [number, number][][]
-  primaryArc: [number, number][]
+  // Route ("VIE → LHR") and duration/distance line. Computed on every update but
+  // not drawn since the stats badge was dropped; computeDuration still guards the
+  // non-finite date that used to blank the trip (#1620).
   mainLabel: string | null
   subLabel: string | null
 }
@@ -131,8 +140,6 @@ export function buildReservationItems(reservations: Reservation[]): TransportIte
       arcs.push(...segArcs)
       distanceKm += haversineKm([a.lat, a.lng], [b.lat, b.lng])
     }
-    const primaryIdx = arcs.reduce((best, seg, idx, all) => seg.length > all[best].length ? idx : best, 0)
-    const primaryArc = arcs[primaryIdx] ?? []
     const duration = computeDuration(from, to, r.reservation_time || null, r.reservation_end_time || null)
     const distance = `${Math.round(distanceKm)} km`
     const mainLabel = waypoints.every(w => w.code)
@@ -140,7 +147,7 @@ export function buildReservationItems(reservations: Reservation[]): TransportIte
       : (from.code && to.code ? `${from.code} → ${to.code}` : null)
     const subParts = [duration, distance].filter(Boolean) as string[]
     const subLabel = subParts.length > 0 ? subParts.join(' · ') : null
-    out.push({ res: r, from, to, waypoints, type, arcs, primaryArc, mainLabel, subLabel })
+    out.push({ res: r, from, to, waypoints, type, arcs, mainLabel, subLabel })
   }
   return out
 }
@@ -148,7 +155,7 @@ export function buildReservationItems(reservations: Reservation[]): TransportIte
 // ── DOM helpers for HTML markers ──────────────────────────────────────────
 function endpointMarkerHtml(type: TransportType, label: string | null): string {
   const { icon: IconCmp } = TYPE_META[type]
-  const svg = renderToStaticMarkup(createElement(IconCmp, { size: 13, color: 'white', strokeWidth: 2.5 }))
+  const svg = renderIconMarkup(createElement(IconCmp, { size: 13, color: 'white', strokeWidth: 2.5 }))
   const labelHtml = label ? `<span style="display:inline-flex;align-items:center;line-height:1">${escapeHtml(label)}</span>` : ''
   return `<div style="
     display:inline-flex;align-items:center;justify-content:center;gap:4px;
@@ -160,32 +167,11 @@ function endpointMarkerHtml(type: TransportType, label: string | null): string {
   "><span style="display:inline-flex;align-items:center;">${svg}</span>${labelHtml}</div>`
 }
 
-function buildStatsHtml(mainLabel: string | null, subLabel: string | null): { html: string; width: number; height: number } {
-  const estWidth = Math.max(
-    mainLabel ? mainLabel.length * 6.5 : 0,
-    subLabel ? subLabel.length * 5.5 : 0,
-  ) + 22
-  const hasBoth = !!mainLabel && !!subLabel
-  const height = hasBoth ? 36 : 22
-  const main = mainLabel ? `<span style="font-size:12px;font-weight:700;line-height:1;display:block">${escapeHtml(mainLabel)}</span>` : ''
-  const sub = subLabel ? `<span style="font-size:10px;font-weight:500;line-height:1;opacity:0.85;display:block${hasBoth ? ';margin-top:4px' : ''}">${escapeHtml(subLabel)}</span>` : ''
-  const html = `<div class="trek-stats-inner" style="
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    width:100%;height:100%;
-    padding:0 11px;border-radius:999px;
-    background:rgba(17,24,39,0.92);color:#fff;
-    box-shadow:0 2px 6px rgba(0,0,0,0.25);
-    border:1px solid ${TRANSPORT_COLOR}aa;
-    font-family:var(--font-system);
-    white-space:nowrap;box-sizing:border-box;pointer-events:none;
-    transform-origin:center;will-change:transform;
-  ">${main}${sub}</div>`
-  return { html, width: estWidth, height }
-}
-
 // ── overlay manager ──────────────────────────────────────────────────────
 export interface ReservationOverlayOptions {
   showConnections: boolean
+  // Accepted for call-site compatibility only: the floating route/duration badge
+  // on the arc is no longer drawn, so nothing is gated on this.
   showStats: boolean
   showEndpointLabels: boolean
   onEndpointClick?: (reservationId: number) => void
@@ -207,7 +193,6 @@ export class ReservationMapboxOverlay {
   private opts: ReservationOverlayOptions
   private MarkerCtor: MarkerConstructor
   private endpointMarkers: GlMarker[] = []
-  private statsMarkers: { marker: GlMarker; arc: [number, number][] }[] = []
   private rerender: () => void
   private destroyed = false
 
@@ -219,7 +204,6 @@ export class ReservationMapboxOverlay {
     this.setupLayer()
     map.on('zoomend', this.rerender)
     map.on('moveend', this.rerender)
-    map.on('render', this.updateStatsRotation)
   }
 
   update(reservations: Reservation[], opts: ReservationOverlayOptions, roadRoutes?: Map<number, [number, number][]>) {
@@ -233,13 +217,17 @@ export class ReservationMapboxOverlay {
     this.destroyed = true
     this.map.off('zoomend', this.rerender)
     this.map.off('moveend', this.rerender)
-    this.map.off('render', this.updateStatsRotation)
     this.endpointMarkers.forEach(m => m.remove())
     this.endpointMarkers = []
-    this.statsMarkers.forEach(s => s.marker.remove())
-    this.statsMarkers = []
     try {
-      if (this.map.getLayer(RESERVATION_LINE_LAYER_ID)) this.map.removeLayer(RESERVATION_LINE_LAYER_ID)
+      // Every layer before the source: the engine refuses to drop a source while
+      // anything still references it, and it reports that by firing an error event
+      // rather than throwing — so the catch below never saw it and the source was
+      // left behind. The casing layer arrived with the transit paths and was missed
+      // here, which is what made the console complain on every map teardown.
+      for (const id of [TRANSIT_CASING_LAYER_ID, RESERVATION_LINE_LAYER_ID]) {
+        if (this.map.getLayer(id)) this.map.removeLayer(id)
+      }
       if (this.map.getSource(RESERVATION_SOURCE_ID)) this.map.removeSource(RESERVATION_SOURCE_ID)
     } catch { /* map already gone */ }
   }
@@ -250,7 +238,7 @@ export class ReservationMapboxOverlay {
     map.addSource(RESERVATION_SOURCE_ID, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     // White casing under real transit paths so the colored lines read cleanly.
     map.addLayer({
-      id: RESERVATION_LINE_LAYER_ID + '-transit-casing',
+      id: TRANSIT_CASING_LAYER_ID,
       type: 'line',
       source: RESERVATION_SOURCE_ID,
       filter: ['all', ['==', ['get', 'transitPath'], true], ['!=', ['get', 'walk'], true]] as any,
@@ -272,27 +260,31 @@ export class ReservationMapboxOverlay {
     })
   }
 
+  /** What a hop will draw: the road it was routed along when there is one, else its arcs. */
+  private linesFor(item: TransportItem): [number, number][][] {
+    const road = this.roadRoutes.get(item.res.id)
+    return road && road.length >= 2 ? [road] : item.arcs
+  }
+
   private render() {
     const map = this.map
     if (!this.map.getSource(RESERVATION_SOURCE_ID)) return
 
     const show = this.opts.showConnections
 
-    // Visible filter: require the on-screen pixel distance between
-    // endpoints to exceed a type-specific minimum, same as the Leaflet
-    // overlay, so tiny no-op transport lines don't clutter the map.
+    // Visible filter: a hop draws once what it will draw is long enough on
+    // screen to be worth it, same as the Leaflet overlay, so tiny no-op
+    // transport lines don't clutter the map. Measured along the drawn line,
+    // not between the ends: a routed drive can cover half the screen while
+    // its endpoints sit close together (#2275).
+    const project = (p: readonly [number, number]) => map.project([p[1], p[0]])
     const visibleItems = show ? this.items.filter(item => {
       try {
         // A transit journey draws its real alignment, not a straight from->to line, so
         // don't let the endpoint-proximity declutter hide it when the map is zoomed out
         // (#1570). Mirrors the Leaflet overlay.
         if (item.type === 'transit' && getTransitMapSegments(item.res).length > 0) return true
-        const fromPx = map.project([item.from.lng, item.from.lat])
-        const toPx = map.project([item.to.lng, item.to.lat])
-        const dx = fromPx.x - toPx.x, dy = fromPx.y - toPx.y
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        const minPx = item.type === 'flight' ? 50 : item.type === 'cruise' ? 150 : item.type === 'car' ? 80 : 200
-        return dist >= minPx
+        return hopIsVisible(item.type, this.linesFor(item), project)
       } catch { return true }
     }) : []
 
@@ -306,8 +298,7 @@ export class ReservationMapboxOverlay {
           const toPx = map.project([item.to.lng, item.to.lat])
           const dx = fromPx.x - toPx.x, dy = fromPx.y - toPx.y
           const dist = Math.sqrt(dx * dx + dy * dy)
-          const minPx = item.type === 'flight' ? 50 : item.type === 'cruise' ? 300 : item.type === 'car' ? 150 : item.type === 'transit' ? 900 : 400
-          if (dist >= minPx) labelVisibleIds.add(item.res.id)
+          if (dist >= labelFloorPx(item.type)) labelVisibleIds.add(item.res.id)
         } catch { /* ignore */ }
       }
     }
@@ -333,9 +324,7 @@ export class ReservationMapboxOverlay {
         }))
       }
       // Prefer the real road route (car/bus/taxi/bicycle) over the straight arc.
-      const road = this.roadRoutes.get(item.res.id)
-      const lines = road && road.length >= 2 ? [road] : item.arcs
-      return lines.map(seg => ({
+      return this.linesFor(item).map(seg => ({
         type: 'Feature' as const,
         properties: {
           resId: item.res.id,
@@ -361,7 +350,7 @@ export class ReservationMapboxOverlay {
       for (const item of visibleItems) {
         const showLabel = this.opts.showEndpointLabels && labelVisibleIds.has(item.res.id)
         for (const ep of item.waypoints) {
-          const label = showLabel ? (ep.code || cleanName(ep.name)) : null
+          const label = showLabel ? (ep.code || cleanEndpointName(ep.name)) : null
           const el = document.createElement('div')
           el.innerHTML = endpointMarkerHtml(item.type, label)
           const inner = el.firstElementChild as HTMLElement | null
@@ -381,34 +370,7 @@ export class ReservationMapboxOverlay {
       }
     }
 
-    // Stats badge removed — the floating route/duration label on the arc is no
-    // longer drawn; only the connection line and the airport markers remain.
-    this.statsMarkers.forEach(s => s.marker.remove())
-    this.statsMarkers = []
-  }
-
-  // Match the Leaflet overlay's "rotate the label along the arc" look.
-  // We pick a short segment straddling the arc midpoint, measure the
-  // screen angle between those two projected points, and clamp it to
-  // [-90°, 90°] so text never renders upside-down.
-  private updateStatsRotation = () => {
-    if (this.destroyed) return
-    for (const entry of this.statsMarkers) {
-      const { marker, arc } = entry
-      if (arc.length < 2) continue
-      const midIdx = Math.floor(arc.length / 2)
-      const a = arc[Math.max(0, midIdx - 2)]!
-      const b = arc[Math.min(arc.length - 1, midIdx + 2)]!
-      try {
-        const pa = this.map.project([a[1], a[0]])
-        const pb = this.map.project([b[1], b[0]])
-        let angle = Math.atan2(pb.y - pa.y, pb.x - pa.x) * 180 / Math.PI
-        if (angle > 90) angle -= 180
-        if (angle < -90) angle += 180
-        const el = marker.getElement()
-        const inner = el.querySelector('.trek-stats-inner') as HTMLElement | null
-        if (inner) inner.style.transform = `rotate(${angle}deg)`
-      } catch { /* map not ready / projection failure */ }
-    }
+    // No stats badge: the floating route/duration label on the arc was removed,
+    // so a rendered overlay is the connection lines plus the airport markers.
   }
 }

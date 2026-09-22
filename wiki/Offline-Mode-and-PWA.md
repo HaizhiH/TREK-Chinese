@@ -18,6 +18,8 @@ TREK must be served over **HTTPS** — the install prompt does not appear on pla
 
 Once installed, TREK launches in **standalone** mode (fullscreen, no browser UI) using the TREK icon.
 
+The installed app starts at the app root, so the **Start page** setting decides what you see when you tap the icon — the dashboard, or straight into your active trip on a tab of your choice. See [Display-Settings](Display-Settings).
+
 ## What works offline
 
 TREK uses Workbox service-worker caching plus an IndexedDB database (Dexie) for structured trip data. The following content is available offline after the first sync:
@@ -26,20 +28,27 @@ TREK uses Workbox service-worker caching plus an IndexedDB database (Dexie) for 
 
 | Content | Cache name | Strategy | Duration | Max entries |
 |---------|------------|----------|----------|-------------|
-| CartoDB / OpenStreetMap map tiles | `map-tiles` | CacheFirst | 30 days | 1 000 |
-| API responses (trips, places, bookings, etc.) | `api-data` | NetworkFirst (5 s timeout) | 24 hours | 200 |
+| Raster map tiles (OpenStreetMap, CartoDB, custom XYZ) | `map-tiles` | CacheFirst | 30 days | 12 288 |
+| Mapbox GL and OpenFreeMap style documents | `gl-map-styles` | NetworkFirst (5 s timeout) | 30 days | 20 |
+| Mapbox GL glyphs, sprites and vector tiles | `mapbox-tiles` | StaleWhileRevalidate | 30 days | 3 000 |
+| OpenFreeMap glyphs, sprites and vector tiles | `gl-map-offline` | CacheFirst | 90 days | 6 000 |
 | Cover images and avatars (`/uploads/covers`, `/uploads/avatars`) | `user-uploads` | CacheFirst | 7 days | 300 |
-| App shell (HTML / JS / CSS) | precache | Precached | Until next deploy | — |
+| App shell and every page of the app (HTML / JS / CSS) | precache | Precached | Until next deploy | — |
 
-> **Note:** The API cache excludes sensitive endpoints — `/api/auth`, `/api/admin`, `/api/backup`, and `/api/settings` are always fetched from the network.
+> **Note:** API responses are **never** stored in the service-worker cache. Workbox keys its entries by URL and cannot vary them on the session cookie, so on a shared device one account's cached data could be served to the next. Offline reads come from the per-user IndexedDB cache described below instead.
+
+> **Note:** The precache covers every page, not just the one you happen to open first. A page you have never visited still works after you lose connectivity — at the cost of a larger initial install.
 
 **IndexedDB (Dexie) — structured trip data**
 
-On login, after each trip-list refresh, and on WebSocket reconnect, TREK runs a background sync that writes full trip bundles into IndexedDB:
+On login, when the browser comes back online, and when you lift **Force offline mode**, TREK runs a background sync that writes full trip bundles into IndexedDB — you can also start one by hand with **Re-sync now**, with **Download for offline use** for a progress-tracked run, or by re-enabling a trip's offline toggle:
 
 - Trips, days, places, packing items, to-dos, budget items, reservations, accommodations, trip members, tags, and categories.
-- Non-photo file attachments (PDFs, documents, etc.) are downloaded and stored as blobs in IndexedDB.
-- Map tiles are pre-fetched into the service-worker `map-tiles` cache for zoom levels 10–16 across each trip's bounding box (capped at ~50 MB of tiles per sync).
+- File attachments that are neither photos nor videos (PDFs, documents, etc.) are downloaded and stored as blobs in IndexedDB. Videos are deliberately skipped — a single clip can be hundreds of megabytes and would evict the trip's real documents.
+- Map tiles are pre-fetched into the service-worker `map-tiles` cache for zoom levels 0 to 16 across each trip's bounding box, stopping at the zoom level that would push the total past 12 288 tiles (roughly 180 MB). If the browser refused persistent storage, prefetching stops at zoom 12 so the app shell cannot be evicted.
+- The places around each trip, up to 3000 from the [TREK Places API](TREK-Places-API) in one request (about a megabyte for a city), so place search and suggestions still answer offline. They are downloaded whether or not **Store map tiles offline** is on, refreshed only when the trip's area changes, and removed with the trip. See [Searching offline](Places-and-Search#searching-offline).
+
+> **Note:** A WebSocket reconnect does *not* run this sync. It replays your queued changes and then re-reads the trip you currently have open — days, places, packing items, to-dos, budget items, reservations and files — which refreshes that one trip's cached rows. It never re-downloads the bundles for your other trips, the file blobs or the map tiles; skipping the full sync there is deliberate, so a dropped socket on an otherwise online device doesn't run into the server's rate limiter.
 
 **Sync scope and eviction**
 
@@ -73,13 +82,13 @@ The stats panel shows cached trips, pending changes, conflicts and failed change
 
 ## Limitations
 
-- Offline **editing** is supported for places and packing items (with conflict detection). Other entities — budget, to-dos, reservations, days — require connectivity to edit; while forced offline those edits still go to the live server when a connection is actually present.
+- Offline **editing** is supported for places and packing items (with conflict detection), plus a visit's start and end time, its **End the day here** flag and the road trip **Driving settings** (queued, without conflict detection). Other entities — budget, to-dos, reservations, days — require connectivity to edit; while forced offline those edits still go to the live server when a connection is actually present.
 - A change you made offline that **deletes** an item wins over a concurrent server edit of that same item ("delete wins"); only edit-vs-edit conflicts are surfaced for resolution.
 - The conflict token has one-second resolution, so two edits to the same field within the same second can't be told apart and fall back to last-write-wins (only relevant to sub-second races; normal offline windows are unaffected).
-- New trips created while offline are queued and synced when connectivity is restored.
-- Photo uploads require connectivity; non-photo file attachments are pre-cached automatically during sync.
+- Creating a trip requires connectivity. Trip creation is not queued, so a new trip cannot be started while offline.
+- Photo uploads require connectivity. Photo and video attachments are not pre-cached; every other file attachment is pre-cached automatically during sync.
 - Real-time collaboration features require an active WebSocket connection.
-- Mapbox GL / vector tiles are not pre-downloaded; raster (Leaflet) tiles are. With map-tile storage off, individually viewed tiles may still be cached opportunistically by the service worker.
+- The Leaflet basemap is pre-downloaded, whether it is an OpenFreeMap vector style (style, sprite, glyphs and the vector tiles for the trip's area) or a raster template. Mapbox GL tiles are not pre-downloaded. With map-tile storage off, individually viewed tiles may still be cached opportunistically by the service worker.
 
 ## See also
 

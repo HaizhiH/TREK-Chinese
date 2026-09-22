@@ -53,7 +53,7 @@ describe('CollabChat', () => {
 
   it('FE-COMP-CHAT-002: shows empty state when no messages', async () => {
     render(<CollabChat {...defaultProps} />);
-    await screen.findByText('Start the conversation');
+    expect(await screen.findByText('Start the conversation')).toBeInTheDocument();
   });
 
   it('FE-COMP-CHAT-003: shows message input placeholder', async () => {
@@ -85,7 +85,7 @@ describe('CollabChat', () => {
       )
     );
     render(<CollabChat {...defaultProps} />);
-    await screen.findByText('Hello world!');
+    expect(await screen.findByText('Hello world!')).toBeInTheDocument();
   });
 
   it('FE-COMP-CHAT-006: typing in input updates text field', async () => {
@@ -124,9 +124,13 @@ describe('CollabChat', () => {
     expect(screen.getByPlaceholderText('Type a message...')).toBeInTheDocument();
   });
 
-  it('FE-COMP-CHAT-009: shows hint text in empty state', async () => {
+  it('FE-COMP-CHAT-009: shows guidance in empty state', async () => {
     render(<CollabChat {...defaultProps} />);
-    await screen.findByText(/Share ideas, plans/i);
+    // The empty state now renders the shared EmptyState: a chat-scene mascot
+    // plus the single "Start the conversation" title (the separate hint
+    // paragraph was dropped in the mobile rewrite).
+    await screen.findByText('Start the conversation');
+    expect(document.querySelector('svg.trek--chat')).toBeInTheDocument();
   });
 
   it('FE-COMP-CHAT-010: chat container renders', () => {
@@ -595,7 +599,7 @@ describe('CollabChat', () => {
     await screen.findByText('New 100');
     const loadMoreBtn = screen.getByRole('button', { name: /load/i });
     await user.click(loadMoreBtn);
-    await screen.findByText('Older message');
+    expect(await screen.findByText('Older message')).toBeInTheDocument();
   });
 
   it('FE-COMP-CHAT-033: clicking delete on own message marks it as deleted', async () => {
@@ -703,5 +707,32 @@ describe('CollabChat', () => {
       () => expect(screen.getByText('Preview Title')).toBeInTheDocument(),
       { timeout: 3000 }
     );
+  });
+
+  // The strip shows the four pictures that will go out; the two the cap turned away
+  // vanish without a word otherwise, and the sender believes all six were sent.
+  it('FE-COMP-CHAT-037: picking more images than fit on one message says so, and says it once', async () => {
+    const addToast = vi.fn();
+    window.__addToast = addToast as unknown as typeof window.__addToast;
+    let minted = 0;
+    const createObjURL = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:mock/${++minted}`);
+    const revokeObjURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    try {
+      render(<CollabChat {...defaultProps} />);
+      await screen.findByText('Start the conversation');
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+      const files = Array.from({ length: 6 }, (_, i) => new File([new Uint8Array(8)], `${i}.png`, { type: 'image/png' }));
+
+      fireEvent.change(input, { target: { files } });
+
+      await waitFor(() => expect(document.querySelectorAll('img[src^="blob:mock/"]')).toHaveLength(4));
+      expect(addToast).toHaveBeenCalledTimes(1);
+      const [message, type] = addToast.mock.calls[0];
+      expect(type).toBe('error');
+      expect(message).not.toBe('Only JPEG, PNG, GIF and WebP images up to 10 MB are allowed');
+    } finally {
+      delete window.__addToast;
+      createObjURL.mockRestore(); revokeObjURL.mockRestore();
+    }
   });
 });

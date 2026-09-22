@@ -86,6 +86,29 @@ describe('validateManifest', () => {
     expect(r.manifest?.permissions).toEqual(permissions);
   });
 
+  it('accepts hook:map-layer-provider, hook:day-schedule-provider, hook:day-tint-provider and geolocation:read', () => {
+    const r = validateManifest({ ...base, permissions: ['hook:map-layer-provider', 'hook:day-schedule-provider', 'hook:day-tint-provider', 'geolocation:read'] });
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('validates capabilities.routeProfiles and ties it to hook:route-provider', () => {
+    const profiles = [{ id: 'ev', label: 'EV' }];
+    const ok = validateManifest({ ...base, permissions: ['hook:route-provider'], capabilities: { routeProfiles: profiles } });
+    expect(ok.errors).toEqual([]);
+    expect(ok.ok).toBe(true);
+    // profiles without the grant are dead buttons — rejected at validate time
+    expect(validateManifest({ ...base, capabilities: { routeProfiles: profiles } }).ok).toBe(false);
+    // id shape, label cap, count cap, duplicates
+    const bad = (routeProfiles: unknown) => validateManifest({ ...base, permissions: ['hook:route-provider'], capabilities: { routeProfiles } }).ok;
+    expect(bad([{ id: 'EV', label: 'x' }])).toBe(false);
+    expect(bad([{ id: 'ev' }])).toBe(false);
+    expect(bad([{ id: 'ev', label: 'L'.repeat(41) }])).toBe(false);
+    expect(bad([{ id: 'ev', label: 'a' }, { id: 'ev', label: 'b' }])).toBe(false);
+    expect(bad([1, 2, 3, 4].map(i => ({ id: `p${i}`, label: 'x' })))).toBe(false);
+    expect(bad('ev')).toBe(false);
+  });
+
   it('accepts the read-symmetry + broker permissions (collab, file content, trip create, rates)', () => {
     const permissions = ['db:read:collab', 'db:create:trips', 'rates:read', 'db:read:files:content'];
     const r = validateManifest({ ...base, permissions });
@@ -108,6 +131,30 @@ describe('validateManifest', () => {
 });
 
 describe('createMockHost', () => {
+  it('mocks plugin UI session storage with scope isolation and production limits', async () => {
+    const host = createMockHost({ sessionTripId: 42 });
+    await host.session.set('filters', ['hotel']);
+    await host.session.set('filters', ['flight'], { scope: 'trip' });
+    await expect(host.session.get('filters')).resolves.toEqual(['hotel']);
+    await expect(host.session.get('filters', { scope: 'trip' })).resolves.toEqual(['flight']);
+
+    await expect(host.session.set('x'.repeat(65), true)).rejects.toThrow(/SESSION_INVALID_KEY/);
+    await expect(host.session.set('large', 'x'.repeat(1024))).rejects.toThrow(/SESSION_VALUE_TOO_LARGE/);
+    await expect(host.session.set('x'.repeat(64), 'x'.repeat(1022))).resolves.toBeUndefined();
+
+    await host.session.clear();
+    await host.session.clear({ scope: 'trip' });
+    for (let index = 0; index < 32; index += 1) await host.session.set(`key-${index}`, index);
+    await expect(host.session.set('key-32', 32)).rejects.toThrow(/SESSION_KEY_LIMIT/);
+    await expect(host.session.set('trip-key', true, { scope: 'trip' })).resolves.toBeUndefined();
+
+  });
+
+  it('requires a trip context for trip-scoped mock session storage', async () => {
+    const { session } = createMockHost();
+    await expect(session.get('filters', { scope: 'trip' })).rejects.toThrow(/NO_TRIP_CONTEXT/);
+  });
+
   it('enforces the granted permission set', async () => {
     const { ctx } = createMockHost({ grants: ['db:own'] });
     await expect(ctx.db.migrate('1', 'CREATE TABLE t (x)')).resolves.toEqual({ applied: true });
@@ -239,6 +286,38 @@ describe('createMockHost', () => {
     const ungranted = createMockHost({ grants: [], actingUserId: 42, trips: { 1: { members: [42, 7] } } });
     await expect(ungranted.ctx.trips.removeMember(1, 7)).rejects.toThrow(/PERMISSION_DENIED/);
     await expect(ungranted.ctx.journal.createJourney({ title: 'x' })).rejects.toThrow(/PERMISSION_DENIED/);
+  });
+
+  it('journal.addEntryPhoto refuses in the mock what the host refuses in production', async () => {
+    const png = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
+    const host = createMockHost({
+      grants: ['db:write:journal'],
+      actingUserId: 42,
+      journals: [{ id: 1, title: 'Japan' }],
+      journalEntries: [{ id: 5, journey_id: 1, entry_date: '2027-04-01' }],
+    });
+
+    const photo = await host.ctx.journal.addEntryPhoto(5, { name: 'tokyo.jpg', content_base64: png, caption: 'Arrival' });
+    expect(photo).toMatchObject({ entry_id: 5, caption: 'Arrival' });
+
+    // An importer that hits one of these in the mock would hit it in production too,
+    // which is the whole point of the double refusing the same things.
+    await expect(host.ctx.journal.addEntryPhoto(999, { name: 'a.jpg', content_base64: png }))
+      .rejects.toThrow(/RESOURCE_FORBIDDEN/);
+    await expect(host.ctx.journal.addEntryPhoto(5, { name: 'map.svg', content_base64: png }))
+      .rejects.toThrow(/not an allowed image type/);
+    await expect(host.ctx.journal.addEntryPhoto(5, { name: 'noext', content_base64: png }))
+      .rejects.toThrow(/not an allowed image type/);
+    await expect(host.ctx.journal.addEntryPhoto(5, { name: '', content_base64: png }))
+      .rejects.toThrow(/name is required/);
+    await expect(host.ctx.journal.addEntryPhoto(5, { name: 'a.jpg', content_base64: '' }))
+      .rejects.toThrow(/content_base64 is required/);
+    await expect(host.ctx.journal.addEntryPhoto(5, { name: 'a.jpg', content_base64: 'A'.repeat(15 * 1024 * 1024) }))
+      .rejects.toThrow(/10MB plugin upload cap/);
+
+    const ungranted = createMockHost({ grants: [], actingUserId: 42, journalEntries: [{ id: 5, journey_id: 1 }] });
+    await expect(ungranted.ctx.journal.addEntryPhoto(5, { name: 'a.jpg', content_base64: png }))
+      .rejects.toThrow(/PERMISSION_DENIED/);
   });
 
   it('creates a trip for the acting user and serves rates + collab reads against the grants', async () => {
@@ -622,6 +701,21 @@ describe('dev-server SDK injection', () => {
   });
 });
 
+describe('dev-server preview', () => {
+  // The preview plays the host, so it has to refuse what the host refuses. A preview
+  // that answered trek:geolocation without the grant green-lights a plugin production
+  // then breaks — the one drift direction this package cannot afford.
+  it('gates the geolocation bridge on geolocation:read, like PluginFrame', async () => {
+    const { preview } = await import('../src/cli/dev.js');
+    const without = preview('demo', 'widget', 1, {});
+    expect(without).toContain('var GEO_ALLOWED=false;');
+    expect(without).toContain('if(!GEO_ALLOWED){');
+    expect(without).toContain('error:"forbidden"');
+
+    expect(preview('demo', 'widget', 1, { geoAllowed: true })).toContain('var GEO_ALLOWED=true;');
+  });
+});
+
 describe('dev db bind shapes', () => {
   let tmp: string;
   beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devdb-')); });
@@ -997,6 +1091,37 @@ describe('mock-host inter-plugin (plugins.call + events.emit)', () => {
     await expect(d.action('sync')).rejects.toThrow(/RESOURCE_FORBIDDEN/);
   });
 
+  it('accepts scoped declaredActions entries and drives an instance action with the acting-user ctx', async () => {
+    const def = definePlugin({
+      actions: {
+        purge: async (ctx) => ({ ok: true, message: `url=${String(ctx.config.url)} user=${await ctx.settings.get('token')}` }),
+        sync: () => ({ ok: true }),
+      },
+    });
+    const d = createMockHost({
+      actingUserId: 7,
+      config: { url: 'https://x.example' },
+      userSettings: { token: 'abc' },
+      declaredActions: ['sync', { key: 'purge', scope: 'instance' }],
+    }).run(def);
+    // The clicking admin is the acting user: ctx.config AND their own settings resolve.
+    expect(await d.action('purge')).toEqual({ ok: true, message: 'url=https://x.example user=abc' });
+    expect(await d.action('sync')).toEqual({ ok: true, message: undefined });
+    await expect(d.action('other')).rejects.toThrow(/RESOURCE_FORBIDDEN/);
+  });
+
+  it('validates the scope of a settings action', () => {
+    const base = { id: 'plugin', name: 'P', version: '1.0.0', type: 'integration', trek: '>=4.0.0 <5.0.0' };
+    expect(validateManifest({ ...base, actions: [{ key: 'a', scope: 'instance' }] }).ok).toBe(true);
+    expect(validateManifest({ ...base, actions: [{ key: 'a', scope: 'user' }] }).ok).toBe(true);
+    expect(validateManifest({ ...base, actions: [{ key: 'a' }] }).ok).toBe(true); // scope optional
+    const bad = validateManifest({ ...base, actions: [{ key: 'a', scope: 'global' }] });
+    expect(bad.ok).toBe(false);
+    expect(bad.errors).toContain('action "a".scope must be "user" or "instance"');
+    // Keys stay unique ACROSS scopes — one action, one form.
+    expect(validateManifest({ ...base, actions: [{ key: 'a', scope: 'user' }, { key: 'a', scope: 'instance' }] }).ok).toBe(false);
+  });
+
   it('never resolves a settings key off Object.prototype', async () => {
     // The bug this models: `__proto__`/`constructor` used to resolve to a truthy object,
     // reporting a REQUIRED field as configured for a user who had configured nothing.
@@ -1055,5 +1180,14 @@ describe('validateManifest: the trek range', () => {
     expect(validateManifest({ ...base, trek: '*' }).ok).toBe(true);
     expect(isUnboundedRange('*')).toBe(true);
     expect(isUnboundedRange('>=3.2.0 <4.0.0')).toBe(false);
+  });
+});
+
+describe('settingDefaults is part of the package surface', () => {
+  it('is exported from the index so a plugin test can seed createMockHost like the host does', async () => {
+    const sdk = await import('../src/index.js');
+    const manifest = { settings: [{ key: 'a', default: 1 }, { key: 'u', scope: 'user', default: 'x' }] };
+    expect(sdk.settingDefaults(manifest, 'instance')).toEqual({ a: 1 });
+    expect(sdk.settingDefaults(manifest, 'user')).toEqual({ u: 'x' });
   });
 });

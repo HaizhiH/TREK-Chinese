@@ -23,14 +23,17 @@ const { testDb } = vi.hoisted(() => {
     CREATE TABLE plugins (id TEXT PRIMARY KEY, name TEXT, description TEXT, type TEXT, icon TEXT, version TEXT,
       api_version INTEGER, min_trek_version TEXT, trek_range TEXT, permissions TEXT, capabilities TEXT DEFAULT '{}', dependencies TEXT DEFAULT '{}', operator_egress INTEGER DEFAULT 0, granted_permissions TEXT, status TEXT, enabled INTEGER DEFAULT 0, config TEXT,
       source_repo TEXT, source_commit TEXT, sha256 TEXT, reviewed_at TEXT, author_pubkey TEXT, updated_at TEXT,
-      update_block_code TEXT, update_block_detail TEXT, update_block_version TEXT);
-    CREATE TABLE plugin_settings_fields (plugin_id TEXT, field_key TEXT, label TEXT, input_type TEXT, placeholder TEXT, hint TEXT, required INTEGER, secret INTEGER, scope TEXT, options TEXT, oauth_config TEXT, sort_order INTEGER);
+      update_block_code TEXT, update_block_detail TEXT, update_block_version TEXT, update_hold INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE plugin_settings_fields (plugin_id TEXT, field_key TEXT, label TEXT, input_type TEXT, placeholder TEXT, hint TEXT, required INTEGER, secret INTEGER, scope TEXT, options TEXT, oauth_config TEXT, default_value TEXT, sort_order INTEGER);
     CREATE TABLE plugin_error_log (id INTEGER PRIMARY KEY AUTOINCREMENT, plugin_id TEXT, level TEXT, message TEXT, ts TEXT);`);
   return { testDb: db };
 });
 vi.mock('../../../src/db/database', () => ({ db: testDb, canAccessTrip: () => undefined }));
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 
 import { PluginRegistryService, RegistryError, __clearRegistryCacheForTests } from '../../../src/nest/plugins/registry/registry.service';
+import type { ManifestPreview } from '../../../src/nest/plugins/registry/registry.service';
 
 // ── tiny tar.gz builder (wraps the plugin in a codeload-style top dir) ────────
 function tarHeader(name: string, size: number, typeflag = '0'): Buffer {
@@ -46,7 +49,7 @@ function tarHeader(name: string, size: number, typeflag = '0'): Buffer {
 // without it would be testing the version gate rather than whatever the test is about.
 // Pass an explicit `trek` (or null, spread last) to exercise the gate itself.
 function makeArtifact(manifest: object): Buffer {
-  const withTrek = { trek: '>=3.2.0 <4.0.0', ...manifest };
+  const withTrek = { trek: '>=3.2.0', ...manifest };
   const files = [
     { name: 'plug-abc/', type: '5' as const, data: '' },
     { name: 'plug-abc/trek-plugin.json', type: '0' as const, data: JSON.stringify(withTrek) },
@@ -86,7 +89,7 @@ beforeEach(() => {
   testDb.exec('DELETE FROM plugins; DELETE FROM plugin_settings_fields; DELETE FROM plugin_error_log');
   __clearRegistryCacheForTests();
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => REGISTRY }) as unknown as Response));
-  svc = new PluginRegistryService();
+  svc = new PluginRegistryService(new DatabaseService(dbConn));
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -179,6 +182,27 @@ describe('PluginRegistryService', () => {
     });
   });
 
+  it('detail carries the UI-facing capabilities, so the review sheet can chip a tab takeover', async () => {
+    safeDownload.mockResolvedValue({
+      bytes: Buffer.from(JSON.stringify({
+        id: 'flight-tracker', permissions: [], egress: [],
+        capabilities: { widget: { slot: 'hero' }, tripPage: { replaces: ['places'], position: 3 }, settingsUi: true },
+      })),
+      sha256: 'unused',
+    });
+    const d = (await svc.detail('flight-tracker')) as { manifest: ManifestPreview };
+    expect(d.manifest.capabilities).toEqual({ widget: { slot: 'hero' }, tripPage: { replaces: ['places'] } });
+  });
+
+  it('detail leaves capabilities empty when the manifest declares none', async () => {
+    safeDownload.mockResolvedValue({
+      bytes: Buffer.from(JSON.stringify({ id: 'flight-tracker', permissions: [], capabilities: { widget: {} } })),
+      sha256: 'unused',
+    });
+    const d = (await svc.detail('flight-tracker')) as { manifest: ManifestPreview };
+    expect(d.manifest.capabilities).toEqual({ widget: {} });
+  });
+
   it('detail soft-fails the manifest fetch (registry metadata still renders)', async () => {
     safeDownload.mockRejectedValue(new Error('offline'));
     const d = await svc.detail('flight-tracker');
@@ -233,10 +257,127 @@ describe('PluginRegistryService', () => {
     await expect(svc.detail('ghost')).rejects.toThrow(RegistryError);
   });
 
+  // The per-plugin update hold: a DELIBERATE non-latest install excludes the plugin from
+  // the update banner until the admin resumes updates or lands back on the newest
+  // compatible version. Dependency resolution pins versions too, but never deliberately —
+  // the `explicit` flag is what separates the two.
+  describe('recomputeUpdateHold', () => {
+    const twoVersions = {
+      schemaVersion: 1,
+      plugins: [
+        {
+          id: 'flight-tracker', name: 'Flight', author: 'Acme', description: 'flights', repo: 'acme/trek-flight', type: 'widget',
+          versions: [
+            { version: '2.0.0', gitTag: 'v2.0.0', commitSha: 'b'.repeat(40), downloadUrl: 'https://x/2', sha256: '2'.repeat(64) },
+            { version: '1.0.0', gitTag: 'v1.0.0', commitSha: 'd'.repeat(40), downloadUrl: 'https://x/1', sha256: '0'.repeat(64) },
+          ],
+        },
+      ],
+    };
+    const seedRow = (hold = 0) =>
+      testDb.prepare("INSERT INTO plugins (id, status, enabled, update_hold) VALUES ('flight-tracker','inactive',0,?)").run(hold);
+    const holdInDb = () =>
+      (testDb.prepare("SELECT update_hold FROM plugins WHERE id='flight-tracker'").get() as { update_hold: number }).update_hold;
+
+    beforeEach(() => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => twoVersions }) as unknown as Response));
+      __clearRegistryCacheForTests();
+    });
+
+    it('holds when the admin explicitly picked an older version', async () => {
+      seedRow();
+      await expect(svc.recomputeUpdateHold('flight-tracker', '1.0.0', true)).resolves.toBe(true);
+      expect(holdInDb()).toBe(1);
+    });
+
+    it('does not hold when the explicit pick IS the newest compatible version', async () => {
+      seedRow(1);
+      await expect(svc.recomputeUpdateHold('flight-tracker', '2.0.0', true)).resolves.toBe(false);
+      expect(holdInDb()).toBe(0);
+    });
+
+    // The comparison is against the newest version THIS TREK can run, not the newest
+    // published one. Both fixtures above leave `trek` unset, so every version is
+    // compatible and the two readings agree; only a version this host must skip tells
+    // them apart. Getting it wrong stamps a hold on an admin who picked the best
+    // available version, and the row silently leaves the banner and "Update all".
+    it('does not hold when a newer version exists but this TREK cannot run it', async () => {
+      const withIncompatibleNewest = {
+        schemaVersion: 1,
+        plugins: [
+          {
+            ...twoVersions.plugins[0],
+            versions: [
+              { version: '3.0.0', gitTag: 'v3.0.0', commitSha: 'c'.repeat(40), downloadUrl: 'https://x/3', sha256: '3'.repeat(64), trek: '>=4.0.0' },
+              ...twoVersions.plugins[0].versions,
+            ],
+          },
+        ],
+      };
+      process.env.APP_VERSION = '3.3.0';
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => withIncompatibleNewest }) as unknown as Response));
+      __clearRegistryCacheForTests();
+      try {
+        seedRow(1);
+        await expect(svc.recomputeUpdateHold('flight-tracker', '2.0.0', true)).resolves.toBe(false);
+        expect(holdInDb()).toBe(0);
+      } finally {
+        delete process.env.APP_VERSION;
+      }
+    });
+
+    it('a non-deliberate update clears a stale hold', async () => {
+      seedRow(1);
+      await expect(svc.recomputeUpdateHold('flight-tracker', '2.0.0', false)).resolves.toBe(false);
+      expect(holdInDb()).toBe(0);
+    });
+
+    it('an unresolvable registry never sets a hold', async () => {
+      seedRow();
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+      __clearRegistryCacheForTests();
+      await expect(svc.recomputeUpdateHold('flight-tracker', '1.0.0', true)).resolves.toBe(false);
+      expect(holdInDb()).toBe(0);
+    });
+  });
+
+  // The version picker's data: every published version, each with its OWN server-computed
+  // compat verdict — the client has no semver and must never re-derive range logic.
+  it('detail lists every published version with its own compat verdict', async () => {
+    process.env.APP_VERSION = '3.3.0';
+    const multi = {
+      schemaVersion: 1,
+      plugins: [
+        {
+          id: 'flight-tracker', name: 'Flight', author: 'Acme', description: 'flights', repo: 'acme/trek-flight',
+          type: 'widget', authorPublicKey: 'K'.repeat(44),
+          versions: [
+            { version: '2.0.0', gitTag: 'v2.0.0', commitSha: 'b'.repeat(40), downloadUrl: 'https://x/2', sha256: '2'.repeat(64), trek: '>=4.0.0', publishedAt: '2026-08-01', size: 2048, signature: 'sig2' },
+            { version: '1.5.0', gitTag: 'v1.5.0', commitSha: 'c'.repeat(40), downloadUrl: 'https://x/15', sha256: '1'.repeat(64), trek: '>=3.0.0 <4.0.0', publishedAt: '2026-07-01', size: 1024 },
+            { version: '1.0.0', gitTag: 'v1.0.0', commitSha: 'd'.repeat(40), downloadUrl: 'https://x/1', sha256: '0'.repeat(64), minTrekVersion: '3.0.0' },
+          ],
+        },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => multi }) as unknown as Response));
+    __clearRegistryCacheForTests();
+    try {
+      const d = (await svc.detail('flight-tracker')) as { versions: unknown };
+      expect(d.versions).toEqual([
+        { version: '2.0.0', publishedAt: '2026-08-01', size: 2048, signed: true, trek: '>=4.0.0', compatible: false },
+        { version: '1.5.0', publishedAt: '2026-07-01', size: 1024, signed: false, trek: '>=3.0.0 <4.0.0', compatible: true },
+        // A legacy entry composes its requirement from the min/max bounds it has.
+        { version: '1.0.0', publishedAt: null, size: null, signed: false, trek: '>=3.0.0', compatible: true },
+      ]);
+    } finally {
+      delete process.env.APP_VERSION;
+    }
+  });
+
   it('fetchRegistry soft-fails to an empty registry on a cold cache', async () => {
     __clearRegistryCacheForTests();
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
-    expect((await new PluginRegistryService().fetchRegistry()).plugins).toEqual([]);
+    expect((await new PluginRegistryService(new DatabaseService(dbConn)).fetchRegistry()).plugins).toEqual([]);
   });
 
   it('installs a pinned version end to end (verify -> extract -> register inactive)', async () => {
@@ -246,7 +387,7 @@ describe('PluginRegistryService', () => {
     safeDownload.mockResolvedValue({ bytes: artifact, sha256: sha });
 
     const out = await svc.install('flight-tracker');
-    expect(out).toEqual({ id: 'flight-tracker', version: '1.0.0' });
+    expect(out).toEqual({ id: 'flight-tracker', version: '1.0.0', trekRangeBypassed: null });
 
     // moved into place + registered inactive with provenance
     expect(fs.existsSync(path.join(codeRoot, 'flight-tracker', 'trek-plugin.json'))).toBe(true);
@@ -355,7 +496,7 @@ describe('PluginRegistryService', () => {
   it('installs a signed plugin and pins the author key (TOFU)', async () => {
     const k = signingKey();
     stageSignedArtifact(k.pubB64, k.sign);
-    await expect(svc.install('flight-tracker')).resolves.toEqual({ id: 'flight-tracker', version: '1.0.0' });
+    await expect(svc.install('flight-tracker')).resolves.toEqual({ id: 'flight-tracker', version: '1.0.0', trekRangeBypassed: null });
     const row = testDb.prepare("SELECT author_pubkey FROM plugins WHERE id='flight-tracker'").get() as { author_pubkey: string };
     expect(row.author_pubkey).toBe(k.pubB64);
   });
@@ -724,6 +865,91 @@ describe('TREK-version gating on install', () => {
     await expect(svc.install('multi')).rejects.toMatchObject({ code: 'TREK_VERSION_INCOMPATIBLE' });
   });
 
+  /**
+   * TREK_PLUGINS_IGNORE_TREK_RANGE: the operator's explicit "install it anyway". Every gate
+   * above turns into a warning + a `trekRangeBypassed` marker in the response, so the admin
+   * is told the author never vouched for this TREK. The registry's compat VERDICT stays
+   * truthful — the UI needs it to say "outside its range" while still offering the button.
+   */
+  describe('range bypass (TREK_PLUGINS_IGNORE_TREK_RANGE)', () => {
+    beforeEach(() => { process.env.TREK_PLUGINS_IGNORE_TREK_RANGE = '1'; });
+    afterEach(() => { delete process.env.TREK_PLUGINS_IGNORE_TREK_RANGE; });
+
+    it('install-latest fetches the newest PUBLISHED version and reports the ignored range', async () => {
+      process.env.APP_VERSION = '3.3.0'; stubMulti();
+      stageMulti('2.1.0', 0);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await expect(svc.install('multi')).resolves.toEqual({
+        id: 'multi', version: '2.1.0', trekRangeBypassed: { trekRange: '>=3.4.0 <4.0.0', hostVersion: '3.3.0' },
+      });
+      expect(warn.mock.calls.some((c) => /multi.*>=3\.4\.0 <4\.0\.0.*3\.3\.0/.test(String(c[0])))).toBe(true);
+      warn.mockRestore();
+    });
+
+    it('installs an explicitly-pinned version this TREK cannot run', async () => {
+      process.env.APP_VERSION = '3.3.0'; stubMulti();
+      stageMulti('2.1.0', 0);
+      await expect(svc.install('multi', { version: '2.1.0' })).resolves.toMatchObject({
+        version: '2.1.0', trekRangeBypassed: { trekRange: '>=3.4.0 <4.0.0', hostVersion: '3.3.0' },
+      });
+    });
+
+    it('a version that fits is a normal install — no marker, nothing to warn about', async () => {
+      process.env.APP_VERSION = '3.5.0'; stubMulti();
+      stageMulti('2.1.0', 0);
+      await expect(svc.install('multi')).resolves.toEqual({ id: 'multi', version: '2.1.0', trekRangeBypassed: null });
+    });
+
+    it('browse keeps telling the truth about compatibility', async () => {
+      process.env.APP_VERSION = '3.3.0'; stubMulti();
+      const [item] = await svc.browse(true);
+      expect(item).toMatchObject({ compatible: false, latestCompatible: '2.0.0', hostVersion: '3.3.0' });
+    });
+
+    it("re-gate on the ARTIFACT's range warns instead of refusing, with the artifact's range", async () => {
+      process.env.APP_VERSION = '3.9.0';
+      __clearRegistryCacheForTests();
+      const artifact = makeArtifact({ id: 'flight-tracker', name: 'Flight', version: '1.0.0', type: 'widget', trek: '>=3.2.0 <3.4.0' });
+      const sha = createHash('sha256').update(artifact).digest('hex');
+      REGISTRY.plugins[0].versions[0].sha256 = sha;
+      safeDownload.mockResolvedValue({ bytes: artifact, sha256: sha });
+      await expect(svc.install('flight-tracker')).resolves.toMatchObject({
+        id: 'flight-tracker', trekRangeBypassed: { trekRange: '>=3.2.0 <3.4.0', hostVersion: '3.9.0' },
+      });
+      expect(fs.existsSync(path.join(codeRoot, 'flight-tracker'))).toBe(true);
+    });
+
+    it('installs an artifact that declares no range at all, saying so', async () => {
+      process.env.APP_VERSION = '3.9.0';
+      __clearRegistryCacheForTests();
+      const artifact = makeArtifact({ id: 'flight-tracker', name: 'Flight', version: '1.0.0', type: 'widget', trek: undefined });
+      const sha = createHash('sha256').update(artifact).digest('hex');
+      REGISTRY.plugins[0].versions[0].sha256 = sha;
+      safeDownload.mockResolvedValue({ bytes: artifact, sha256: sha });
+      await expect(svc.install('flight-tracker')).resolves.toMatchObject({
+        trekRangeBypassed: { trekRange: null, hostVersion: '3.9.0' },
+      });
+    });
+
+    it('sideload: stages an incompatible or rangeless archive and reports it', () => {
+      process.env.APP_VERSION = '3.9.0';
+      const old = svc.stageUpload(makeArtifact({ id: 'my-upload', name: 'Up', version: '1.0.0', type: 'integration', trek: '>=3.0.0 <3.5.0' }));
+      expect(old).toMatchObject({ id: 'my-upload', trekRangeBypassed: { trekRange: '>=3.0.0 <3.5.0', hostVersion: '3.9.0' } });
+      fs.rmSync(old.stagingDir, { recursive: true, force: true });
+      const rangeless = svc.stageUpload(makeArtifact({ id: 'my-upload', name: 'Up', version: '1.0.0', type: 'integration', trek: undefined }));
+      expect(rangeless).toMatchObject({ trekRangeBypassed: { trekRange: null, hostVersion: '3.9.0' } });
+      fs.rmSync(rangeless.stagingDir, { recursive: true, force: true });
+      const fits = svc.stageUpload(makeArtifact({ id: 'my-upload', name: 'Up', version: '1.0.0', type: 'integration' }));
+      expect(fits.trekRangeBypassed).toBeNull();
+      fs.rmSync(fits.stagingDir, { recursive: true, force: true });
+    });
+
+    it('does NOT lift the plugin-API version gate — that one is a real ABI break', () => {
+      const bytes = makeArtifact({ id: 'my-upload', name: 'Up', version: '1.0.0', type: 'integration', apiVersion: 2 });
+      expect(() => svc.stageUpload(bytes)).toThrow('plugin requires plugin-API v2; this TREK supports v1');
+    });
+  });
+
   it('reports the newest version this TREK CAN run, so the UI can offer it', async () => {
     process.env.APP_VERSION = '3.3.0'; stubMulti();
     const [item] = await svc.browse(true);
@@ -799,6 +1025,14 @@ describe('TREK-version gating on install', () => {
     it('refuses an uploaded archive that declares no range', () => {
       const bytes = makeArtifact({ id: 'my-upload', name: 'Up', version: '1.0.0', type: 'integration', trek: undefined });
       expect(() => svc.stageUpload(bytes)).toThrow(/missing "trek"/);
+    });
+
+    it('refuses an uploaded archive declaring apiVersion 2 (this TREK only speaks plugin-API v1), and writes nothing to the plugin code dir', () => {
+      // trek range is satisfiable on its own — parseManifest's apiVersion check must
+      // fire (and stop the upload) before assertHostCompatible is ever reached.
+      const bytes = makeArtifact({ id: 'my-upload', name: 'Up', version: '1.0.0', type: 'integration', apiVersion: 2 });
+      expect(() => svc.stageUpload(bytes)).toThrow('plugin requires plugin-API v2; this TREK supports v1');
+      expect(fs.existsSync(path.join(codeRoot, 'my-upload'))).toBe(false);
     });
   });
 

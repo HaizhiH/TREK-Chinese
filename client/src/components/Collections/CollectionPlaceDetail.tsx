@@ -2,16 +2,23 @@ import React, { useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { X, Pencil, Copy, Trash2, MapPin, Link2, Plus, ExternalLink, Check, Tag, Tags } from 'lucide-react'
+import { markdownLinkComponents } from '../shared/markdownLink'
+import { X, Pencil, Copy, Trash2, MapPin, Link2, Plus, ExternalLink, Check, Tag, Tags, Camera, Loader2, Navigation } from 'lucide-react'
 import type { CollectionPlace, CollectionStatus, CollectionLink, CollectionLabel } from '@trek/shared'
 import type { Category, TranslationFn } from '../../types'
 import MarkdownToolbar from '../Journey/MarkdownToolbar'
+import { NumericInput } from '../shared/NumericInput'
 import { mapsApi } from '../../api/client'
 import { entityGradient } from '../../utils/gradients'
 import { getCategoryIcon } from '../shared/categoryIcons'
+import { NavigationMenu } from '../shared/NavigationMenu'
+import { getNavigationTargets, openNavigationTarget } from '../Planner/placeNavigation'
 import { STATUS_META, STATUS_ORDER, normalizeLinkUrl } from '../../pages/collections/collectionsModel'
 import { useToast } from '../shared/Toast'
-import { getApiErrorMessage } from '../../types'
+import { Tooltip } from '../shared/Tooltip'
+import PlaceRating from '../shared/StarRating'
+import { normalizeImageFile } from '../../utils/convertHeic'
+import { getApiErrorMessage } from '../../utils/apiError'
 
 function linkHost(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
@@ -28,9 +35,13 @@ interface CollectionPlaceDetailProps {
   anchorRect?: { left: number; width: number } | null
   onClose: () => void
   onSetStatus: (status: CollectionStatus) => void
-  onSave: (patch: { name?: string; description?: string | null; links?: CollectionLink[]; category_id?: number | null; label_ids?: number[] }) => Promise<void>
+  onSave: (patch: { name?: string; description?: string | null; links?: CollectionLink[]; category_id?: number | null; label_ids?: number[]; image_url?: string | null; lat?: number | null; lng?: number | null; address?: string | null }) => Promise<void>
+  /** Upload a custom cover image (#1136); enables the cover change/remove controls. */
+  onUploadImage?: (file: File) => Promise<void>
   onCopyToTrip: () => void
   onRemove: () => void
+  /** Cast/clear the current user's star vote (#1435); every member may vote. */
+  onRate?: (rating: number | null) => Promise<void> | void
   t: TranslationFn
 }
 
@@ -58,15 +69,23 @@ function StatusSegment({ status, onSet, t }: { status: CollectionStatus; onSet: 
  * is an always-live segmented control (auto-saves).
  */
 export default function CollectionPlaceDetail({
-  place, canEdit, canDelete, categories, labels, anchorRect, onClose, onSetStatus, onSave, onCopyToTrip, onRemove, t,
+  place, canEdit, canDelete, categories, labels, anchorRect, onClose, onSetStatus, onSave, onUploadImage, onCopyToTrip, onRemove, onRate, t,
 }: CollectionPlaceDetailProps): React.ReactElement {
   const toast = useToast()
   const [editing, setEditing] = useState(false)
+  const coverInputRef = useRef<HTMLInputElement>(null)
+  const [imgBusy, setImgBusy] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
+  const navBtnRef = useRef<HTMLButtonElement>(null)
+  const navigationTargets = getNavigationTargets(place)
   const [name, setName] = useState(place.name)
   const [categoryId, setCategoryId] = useState<number | null>(place.category_id ?? null)
   const [description, setDescription] = useState(place.description ?? '')
   const [links, setLinks] = useState<CollectionLink[]>(place.links ?? [])
   const [labelIds, setLabelIds] = useState<number[]>(place.label_ids ?? [])
+  const [address, setAddress] = useState(place.address ?? '')
+  const [lat, setLat] = useState(place.lat != null ? String(place.lat) : '')
+  const [lng, setLng] = useState(place.lng != null ? String(place.lng) : '')
   const [saving, setSaving] = useState(false)
   // A higher-res photo pulled from the maps provider when the place has none of
   // its own — the list avatar's little thumbnail is too low-res for the cover.
@@ -81,6 +100,9 @@ export default function CollectionPlaceDetail({
     setDescription(place.description ?? '')
     setLinks(place.links ?? [])
     setLabelIds(place.label_ids ?? [])
+    setAddress(place.address ?? '')
+    setLat(place.lat != null ? String(place.lat) : '')
+    setLng(place.lng != null ? String(place.lng) : '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [place.id])
 
@@ -99,16 +121,49 @@ export default function CollectionPlaceDetail({
   }, [place.id])
 
   const banner = place.image_url || fetchedPhoto
+
+  const handleCoverPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !onUploadImage) return
+    setImgBusy(true)
+    try {
+      await onUploadImage(await normalizeImageFile(file))
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, t('places.imageUploadError')))
+    } finally {
+      setImgBusy(false)
+    }
+  }
+
+  const handleImageRemove = async () => {
+    setImgBusy(true)
+    try {
+      await onSave({ image_url: null })
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, t('places.imageUploadError')))
+    } finally {
+      setImgBusy(false)
+    }
+  }
+
   const setLink = (i: number, patch: Partial<CollectionLink>) => setLinks(links.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
   const toggleLabel = (id: number) => setLabelIds(labelIds.includes(id) ? labelIds.filter(x => x !== id) : [...labelIds, id])
-  const resetForm = () => { setEditing(false); setName(place.name); setCategoryId(place.category_id ?? null); setDescription(place.description ?? ''); setLinks(place.links ?? []); setLabelIds(place.label_ids ?? []) }
+  const resetForm = () => { setEditing(false); setName(place.name); setCategoryId(place.category_id ?? null); setDescription(place.description ?? ''); setLinks(place.links ?? []); setLabelIds(place.label_ids ?? []); setAddress(place.address ?? ''); setLat(place.lat != null ? String(place.lat) : ''); setLng(place.lng != null ? String(place.lng) : '') }
+  const coordPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text').trim()
+    const match = text.match(/^(-?\d+(?:\.\d*)?)(?:\s*[,;]\s*|\s+)(-?\d+(?:\.\d*)?)$/)
+    if (match) { e.preventDefault(); setLat(match[1]); setLng(match[2]) }
+  }
   const assignedLabels = labels.filter(l => (place.label_ids ?? []).includes(l.id))
 
   const save = async () => {
     const cleanLinks = links.map(l => ({ label: l.label?.trim() || undefined, url: normalizeLinkUrl(l.url) })).filter(l => l.url)
+    const latNum = lat.trim() ? Number(lat) : Number.NaN
+    const lngNum = lng.trim() ? Number(lng) : Number.NaN
     setSaving(true)
     try {
-      await onSave({ name: name.trim() || place.name, description: description.trim() || null, links: cleanLinks, category_id: categoryId, label_ids: labelIds })
+      await onSave({ name: name.trim() || place.name, description: description.trim() || null, links: cleanLinks, category_id: categoryId, label_ids: labelIds, address: address.trim() || null, lat: Number.isFinite(latNum) ? latNum : null, lng: Number.isFinite(lngNum) ? lngNum : null })
       setEditing(false)
     } catch (err) {
       toast.error(getApiErrorMessage(err, t('common.error')))
@@ -121,16 +176,49 @@ export default function CollectionPlaceDetail({
   const CatIcon = getCategoryIcon(place.category?.icon)
 
   return (
-    <div className={`col-detail${anchorRect ? ' docked' : ''}`} style={dockStyle} onClick={e => e.stopPropagation()}>
+    <div className={`col-detail${anchorRect ? ' docked' : ''}`} style={dockStyle} role="presentation" onClick={e => e.stopPropagation()}>
       <div className="col-detail-cover" style={banner ? undefined : { backgroundImage: entityGradient(place.id) }}>
         {banner && <img src={banner} alt="" />}
         <div className="col-detail-cover-scrim" />
-        {place.category?.name && (
-          <span className="col-detail-cover-cat" style={{ ['--cat' as string]: place.category.color || '#6366f1' }}>
-            <CatIcon size={12} /> {place.category.name}
-          </span>
-        )}
-        <button type="button" className="col-detail-close" onClick={onClose} aria-label={t('common.close')}><X size={16} /></button>
+        {/* Chip and cover controls share the top bar. The controls keep the end and
+            never shrink, so a long category name ellipsizes instead of sliding under
+            them, however many buttons there are and whatever size phones give them. */}
+        <div className="absolute left-[14px] right-[12px] top-[12px] z-[2] flex items-center gap-[8px]">
+          {place.category?.name && (
+            <span className="col-detail-cover-cat min-w-0" style={{ ['--cat' as string]: place.category.color || '#6366f1' }}>
+              <CatIcon size={12} className="flex-none" />
+              <span className="truncate">{place.category.name}</span>
+            </span>
+          )}
+          {/* The cover controls wear the close button's class, so they get its look,
+              hover and phone size. */}
+          <div className="ms-auto flex flex-none gap-[6px]">
+            {canEdit && onUploadImage && (
+              <>
+                <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,.heic,.heif" style={{ display: 'none' }} onChange={handleCoverPick} />
+                {place.image_url && !imgBusy && (
+                  <Tooltip label={t('places.removeImage')} placement="bottom">
+                    <button type="button" className="col-detail-close" onClick={handleImageRemove} aria-label={t('places.removeImage')}>
+                      <Trash2 size={16} />
+                    </button>
+                  </Tooltip>
+                )}
+                <Tooltip label={place.image_url ? t('places.changeImage') : t('places.uploadImage')} placement="bottom">
+                  <button
+                    type="button"
+                    className="col-detail-close"
+                    style={imgBusy ? { cursor: 'default' } : undefined}
+                    onClick={() => { if (!imgBusy) coverInputRef.current?.click() }}
+                    aria-label={place.image_url ? t('places.changeImage') : t('places.uploadImage')}
+                  >
+                    {imgBusy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                  </button>
+                </Tooltip>
+              </>
+            )}
+            <button type="button" className="col-detail-close" onClick={onClose} aria-label={t('common.close')}><X size={16} /></button>
+          </div>
+        </div>
         <div className="col-detail-head">
           {editing
             ? <input value={name} onChange={e => setName(e.target.value)} className="col-detail-name-input" autoFocus aria-label={t('collections.listName')} />
@@ -142,12 +230,35 @@ export default function CollectionPlaceDetail({
         {/* Meta (view only) */}
         {!editing && place.address && (
           <div className="col-detail-meta">
-            <span className="col-detail-addr"><MapPin size={12} /> {place.address}</span>
+            {place.address && <span className="col-detail-addr"><MapPin size={12} /> {place.address}</span>}
+            {/* Same picker as inside a trip (#1455). A saved place is somewhere
+                you intend to go, and until now the only way to get directions
+                was to add it to a trip first. */}
           </div>
         )}
 
         {/* Status — live for editors, read-only for viewers */}
         <StatusSegment status={place.status} onSet={canEdit ? onSetStatus : () => {}} t={t} />
+
+        {/* Collaborative rating (#1435) — every member votes; the average shows. */}
+        {/* Rating and labels on one line, each on its own ground.
+            A bare line of stars read as another row of text, and the labels tried the
+            cover photo first — where a blue chip on a blue sky is simply not there.
+            Side by side they are two badges answering two questions about the place. */}
+        {(onRate || assignedLabels.length > 0) && (
+          <div className="col-detail-badges">
+            {onRate && (
+              <div className="col-detail-rating">
+                <PlaceRating ratings={place.ratings ?? []} ratingAvg={place.rating_avg} onRate={onRate} />
+              </div>
+            )}
+            {!editing && assignedLabels.map(l => (
+              <span key={l.id} className="col-labelchip on static big" style={{ ['--label' as string]: l.color || 'var(--accent)' }}>
+                <span className="col-labelchip-dot" /> {l.name}
+              </span>
+            ))}
+          </div>
+        )}
 
         {editing ? (
           <div className="col-detail-edit">
@@ -165,6 +276,19 @@ export default function CollectionPlaceDetail({
                     </button>
                   )
                 })}
+              </div>
+            </div>
+            {/* Address (#1870): free text, the coordinates stay separate */}
+            <div className="col-detail-field">
+              <div className="col-detail-label"><MapPin size={12} /> {t('places.formAddress')}</div>
+              <input value={address} onChange={e => setAddress(e.target.value)} placeholder={t('places.formAddressPlaceholder')} className="col-detail-input" />
+            </div>
+            {/* Coordinates */}
+            <div className="col-detail-field">
+              <div className="col-detail-label"><MapPin size={12} /> {t('collections.coordinates')}</div>
+              <div className="col-detail-link-row">
+                <NumericInput mode="signed" value={lat} onValueChange={setLat} onPaste={coordPaste} placeholder={t('places.formLat')} className="col-detail-input flex-1" />
+                <NumericInput mode="signed" value={lng} onValueChange={setLng} placeholder={t('places.formLng')} className="col-detail-input flex-1" />
               </div>
             </div>
             {/* Labels */}
@@ -206,18 +330,9 @@ export default function CollectionPlaceDetail({
           </div>
         ) : (
           <>
-            {assignedLabels.length > 0 && (
-              <div className="col-detail-labels">
-                {assignedLabels.map(l => (
-                  <span key={l.id} className="col-labelchip on static" style={{ ['--label' as string]: l.color || 'var(--accent)' }}>
-                    <span className="col-labelchip-dot" /> {l.name}
-                  </span>
-                ))}
-              </div>
-            )}
             {place.description && (
               <div className="col-detail-md collab-note-md">
-                <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{place.description}</Markdown>
+                <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{place.description}</Markdown>
               </div>
             )}
             {place.links && place.links.length > 0 && (
@@ -243,6 +358,32 @@ export default function CollectionPlaceDetail({
           <>
             {canEdit && <button type="button" onClick={() => setEditing(true)} className="col-detail-btn"><Pencil size={14} /> {t('common.edit')}</button>}
             <button type="button" onClick={onCopyToTrip} className="col-detail-btn"><Copy size={14} /> {t('collections.copyToTrip')}</button>
+            {/* Beside the other two rather than up by the address: getting directions is
+                something you DO with the place, like editing it or copying it into a
+                trip, and the row of things you do belongs in one place. */}
+            {navigationTargets.length > 0 && (
+              <>
+                <button
+                  ref={navBtnRef}
+                  type="button"
+                  className="col-detail-btn"
+                  onClick={() => {
+                    if (navigationTargets.length === 1) openNavigationTarget(navigationTargets[0])
+                    else setNavOpen(o => !o)
+                  }}
+                >
+                  <Navigation size={14} />
+                  {navigationTargets.length === 1 ? navigationTargets[0].label : t('inspector.navigation')}
+                </button>
+                {navOpen && (
+                  <NavigationMenu
+                    targets={navigationTargets}
+                    anchor={navBtnRef.current}
+                    onClose={() => setNavOpen(false)}
+                  />
+                )}
+              </>
+            )}
             <div className="col-detail-footer-spacer" />
             {canDelete && <button type="button" onClick={onRemove} className="col-detail-btn danger"><Trash2 size={14} /> {t('collections.removeFromList')}</button>}
           </>

@@ -7,10 +7,11 @@ import { z } from 'zod';
  * endpoints under /api/trips/:tripId/days/:dayId/assignments and
  * /api/trips/:tripId/assignments/:id/*.
  *
- * Trip-scoped; mutations use the 'day_edit' permission. The legacy route
- * (server/src/routes/assignments.ts, mounted on /api) wraps assignmentService.
- * Assignment rows carry joined place data and are kept open in responses; the
- * request schemas + the bespoke 404/400 controller messages pin the rest.
+ * Trip-scoped; mutations use the 'day_edit' permission. The server side is the
+ * DI-native AssignmentsService (server/src/nest/assignments/), validated via
+ * the createZodDto wrappers in assignments.dto.ts. Assignment rows carry
+ * joined place data and are kept open in responses; the request schemas + the
+ * bespoke 404 controller messages pin the rest.
  */
 
 /**
@@ -39,6 +40,19 @@ export const assignmentSchema = z.object({
   notes: z.string().nullable().optional(),
   assignment_time: z.string().nullable().optional(),
   assignment_end_time: z.string().nullable().optional(),
+  end_day: z.boolean().optional(),
+  // Per-segment travel mode (#1281): the transport mode of the leg LEAVING this
+  // stop for the next one. null = inherit the day's default_transport_mode.
+  leg_transport_mode: z.string().nullable().optional(),
+  // Per-segment travel mode of the leg ENTERING this stop when its origin is
+  // not a place (booking arrival / morning hotel). null = inherit the day default.
+  // Inert when the previous timeline element is a place.
+  incoming_leg_transport_mode: z.string().nullable().optional(),
+  // The lodging booking that put this stop on the day, when one did. The day
+  // planner already shows that booking as its own overnight block, so it hides
+  // this row and leaves it to road trip mode, which is the view that needs the
+  // hotel in the driving chain. Null for every stop a traveller placed.
+  accommodation_id: z.number().nullable().optional(),
   participants: z.array(assignmentParticipantSchema).optional(),
   created_at: z.string().optional(),
   place: assignmentPlaceSchema,
@@ -58,7 +72,9 @@ export type AssignmentReorderRequest = z.infer<typeof assignmentReorderRequestSc
 
 export const assignmentMoveRequestSchema = z.object({
   new_day_id: z.union([z.number(), z.string()]),
-  order_index: z.number().optional(),
+  // The client api types this `number | null` (assignmentsApi.move) and the
+  // legacy route accepted null (`orderIndex || 0`) — keep null on the wire.
+  order_index: z.number().nullable().optional(),
 });
 export type AssignmentMoveRequest = z.infer<typeof assignmentMoveRequestSchema>;
 
@@ -67,6 +83,35 @@ export const assignmentTimeRequestSchema = z.object({
   end_time: z.string().nullable().optional(),
 });
 export type AssignmentTimeRequest = z.infer<typeof assignmentTimeRequestSchema>;
+
+export const assignmentEndDayRequestSchema = z.object({
+  end_day: z.boolean(),
+});
+export type AssignmentEndDayRequest = z.infer<typeof assignmentEndDayRequestSchema>;
+
+/**
+ * PUT /:id/notes (#2163) — edit the per-assignment note after creation.
+ * Deliberately uncapped like the create contract above: the REST create body
+ * and the plugin RPC accept notes of any length, so a length cap here would
+ * strand an existing longer note as uneditable (the unchanged textarea would
+ * be rejected on save). Falsy values ('' or null) clear the column, the same
+ * `notes || null` normalisation createAssignment applies on the way in.
+ */
+export const assignmentNotesRequestSchema = z.object({
+  notes: z.string().nullable(),
+});
+export type AssignmentNotesRequest = z.infer<typeof assignmentNotesRequestSchema>;
+
+/** Set the leg's travel mode (a RouteProfileKey, or null to inherit the day default). */
+export const assignmentTransportRequestSchema = z.object({
+  // The legacy route read `body.transport_mode ?? null`, so an absent key
+  // behaves like an explicit null — keep it optional on the wire.
+  transport_mode: z.string().nullable().optional(),
+  // Which leg this write targets: the one leaving this stop (default, and the
+  // legacy behaviour) or the one arriving at it (#1281 boundary legs).
+  direction: z.enum(['outgoing', 'incoming']).default('outgoing'),
+});
+export type AssignmentTransportRequest = z.infer<typeof assignmentTransportRequestSchema>;
 
 export const assignmentParticipantsRequestSchema = z.object({
   user_ids: z.array(z.number()),

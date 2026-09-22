@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams } from 'react-router-dom'
-import { Plane, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront, Paperclip, FileText, X, ExternalLink, Link2, Plus, Trash2, RefreshCw } from 'lucide-react'
+import { useParams } from 'react-router'
+import { Plane, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront, Paperclip, FileText, X, ExternalLink, Link2, Plus, Trash2, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react'
 import Modal from '../shared/Modal'
 import CustomSelect from '../shared/CustomSelect'
 import CustomTimePicker from '../shared/CustomTimePicker'
@@ -16,6 +16,8 @@ import apiClient, { mapsApi, reservationsApi } from '../../api/client'
 import type { Day, Place, Accommodation, Reservation, ReservationEndpoint, TripFile, BudgetItem, AssignmentsMap } from '../../types'
 import { parseReservationMetadata, orderedEndpoints } from '../../utils/flightLegs'
 import { BookingCostsSection } from './BookingCostsSection'
+import { TravelerPicker } from './TravelerPicker'
+import type { TripMember } from '../Budget/BudgetPanelMemberChips'
 import type { BookingExpenseRequest } from './BookingCostsSection.types'
 import type { BookingReviewDraft } from './parsedItemToDraft'
 import TransitSearchPanel, { type PickedPlace } from './TransitSearchPanel'
@@ -54,11 +56,19 @@ function endpointFromLocation(l: LocationPoint, role: 'from' | 'to' | 'stop', se
   }
 }
 
+// "Paris Charles de Gaulle (CDG)" → "Paris Charles de Gaulle". Done as a trim
+// plus an anchored test instead of /\s*\([A-Z]{3}\)\s*$/, because the leading
+// \s* backtracks over every space in a long name for a quadratic worst case.
+function stripAirportCode(name: string): string {
+  const trimmed = name.trimEnd()
+  return /\([A-Z]{3}\)$/.test(trimmed) ? trimmed.slice(0, -5).trimEnd() : name
+}
+
 function airportFromEndpoint(e: ReservationEndpoint | undefined): Airport | null {
   if (!e || !e.code) return null
   return {
     iata: e.code, icao: null,
-    name: e.name, city: e.name.replace(/\s*\([A-Z]{3}\)\s*$/, ''),
+    name: e.name, city: stripAirportCode(e.name),
     country: '',
     lat: e.lat, lng: e.lng,
     tz: e.timezone || '',
@@ -84,9 +94,12 @@ interface WaypointForm {
   airline: string
   flight_number: string
   seat: string
+  // Booking reference of the leg leaving this waypoint: airlines often issue one
+  // per flight rather than one per booking (#1943). Empty means the booking's own.
+  confirmation_number: string
 }
 function emptyWaypoint(dayId: string | number = ''): WaypointForm {
-  return { airport: null, arrDayId: dayId, arrTime: '', depDayId: dayId, depTime: '', airline: '', flight_number: '', seat: '' }
+  return { airport: null, arrDayId: dayId, arrTime: '', depDayId: dayId, depTime: '', airline: '', flight_number: '', seat: '', confirmation_number: '' }
 }
 
 // ── Multi-leg train stations ───────────────────────────────────────────────
@@ -102,6 +115,7 @@ interface StationWaypointForm {
   train_number: string
   platform: string
   seat: string
+  confirmation_number: string
 }
 
 interface ChinaRailStop {
@@ -111,8 +125,21 @@ interface ChinaRailStop {
   departureTime: string | null
   stopoverMinutes: number | null
 }
+// ── Car stops along the drive ──────────────────────────────────────────────
+//
+// A rental is one booking with one pick-up and one return, so — unlike a flight or a
+// train — the stops in between are not legs of their own: they are places the drive
+// passes through, each with an optional time the driver plans to be there. They persist
+// as the same `role: 'stop'` endpoints every other transport type already uses.
+interface CarStopForm {
+  location: LocationPoint | null
+  time: string
+}
+
+const emptyCarStop = (): CarStopForm => ({ location: null, time: '' })
+
 function emptyStationWaypoint(dayId: string | number = ''): StationWaypointForm {
-  return { location: null, arrDayId: dayId, arrTime: '', depDayId: dayId, depTime: '', train_number: '', platform: '', seat: '' }
+  return { location: null, arrDayId: dayId, arrTime: '', depDayId: dayId, depTime: '', train_number: '', platform: '', seat: '', confirmation_number: '' }
 }
 
 const TYPE_OPTIONS = [
@@ -167,17 +194,20 @@ interface TransportModalProps {
   initialAutomated?: boolean
   /** Transit search needs real dates to depart on, so the Automated mode is hidden on a dateless trip. */
   tripHasDates?: boolean
-  /** Pre-seed the transit search — used by "change route" on an existing journey. */
-  transitPrefill?: { from?: PickedPlace | null; to?: PickedPlace | null } | null
+  /** Pre-seed the transit search — used by "change route" and by per-leg planning. */
+  transitPrefill?: { from?: PickedPlace | null; to?: PickedPlace | null; time?: string | null } | null
+  /** Trip members + guests, for the traveler picker (#1517). */
+  tripMembers?: TripMember[]
 }
 
-export function TransportModal({ isOpen, onClose, onSave, reservation, days, selectedDayId, files = [], onFileUpload, onFileDelete, onOpenExpense, prefill = null, places = [], assignments = {}, accommodations = [], initialAutomated = false, transitPrefill = null, tripHasDates = true }: TransportModalProps) {
+export function TransportModal({ isOpen, onClose, onSave, reservation, days, selectedDayId, files = [], onFileUpload, onFileDelete, onOpenExpense, prefill = null, places = [], assignments = {}, accommodations = [], initialAutomated = false, transitPrefill = null, tripHasDates = true, tripMembers = [] }: TransportModalProps) {
   const { t, locale } = useTranslation()
   const toast = useToast()
   const isBudgetEnabled = useAddonStore(s => s.isEnabled('budget'))
   const budgetItems = useTripStore(s => s.budgetItems)
   const deleteBudgetItem = useTripStore(s => s.deleteBudgetItem)
   const loadFiles = useTripStore(s => s.loadFiles)
+  const setReservationTravelers = useTripStore(s => s.setReservationTravelers)
   const { id: tripId } = useParams<{ id: string }>()
   // Set right before submitting when the user clicked "create/edit expense", so
   // the post-save handler knows to open the Costs editor for the saved booking.
@@ -192,21 +222,54 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
   const [waypoints, setWaypoints] = useState<WaypointForm[]>([emptyWaypoint(), emptyWaypoint()])
   // Train route as an ordered list of stations (origin .. stops .. destination).
   const [trainWaypoints, setTrainWaypoints] = useState<StationWaypointForm[]>([emptyStationWaypoint(), emptyStationWaypoint()])
+  const chinaRailSequence = useRef(0)
   const [chinaRailSync, setChinaRailSync] = useState(false)
   const [chinaRailStops, setChinaRailStops] = useState<ChinaRailStop[]>([])
   const [selectedChinaRailStops, setSelectedChinaRailStops] = useState<Set<number>>(new Set())
   const [chinaRailLoading, setChinaRailLoading] = useState(false)
+  // A car keeps its pick-up and return as the frame of the rental and gains the stops
+  // in between (#1797): one booking, one continuous drive, several places along it.
+  const [carStops, setCarStops] = useState<CarStopForm[]>([])
+
+  /** Swaps a stop with its neighbour. Purely local: `sequence` is derived on save. */
+  const moveCarStop = (index: number, delta: number): void => {
+    setCarStops(prev => {
+      const to = index + delta
+      if (to < 0 || to >= prev.length) return prev
+      const next = [...prev]
+      ;[next[index], next[to]] = [next[to], next[index]]
+      return next
+    })
+  }
   const [uploadingFile, setUploadingFile] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [showFilePicker, setShowFilePicker] = useState(false)
   const [linkedFileIds, setLinkedFileIds] = useState<number[]>([])
+  // Travelers assigned to this booking (#1517) — seeded on open, persisted after save.
+  const [travelerIds, setTravelerIds] = useState<Set<number>>(new Set())
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const filePickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showFilePicker) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!filePickerRef.current?.contains(event.target as Node)) setShowFilePicker(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [showFilePicker])
+
+  useEffect(() => {
+    if (!isOpen) setShowFilePicker(false)
+  }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
+    chinaRailSequence.current += 1
     setChinaRailSync(false)
     setChinaRailStops([])
     setSelectedChinaRailStops(new Set())
+    setTravelerIds(new Set((reservation?.travelers || []).map(tv => tv.user_id)))
     // Edit uses the saved `reservation`; a review-import populates from `prefill`.
     // Either way the init reads the same fields — `reservation` still decides
     // edit-vs-create at submit time.
@@ -221,9 +284,12 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       const eps = src.endpoints || []
       const from = eps.find(e => e.role === 'from')
       const to = eps.find(e => e.role === 'to')
+      // 'transport_other', not 'flight': an import whose type could not be read has
+      // to arrive as something the user corrects, and a wrong flight looks right
+      // enough to be saved unnoticed (#2076).
       const type = (TRANSPORT_TYPES as readonly string[]).includes(src.type)
         ? src.type as TransportType
-        : 'flight'
+        : 'transport_other'
       setForm({
         title: src.title || '',
         type,
@@ -242,6 +308,13 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         meta_platform: meta.platform || '',
         meta_seat: meta.seat || '',
       })
+      // Only an import prefill carries a per-endpoint local_date without a day_id. On an
+      // edit the saved day wins: local_date is denormalised and can lag behind after a
+      // day drag, insertDay or a trip-date shift, so resolving from it would silently
+      // move the booking to another day on a plain re-save.
+      const endpointDayId = (ep?: { local_date?: string | null } | null) =>
+        reservation ? '' : resolveDayId(days, ep?.local_date)
+
       if (type === 'flight') {
         const orderedEps = orderedEndpoints(src)
         const metaLegs: any[] = Array.isArray(meta.legs) ? meta.legs : []
@@ -254,24 +327,32 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
             const isLast = i === orderedEps.length - 1
             return {
               airport: airportFromEndpoint(ep),
-              arrDayId: legInto?.arr_day_id ?? (isLast ? (src.end_day_id ?? '') : ''),
+              // An import prefill gives each endpoint its own local_date but no day_id, so
+              // resolve the day from that date — otherwise the review's per-leg day
+              // selectors render empty even though the time, read from the same
+              // endpoint, is filled.
+              arrDayId: legInto?.arr_day_id ?? (endpointDayId(ep) || (isLast ? (src.end_day_id ?? '') : '')),
               arrTime: legInto?.arr_time ?? (!isFirst ? (ep.local_time ?? '') : ''),
-              depDayId: legOut?.dep_day_id ?? (isFirst ? (src.day_id ?? '') : ''),
+              depDayId: legOut?.dep_day_id ?? (endpointDayId(ep) || (isFirst ? (src.day_id ?? '') : '')),
               depTime: legOut?.dep_time ?? (!isLast ? (ep.local_time ?? '') : ''),
               airline: legOut?.airline ?? (isFirst ? (meta.airline ?? '') : ''),
               flight_number: legOut?.flight_number ?? (isFirst ? (meta.flight_number ?? '') : ''),
               seat: legOut?.seat ?? (isFirst ? (meta.seat ?? '') : ''),
+              // No fallback to src.confirmation_number: that one belongs to the
+              // whole booking and stays in the form's own field, otherwise a
+              // plain re-save would copy it onto the first leg.
+              confirmation_number: legOut?.confirmation_number ?? '',
             }
           })
         } else {
           // Legacy flight with no (or partial) endpoints — seed two waypoints.
-          const dep = emptyWaypoint(src.day_id ?? '')
+          const dep = emptyWaypoint(endpointDayId(from) || (src.day_id ?? ''))
           dep.airport = airportFromEndpoint(from)
           dep.depTime = splitReservationDateTime(src.reservation_time).time ?? ''
           dep.airline = meta.airline ?? ''
           dep.flight_number = meta.flight_number ?? ''
           dep.seat = meta.seat ?? ''
-          const arr = emptyWaypoint(src.end_day_id ?? src.day_id ?? '')
+          const arr = emptyWaypoint(endpointDayId(to) || (src.end_day_id ?? src.day_id ?? ''))
           arr.airport = airportFromEndpoint(to)
           arr.arrTime = splitReservationDateTime(src.reservation_end_time).time ?? ''
           wps = [dep, arr]
@@ -293,23 +374,27 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
             const isLast = i === orderedEps.length - 1
             return {
               location: locationFromEndpoint(ep),
-              arrDayId: legInto?.arr_day_id ?? (isLast ? (src.end_day_id ?? '') : ''),
+              // See the flight branch: resolve each station's day from its endpoint local_date
+              // so an import prefill doesn't leave the per-leg day selectors empty.
+              arrDayId: legInto?.arr_day_id ?? (endpointDayId(ep) || (isLast ? (src.end_day_id ?? '') : '')),
               arrTime: legInto?.arr_time ?? (!isFirst ? (ep.local_time ?? '') : ''),
-              depDayId: legOut?.dep_day_id ?? (isFirst ? (src.day_id ?? '') : ''),
+              depDayId: legOut?.dep_day_id ?? (endpointDayId(ep) || (isFirst ? (src.day_id ?? '') : '')),
               depTime: legOut?.dep_time ?? (!isLast ? (ep.local_time ?? '') : ''),
               train_number: legOut?.train_number ?? (isFirst ? (meta.train_number ?? '') : ''),
               platform: legOut?.platform ?? (isFirst ? (meta.platform ?? '') : ''),
               seat: legOut?.seat ?? (isFirst ? (meta.seat ?? '') : ''),
+              // See the flight branch: the booking's own reference stays out of the legs.
+              confirmation_number: legOut?.confirmation_number ?? '',
             }
           })
         } else {
-          const dep = emptyStationWaypoint(src.day_id ?? '')
+          const dep = emptyStationWaypoint(endpointDayId(from) || (src.day_id ?? ''))
           dep.location = locationFromEndpoint(from)
           dep.depTime = splitReservationDateTime(src.reservation_time).time ?? ''
           dep.train_number = meta.train_number ?? ''
           dep.platform = meta.platform ?? ''
           dep.seat = meta.seat ?? ''
-          const arr = emptyStationWaypoint(src.end_day_id ?? src.day_id ?? '')
+          const arr = emptyStationWaypoint(endpointDayId(to) || (src.end_day_id ?? src.day_id ?? ''))
           arr.location = locationFromEndpoint(to)
           arr.arrTime = splitReservationDateTime(src.reservation_end_time).time ?? ''
           wps = [dep, arr]
@@ -320,6 +405,17 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       } else {
         setFromPick({ location: locationFromEndpoint(from) || undefined })
         setToPick({ location: locationFromEndpoint(to) || undefined })
+        // Stops persist for every type; only a car offers an editor for them, so only a
+        // car reads them back into one. The others keep passing theirs through untouched.
+        setCarStops(
+          src.type === 'car'
+            ? (src.endpoints ?? [])
+                .filter(e => e.role === 'stop')
+                .slice()
+                .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+                .map(e => ({ location: locationFromEndpoint(e), time: e.local_time ?? '' }))
+            : [],
+        )
       }
     } else {
       setForm({ ...defaultForm, start_day_id: selectedDayId ?? '', end_day_id: selectedDayId ?? '' })
@@ -328,10 +424,21 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       setToPick({})
       setWaypoints([emptyWaypoint(selectedDayId ?? ''), emptyWaypoint(selectedDayId ?? '')])
       setTrainWaypoints([emptyStationWaypoint(selectedDayId ?? ''), emptyStationWaypoint(selectedDayId ?? '')])
+      setCarStops([])
     }
   }, [isOpen, reservation, prefill, selectedDayId, budgetItems])
 
   const set = (field: string, value: any) => setForm(prev => ({ ...prev, [field]: value }))
+
+  // A response belongs to the booking, type and train/date that requested it.
+  // Switching to a car or reopening the dialog must not overwrite the new form.
+  useEffect(() => {
+    chinaRailSequence.current += 1
+    setChinaRailLoading(false)
+    setChinaRailStops([])
+    setSelectedChinaRailStops(new Set())
+    return () => { chinaRailSequence.current += 1 }
+  }, [isOpen, reservation?.id, form.type, chinaRailSync, trainWaypoints])
 
   const lookupChinaRail = async () => {
     const trainNumber = trainWaypoints[0]?.train_number.trim()
@@ -340,16 +447,19 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       toast.error(t('reservations.12306.missingInput'))
       return
     }
+    const sequence = ++chinaRailSequence.current
     setChinaRailLoading(true)
     try {
       const timetable = await reservationsApi.chinaRailTimetable(tripId, trainNumber, departureDay.date)
+      if (sequence !== chinaRailSequence.current) return
       setChinaRailStops(timetable.stops)
       setSelectedChinaRailStops(new Set(timetable.stops.map(stop => stop.sequence)))
     } catch (err: any) {
+      if (sequence !== chinaRailSequence.current) return
       toast.error(err?.response?.data?.error || t('reservations.12306.lookupError'))
       setChinaRailStops([])
     } finally {
-      setChinaRailLoading(false)
+      if (sequence === chinaRailSequence.current) setChinaRailLoading(false)
     }
   }
 
@@ -359,6 +469,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       toast.error(t('reservations.12306.selectTwo'))
       return
     }
+    const sequence = ++chinaRailSequence.current
     setChinaRailLoading(true)
     try {
       let dayOffset = 0
@@ -381,7 +492,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         const place = result.places?.[0]
         const lat = Number(place?.lat)
         const lng = Number(place?.lng)
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error(stop.name)
+        if (place?.lat == null || place?.lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error(stop.name)
         const offset = offsets.get(stop.sequence) || 0
         const date = baseDate ? new Date(`${baseDate}T12:00:00Z`) : null
         if (date) date.setUTCDate(date.getUTCDate() + offset)
@@ -393,20 +504,28 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
           depDayId: dayId,
           depTime: stop.departureTime || '',
           train_number: trainNumber,
+          confirmation_number: '',
           platform: '',
           seat: '',
         } satisfies StationWaypointForm
       }))
+      if (sequence !== chinaRailSequence.current) return
       setTrainWaypoints(resolved)
-      if (!form.title.trim()) set('title', `${trainNumber} ${picked[0].name} - ${picked[picked.length - 1].name}`)
+      setForm(prev => prev.title.trim() ? prev : { ...prev, title: `${trainNumber} ${picked[0].name} - ${picked[picked.length - 1].name}` })
       toast.success(t('reservations.12306.applied', { count: resolved.length }))
     } catch (err) {
+      if (sequence !== chinaRailSequence.current) return
       const station = err instanceof Error ? err.message : ''
       toast.error(t('reservations.12306.geocodeError', { station }))
     } finally {
-      setChinaRailLoading(false)
+      if (sequence === chinaRailSequence.current) setChinaRailLoading(false)
     }
   }
+  const toggleTraveler = (id: number) => setTravelerIds(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -463,6 +582,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
               ...(w.airline ? { airline: w.airline } : {}),
               ...(w.flight_number ? { flight_number: w.flight_number } : {}),
               ...(w.seat ? { seat: w.seat } : {}),
+              ...(w.confirmation_number ? { confirmation_number: w.confirmation_number } : {}),
               dep_day_id: w.depDayId ? Number(w.depDayId) : null,
               dep_time: w.depTime || null,
               arr_day_id: next.arrDayId ? Number(next.arrDayId) : null,
@@ -490,6 +610,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
               ...(w.train_number ? { train_number: w.train_number } : {}),
               ...(w.platform ? { platform: w.platform } : {}),
               ...(w.seat ? { seat: w.seat } : {}),
+              ...(w.confirmation_number ? { confirmation_number: w.confirmation_number } : {}),
               dep_day_id: w.depDayId ? Number(w.depDayId) : null,
               dep_time: w.depTime || null,
               arr_day_id: next.arrDayId ? Number(next.arrDayId) : null,
@@ -545,8 +666,14 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         })
       } else {
         if (fromPick.location) endpoints.push(endpointFromLocation(fromPick.location, 'from', 0, startDate, form.departure_time || null))
-        // Keep the itinerary's transfer stops while the route is unchanged (#1065).
-        const stops = keepTransit
+        // A car writes the stops the driver planned; every other type keeps passing the
+        // itinerary's transfer stops through while the route is unchanged (#1065).
+        const carEndpoints = form.type === 'car'
+          ? carStops
+              .filter(s => s.location)
+              .map((s, i) => endpointFromLocation(s.location!, 'stop', i + 1, startDate, s.time || null))
+          : []
+        const stops = keepTransit && form.type !== 'car'
           ? prevEndpointsAll.filter(ep => ep.role === 'stop').slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
           : []
         stops.forEach((s, i) => endpoints.push({
@@ -554,7 +681,9 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
           lat: s.lat, lng: s.lng, timezone: s.timezone ?? null,
           local_date: s.local_date ?? null, local_time: s.local_time ?? null,
         }))
-        if (toPick.location) endpoints.push(endpointFromLocation(toPick.location, 'to', stops.length + 1, endDate, form.arrival_time || null))
+        carEndpoints.forEach(e => endpoints.push(e))
+        const stopCount = stops.length + carEndpoints.length
+        if (toPick.location) endpoints.push(endpointFromLocation(toPick.location, 'to', stopCount + 1, endDate, form.arrival_time || null))
       }
 
       // Flights and trains derive their span from the first/last waypoint; other
@@ -584,7 +713,12 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         location: null,
         confirmation_number: form.confirmation_number || null,
         notes: form.notes || null,
-        metadata: Object.keys(metadata).length > 0 ? metadata : null,
+        // An empty object, not null: null clears the column outright, and that
+        // took the mirrored booking price with it on every edit of a type that
+        // fills no metadata of its own — restaurant, event, tour, parking, other,
+        // a hotel without check-in times (#2233). An object still clears what the
+        // form dropped, and lets the server carry the price across.
+        metadata,
         endpoints,
         needs_review: false,
       }
@@ -598,6 +732,17 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         }
       }
       const saved = await onSave(payload)
+      // Persist the traveler assignment once we have the reservation id (create → save
+      // result, edit → existing reservation), and only when it actually changed (#1517).
+      const savedId = saved?.id ?? reservation?.id
+      if (savedId && tripId) {
+        const original = (reservation?.travelers || []).map(tv => tv.user_id)
+        const nextIds = [...travelerIds]
+        const changed = original.length !== nextIds.length || nextIds.some(id => !original.includes(id))
+        if (changed) {
+          try { await setReservationTravelers(tripId, savedId, nextIds) } catch { toast.error(t('common.unknownError')) }
+        }
+      }
       if (!reservation?.id && saved?.id && pendingFiles.length > 0 && onFileUpload) {
         for (const file of pendingFiles) {
           const fd = new FormData()
@@ -683,6 +828,12 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
     }),
   ]
 
+  // The per-leg booking code is only offered where handleSubmit actually writes
+  // metadata.legs: the SAME condition, over the waypoints that become endpoints,
+  // not over the raw rows. Anywhere else the value would vanish on save (#1943).
+  const writesFlightLegs = waypoints.filter(w => w.airport).length > 2
+  const writesTrainLegs = trainWaypoints.filter(w => w.location).length > 2
+
   return (
     <Modal
       isOpen={isOpen}
@@ -754,6 +905,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                 onAdd={(payload) => onSave(payload as Record<string, any> & { title: string })}
                 initialFrom={transitPrefill?.from ?? null}
                 initialTo={transitPrefill?.to ?? null}
+                initialTime={transitPrefill?.time ?? null}
               />
             )
           })()}
@@ -821,7 +973,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                         {wp.airport && (
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <label className={labelClass}>{t('reservations.meta.arrivalTimezone')}</label>
-                            <div className={inputClass} style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: 'calc(12px * var(--fs-scale-body, 1))', background: 'var(--bg-tertiary)' }}>{wp.airport.tz}</div>
+                            <div className={inputClass} style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: 'calc(12px * var(--fs-scale-body, 1))', background: 'var(--bg-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={wp.airport.tz}>{wp.airport.tz}</div>
                           </div>
                         )}
                       </div>
@@ -840,11 +992,11 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                           {wp.airport && (
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <label className={labelClass}>{t('reservations.meta.departureTimezone')}</label>
-                              <div className={inputClass} style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: 'calc(12px * var(--fs-scale-body, 1))', background: 'var(--bg-tertiary)' }}>{wp.airport.tz}</div>
+                              <div className={inputClass} style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: 'calc(12px * var(--fs-scale-body, 1))', background: 'var(--bg-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={wp.airport.tz}>{wp.airport.tz}</div>
                             </div>
                           )}
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className={`grid grid-cols-1 ${writesFlightLegs ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
                           <div>
                             <label className={labelClass}>{t('reservations.meta.airline')}</label>
                             <input type="text" value={wp.airline} onChange={e => updateWp({ airline: e.target.value })} placeholder="Lufthansa" className={inputClass} />
@@ -857,6 +1009,13 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                             <label className={labelClass}>{t('reservations.meta.seat')}</label>
                             <input type="text" value={wp.seat} onChange={e => updateWp({ seat: e.target.value })} placeholder="12A" className={inputClass} />
                           </div>
+                          {writesFlightLegs && (
+                            <div>
+                              <label className={labelClass}>{t('reservations.confirmationCode')}</label>
+                              <input type="text" value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
+                                placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
+                            </div>
+                          )}
                         </div>
                       </>
                     )}
@@ -956,7 +1115,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                             <CustomTimePicker value={wp.depTime} onChange={v => updateWp({ depTime: v })} />
                           </div>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className={`grid grid-cols-1 ${writesTrainLegs ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
                           <div>
                             <label className={labelClass}>{t('reservations.meta.trainNumber')}</label>
                             <input type="text" value={wp.train_number} onChange={e => updateWp({ train_number: e.target.value })} placeholder="ICE 123" className={inputClass} />
@@ -969,6 +1128,13 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                             <label className={labelClass}>{t('reservations.meta.seat')}</label>
                             <input type="text" value={wp.seat} onChange={e => updateWp({ seat: e.target.value })} placeholder="42A" className={inputClass} />
                           </div>
+                          {writesTrainLegs && (
+                            <div>
+                              <label className={labelClass}>{t('reservations.confirmationCode')}</label>
+                              <input type="text" value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
+                                placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
+                            </div>
+                          )}
                         </div>
                       </>
                     )}
@@ -996,6 +1162,76 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                 <LocationSelect value={toPick.location || null} onChange={l => setToPick({ location: l || undefined })} />
               </div>
             </div>
+
+            {/* Stops along the drive — cars only (#1797). The rental frame above stays the
+                pick-up and return; these are the places in between, in order. */}
+            {form.type === 'car' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label className={labelClass}>{t('roadtrip.stops.label')}</label>
+                {carStops.map((stop, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    {/* The order of these stops IS the route: `sequence` is the array index
+                        at save time, so the only way to change which one is driven first
+                        was to delete both and re-enter them. Buttons rather than dragging,
+                        because the row already carries a location picker and a time picker
+                        and there is nothing left to grab. */}
+                    {carStops.length > 1 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => moveCarStop(i, -1)}
+                          disabled={i === 0}
+                          aria-label={t('dayplan.moveUp')}
+                          className="text-content-faint enabled:hover:text-content disabled:opacity-30"
+                          style={{ background: 'none', border: 'none', cursor: i === 0 ? 'default' : 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}
+                        >
+                          <ChevronUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveCarStop(i, 1)}
+                          disabled={i === carStops.length - 1}
+                          aria-label={t('dayplan.moveDown')}
+                          className="text-content-faint enabled:hover:text-content disabled:opacity-30"
+                          style={{ background: 'none', border: 'none', cursor: i === carStops.length - 1 ? 'default' : 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <LocationSelect
+                        value={stop.location}
+                        onChange={l => setCarStops(prev => prev.map((s, j) => (j === i ? { ...s, location: l || null } : s)))}
+                      />
+                    </div>
+                    <div style={{ width: 110, flexShrink: 0 }}>
+                      <CustomTimePicker
+                        value={stop.time}
+                        onChange={v => setCarStops(prev => prev.map((s, j) => (j === i ? { ...s, time: v } : s)))}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCarStops(prev => prev.filter((_, j) => j !== i))}
+                      aria-label={t('roadtrip.stops.remove')}
+                      className="text-content-faint hover:text-danger"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, display: 'flex', alignItems: 'center' }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setCarStops(prev => [...prev, emptyCarStop()])}
+                  className="text-content-faint hover:text-content-secondary"
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '6px 10px', border: '1px dashed var(--border-primary)', borderRadius: 8, background: 'none', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  <Plus size={12} /> {t('reservations.layover.addStop')}
+                </button>
+              </div>
+            )}
 
             {/* Departure row */}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -1055,6 +1291,12 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
             className={inputClass} style={{ resize: 'none', lineHeight: 1.5 }} />
         </div>
 
+        {/* Travelers — assign trip members & guests to this transport (#1517) */}
+        <div>
+          <label className={labelClass}>{t('reservations.travelers.label')}</label>
+          <TravelerPicker tripMembers={tripMembers} selectedIds={travelerIds} onToggle={toggleTraveler} />
+        </div>
+
         {/* Files */}
         <div>
           <label className={labelClass}>{t('files.title')}</label>
@@ -1063,7 +1305,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
               <div key={f.id} className="bg-surface-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderRadius: 8 }}>
                 <FileText size={12} className="text-content-muted" style={{ flexShrink: 0 }} />
                 <span className="text-content-secondary" style={{ flex: 1, fontSize: 'calc(12px * var(--fs-scale-body, 1))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_name}</span>
-                <a href="#" onClick={(e) => { e.preventDefault(); openFile(f.url).catch(() => {}) }} className="text-content-faint" style={{ display: 'flex', flexShrink: 0, cursor: 'pointer' }}><ExternalLink size={11} /></a>
+                <button type="button" onClick={() => { openFile(f.url).catch(() => {}) }} aria-label={t('common.open')} className="text-content-faint" style={{ background: 'none', border: 'none', padding: 0, display: 'flex', flexShrink: 0, cursor: 'pointer' }}><ExternalLink size={11} /></button>
                 <button type="button" onClick={async () => {
                   if (f.reservation_id === reservation?.id) {
                     try { await apiClient.put(`/trips/${tripId}/files/${f.id}`, { reservation_id: null }) } catch { toast.error(t('reservations.toast.updateError')) }
@@ -1101,7 +1343,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                 {uploadingFile ? t('reservations.uploading') : t('reservations.attachFile')}
               </button>}
               {reservation?.id && files.filter(f => !f.deleted_at && !attachedFiles.some(af => af.id === f.id)).length > 0 && (
-                <div style={{ position: 'relative' }}>
+                <div ref={filePickerRef} style={{ position: 'relative' }}>
                   <button type="button" onClick={() => setShowFilePicker(v => !v)} className="text-content-faint" style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px',
                     border: '1px dashed var(--border-primary)', borderRadius: 8, background: 'none',

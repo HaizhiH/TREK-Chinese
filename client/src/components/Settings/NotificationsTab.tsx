@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { Lock } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { notificationsApi, settingsApi } from '../../api/client'
@@ -39,6 +39,10 @@ const EVENT_LABEL_KEYS: Record<string, string> = {
   trip_reminder: 'settings.notifyTripReminder',
   todo_due: 'settings.notifyTodoDue',
   vacay_invite: 'settings.notifyVacayInvite',
+  vacay_share: 'settings.notifyVacayShare',
+  collection_invite: 'settings.notifyCollectionInvite',
+  synology_session_cleared: 'settings.notifySynologySessionCleared',
+  plugin_notification: 'settings.notifyPluginNotification',
   photos_shared: 'settings.notifyPhotosShared',
   collab_message: 'settings.notifyCollabMessage',
   packing_tagged: 'settings.notifyPackingTagged',
@@ -115,16 +119,24 @@ export default function NotificationsTab(): React.ReactElement {
   const toggle = async (eventType: string, channel: string) => {
     if (!matrix) return
     const current = matrix.preferences[eventType]?.[channel] ?? true
-    const updated = {
-      ...matrix.preferences,
-      [eventType]: { ...matrix.preferences[eventType], [channel]: !current },
-    }
-    setMatrix(m => m ? { ...m, preferences: updated } : m)
+    setMatrix(m => m ? {
+      ...m,
+      preferences: { ...m.preferences, [eventType]: { ...m.preferences[eventType], [channel]: !current } },
+    } : m)
     setSaving(true)
     try {
-      await notificationsApi.updatePreferences(updated)
+      // Only the toggled cell goes out. The server merges what it gets, and sending the
+      // whole matrix would carry this render's value for every other cell — a second
+      // toggle made while this request is in flight would be overwritten by it.
+      await notificationsApi.updatePreferences({ [eventType]: { [channel]: !current } })
     } catch {
-      setMatrix(m => m ? { ...m, preferences: matrix.preferences } : m)
+      // Only this cell rolls back — restoring the whole snapshot would also undo a
+      // toggle the user made while this request was in flight.
+      setMatrix(m => m ? {
+        ...m,
+        preferences: { ...m.preferences, [eventType]: { ...m.preferences[eventType], [channel]: current } },
+      } : m)
+      toast.error(t('common.error'))
     } finally {
       setSaving(false)
     }
@@ -164,9 +176,9 @@ export default function NotificationsTab(): React.ReactElement {
       await settingsApi.setBulk({
         ntfy_topic: ntfyTopic,
         ntfy_server: ntfyServer,
-        ...(ntfyToken && ntfyToken !== '••••••••' ? { ntfy_token: ntfyToken } : {}),
+        ...(ntfyToken ? { ntfy_token: ntfyToken } : {}),
       })
-      if (ntfyToken && ntfyToken !== '••••••••') setNtfyTokenIsSet(true)
+      if (ntfyToken) setNtfyTokenIsSet(true)
       toast.success(t('settings.ntfyUrl.saved'))
     } catch {
       toast.error(t('common.error'))
@@ -193,7 +205,9 @@ export default function NotificationsTab(): React.ReactElement {
       const result = await notificationsApi.testNtfy({
         topic: ntfyTopic,
         server: ntfyServer || null,
-        token: ntfyToken && ntfyToken !== '••••••••' ? ntfyToken : null,
+        // A stored token is only masked in the placeholder, never in state — sending
+        // null makes the server fall back to the saved one.
+        token: ntfyToken || null,
       })
       if (result.success) toast.success(t('settings.ntfyUrl.testSuccess'))
       else toast.error(result.error || t('settings.ntfyUrl.testFailed'))
@@ -232,14 +246,14 @@ export default function NotificationsTab(): React.ReactElement {
                 placeholder={webhookIsSet ? '••••••••' : t('settings.webhookUrl.placeholder')}
                 style={{ flex: 1, fontSize: 'calc(13px * var(--fs-scale-body, 1))', padding: '6px 10px', border: '1px solid var(--border-primary)', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
               />
-              <button
+              <button type="button"
                 onClick={saveWebhookUrl}
                 disabled={webhookSaving}
                 style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 12px', background: 'var(--text-primary)', color: 'var(--bg-primary)', border: 'none', borderRadius: 6, cursor: webhookSaving ? 'not-allowed' : 'pointer', opacity: webhookSaving ? 0.6 : 1 }}
               >
                 {t('common.save')}
               </button>
-              <button
+              <button type="button"
                 onClick={testWebhookUrl}
                 disabled={(!webhookUrl && !webhookIsSet) || webhookTesting}
                 style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 12px', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-primary)', borderRadius: 6, cursor: ((!webhookUrl && !webhookIsSet) || webhookTesting) ? 'not-allowed' : 'pointer', opacity: ((!webhookUrl && !webhookIsSet) || webhookTesting) ? 0.5 : 1 }}
@@ -285,21 +299,21 @@ export default function NotificationsTab(): React.ReactElement {
                 style={{ flex: 1, fontSize: 'calc(13px * var(--fs-scale-body, 1))', padding: '6px 10px', border: '1px solid var(--border-primary)', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
               />
               {ntfyTokenIsSet && (
-                <button
+                <button type="button"
                   onClick={clearNtfyToken}
                   style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 12px', background: 'transparent', color: 'var(--color-danger, #e53e3e)', border: '1px solid var(--color-danger, #e53e3e)', borderRadius: 6, cursor: 'pointer' }}
                 >
                   {t('common.clear')}
                 </button>
               )}
-              <button
+              <button type="button"
                 onClick={saveNtfySettings}
                 disabled={ntfySaving}
                 style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 12px', background: 'var(--text-primary)', color: 'var(--bg-primary)', border: 'none', borderRadius: 6, cursor: ntfySaving ? 'not-allowed' : 'pointer', opacity: ntfySaving ? 0.6 : 1 }}
               >
                 {t('common.save')}
               </button>
-              <button
+              <button type="button"
                 onClick={testNtfySettings}
                 disabled={!ntfyTopic || ntfyTesting}
                 style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 12px', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-primary)', borderRadius: 6, cursor: (!ntfyTopic || ntfyTesting) ? 'not-allowed' : 'pointer', opacity: (!ntfyTopic || ntfyTesting) ? 0.5 : 1 }}
@@ -330,7 +344,7 @@ export default function NotificationsTab(): React.ReactElement {
                   {t('settings.notificationPreferences.configure')}
                 </Link>
               )}
-              <button
+              <button type="button"
                 onClick={() => testChannel(ch)}
                 disabled={!ch.configured || channelTesting === ch.id}
                 style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 12px', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-primary)', borderRadius: 6, cursor: (!ch.configured || channelTesting === ch.id) ? 'not-allowed' : 'pointer', opacity: (!ch.configured || channelTesting === ch.id) ? 0.5 : 1 }}

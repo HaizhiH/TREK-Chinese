@@ -14,7 +14,7 @@ interface AdminNotificationsTabProps {
 // trip reminders, admin webhook + ntfy targets, and the per-event preference matrix.
 // Derives channel state from smtpValues exactly as the original inline IIFE did.
 export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTabProps): React.ReactElement {
-  const { toast, smtpValues, setSmtpValues, smtpLoaded, setTripRemindersEnabled } = admin
+  const { toast, smtpValues, setSmtpValues, smtpLoaded, setTripRemindersEnabled, managed } = admin
 
   // Derive active channels from smtpValues.notification_channels (plural)
   // with fallback to notification_channel (singular) for existing installs
@@ -57,7 +57,23 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
   }
 
   return (<>
-    <div className="space-y-4">
+    {/* Two columns from xl up, the same shape as the Settings tab. Most of these
+        cards are a title with a switch on the far right, so on a wide screen the
+        middle stayed empty while the page still scrolled past the three tall ones.
+        Two explicit columns rather than a grid over the flat list: a plain grid
+        pairs cards row by row and leaves a hole under the shorter one, and the SMTP
+        card is taller than all the toggle rows together. Grouped by audience, not by
+        height — the channels a user can receive on the left, everything the operator
+        sends or receives themselves on the right. The three channel switches stay
+        together because they all write the same notification_channels list.
+        On a managed install the two admin-target cards are gone and the right column
+        is the matrix alone — still a column, so the grid keeps working. */}
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-start">
+      <div className="space-y-6">
+      {/* The relay is the operator's: their host, their credential, their sending
+          reputation. An instance that could point it elsewhere would send under a
+          domain it does not own. */}
+      {!managed && (<>
       {/* Email Panel */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -65,7 +81,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
             <h2 className="font-semibold text-slate-900">{t('admin.notifications.emailPanel.title')}</h2>
             <p className="text-xs text-slate-400 mt-1">{t('admin.smtp.hint')}</p>
           </div>
-          <button
+          <button type="button"
             onClick={() => setChannels(!emailActive, webhookActive, ntfyActive)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${emailActive ? 'bg-content' : 'bg-edge'}`}
           >
@@ -83,9 +99,12 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
           ].map(field => (
             <div key={field.key}>
               <label className="block text-xs font-medium text-slate-500 mb-1">{field.label}</label>
+              {/* A stored password comes back masked. Showing the mask as the VALUE meant
+                  typing a new one appended it to eight bullet characters and saved that,
+                  so the same treatment as the webhook URL below: mask as placeholder. */}
               <input
                 type={field.type || 'text'}
-                value={smtpValues[field.key] || ''}
+                value={smtpValues[field.key] === '••••••••' ? '' : smtpValues[field.key] || ''}
                 onChange={e => setSmtpValues(prev => ({ ...prev, [field.key]: e.target.value }))}
                 placeholder={field.placeholder}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent"
@@ -97,7 +116,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
               <span className="text-xs font-medium text-slate-500">Skip TLS certificate check</span>
               <p className="text-[10px] text-slate-400 mt-0.5">Enable for self-signed certificates on local mail servers</p>
             </div>
-            <button onClick={() => {
+            <button type="button" onClick={() => {
               const newVal = smtpValues.smtp_skip_tls_verify === 'true' ? 'false' : 'true'
               setSmtpValues(prev => ({ ...prev, smtp_skip_tls_verify: newVal }))
             }}
@@ -108,11 +127,11 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
           </div>
         </div>
         <div className="px-6 pb-4 flex items-center gap-2 border-t border-slate-100 pt-4">
-          <button onClick={saveNotifications}
+          <button type="button" onClick={saveNotifications}
             className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">
             <Save className="w-4 h-4" />{t('common.save')}
           </button>
-          <button
+          <button type="button"
             onClick={async () => {
               const smtpKeys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'smtp_skip_tls_verify']
               const payload: Record<string, string> = {}
@@ -132,6 +151,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
         </div>
       </div>
 
+      </>)}
       {/* Webhook Panel */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 flex items-center justify-between">
@@ -139,7 +159,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
             <h2 className="font-semibold text-slate-900">{t('admin.notifications.webhookPanel.title')}</h2>
             <p className="text-xs text-slate-400 mt-1">{t('admin.webhook.hint')}</p>
           </div>
-          <button
+          <button type="button"
             onClick={() => setChannels(emailActive, !webhookActive, ntfyActive)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${webhookActive ? 'bg-content' : 'bg-edge'}`}
           >
@@ -156,7 +176,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
             <h2 className="font-semibold text-slate-900">{t('admin.notifications.ntfy')}</h2>
             <p className="text-xs text-slate-400 mt-1">{t('admin.ntfy.hint') || 'Allow users to configure their own ntfy topics for push notifications.'}</p>
           </div>
-          <button
+          <button type="button"
             onClick={() => setChannels(emailActive, webhookActive, !ntfyActive)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${ntfyActive ? 'bg-content' : 'bg-edge'}`}
           >
@@ -188,7 +208,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
             <h2 className="font-semibold text-slate-900">{t('admin.notifications.tripReminders.title')}</h2>
             <p className="text-xs text-slate-400 mt-1">{t('admin.notifications.tripReminders.hint')}</p>
           </div>
-          <button
+          <button type="button"
             onClick={async () => {
               const next = !tripRemindersActive
               setSmtpValues(prev => ({ ...prev, notify_trip_reminder: next ? 'true' : 'false' }))
@@ -210,7 +230,12 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
           </button>
         </div>
       </div>
+      </div>
 
+      <div className="space-y-6">
+      {/* Admin alerts are about running the instance (version notices, and what else
+          lands there later). On a managed install those go to whoever runs it. */}
+      {!managed && (<>
       {/* Admin Webhook Panel */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100">
@@ -232,7 +257,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
           )}
         </div>
         <div className="px-6 pb-4 flex items-center gap-2 border-t border-slate-100 pt-4">
-          <button
+          <button type="button"
             onClick={async () => {
               try {
                 await authApi.updateAppSettings({ admin_webhook_url: smtpValues.admin_webhook_url || '' })
@@ -242,10 +267,11 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
             className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">
             <Save className="w-4 h-4" />{t('common.save')}
           </button>
-          <button
+          <button type="button"
             onClick={async () => {
+              // A masked value means the URL only lives on the server — send no url and let
+              // the server test the stored one instead of pre-saving the mask.
               const url = smtpValues.admin_webhook_url === '••••••••' ? undefined : smtpValues.admin_webhook_url
-              if (!url && smtpValues.admin_webhook_url !== '••••••••') return
               try {
                 if (url) await authApi.updateAppSettings({ admin_webhook_url: url }).catch(() => {})
                 const result = await notificationsApi.testWebhook(url)
@@ -261,7 +287,8 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
         </div>
       </div>
 
-      {/* Admin Ntfy Panel */}
+      {/* Admin Ntfy Panel — same audience as the webhook above, and inside the
+          same wrapper. */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100">
           <h2 className="font-semibold text-slate-900">{t('admin.notifications.adminNtfyPanel.title')}</h2>
@@ -302,7 +329,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
                     className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent"
                   />
                   {smtpValues.admin_ntfy_token === '••••••••' && (
-                    <button
+                    <button type="button"
                       onClick={async () => {
                         try {
                           await authApi.updateAppSettings({ admin_ntfy_token: '' })
@@ -321,7 +348,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
           )}
         </div>
         <div className="px-6 pb-4 flex items-center gap-2 border-t border-slate-100 pt-4">
-          <button
+          <button type="button"
             onClick={async () => {
               try {
                 await authApi.updateAppSettings({
@@ -337,7 +364,7 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
             className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">
             <Save className="w-4 h-4" />{t('common.save')}
           </button>
-          <button
+          <button type="button"
             onClick={async () => {
               const topic = smtpValues.admin_ntfy_topic?.trim()
               if (!topic) return
@@ -360,10 +387,13 @@ export default function AdminNotificationsTab({ admin, t }: AdminNotificationsTa
           </button>
         </div>
       </div>
+      </>)}
 
-    </div>
-    <div className="mt-6">
+      {/* The matrix decides which of those channels each admin-only event goes out
+          over, so it belongs under the targets it routes to rather than across the
+          full width below both columns. */}
       <AdminNotificationsPanel t={t} toast={toast} />
+      </div>
     </div>
   </>)
 }

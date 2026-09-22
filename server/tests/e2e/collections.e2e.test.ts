@@ -1,9 +1,11 @@
 /**
  * Collections e2e — drives /api/addons/collections through the REAL JwtAuthGuard
- * AND the real collectionsService against a temp SQLite db (full schema). Only the
- * addon flag, websocket and notification send are mocked. Covers: the addon gate
+ * AND the real DI-native CollectionsService (DatabaseModule + RealtimeModule +
+ * CollectionsModule) against a temp SQLite db (full schema). Only the addon
+ * flag, websocket and notification send are mocked. Covers: the addon gate
  * (404 before auth), auth, CRUD happy paths, invite/accept/decline, copy-to-trip,
- * cross-user 404s and the non-owner 403 on /:id/available-users (no enumeration).
+ * cross-user 404s, the non-owner 403 on /:id/available-users (no enumeration), and
+ * a list out as GPX and back in through the reader and the import (#2301).
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';
@@ -32,15 +34,17 @@ vi.mock('../../src/db/database', () => ({
 }));
 
 const { isAddonEnabled } = vi.hoisted(() => ({ isAddonEnabled: vi.fn(() => true) }));
-vi.mock('../../src/services/adminService', () => ({ isAddonEnabled }));
 vi.mock('../../src/websocket', () => ({ broadcastToUser: vi.fn(), broadcast: vi.fn() }));
-vi.mock('../../src/services/notificationService', () => ({ send: vi.fn().mockResolvedValue(undefined) }));
 
 import { createTables } from '../../src/db/schema';
 import { runMigrations } from '../../src/db/migrations';
-import { createUser, createTrip, createCategory } from '../helpers/factories';
+import { createUser, createTrip, createCategory, createDay, createPlace, createDayAssignment } from '../helpers/factories';
 import { CollectionsModule } from '../../src/nest/collections/collections.module';
+import { DatabaseModule } from '../../src/nest/database/database.module';
+import { RealtimeModule } from '../../src/nest/realtime/realtime.module';
+import { AddonsService } from '../../src/nest/addons/addons.service';
 import { TrekExceptionFilter } from '../../src/nest/common/trek-exception.filter';
+import { ZodValidationPipe } from '../../src/nest/common/zod-validation.pipe';
 
 describe('Collections e2e (real auth guard + real service + temp SQLite)', () => {
   let server: Server;
@@ -50,10 +54,16 @@ describe('Collections e2e (real auth guard + real service + temp SQLite)', () =>
   let tripId: number;
 
   async function build() {
-    const moduleRef = await Test.createTestingModule({ imports: [CollectionsModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule, RealtimeModule, CollectionsModule] })
+      .overrideProvider(AddonsService)
+      .useValue({ isAddonEnabled })
+      .compile();
     const nest = moduleRef.createNestApplication();
     nest.use(cookieParser());
     nest.useGlobalFilters(new TrekExceptionFilter());
+    // Mirror the production APP_PIPE (app.module.ts): DTO-typed bodies validate
+    // by metatype, exactly as they do under buildApp().
+    nest.useGlobalPipes(new ZodValidationPipe());
     await nest.init();
     return nest;
   }
@@ -143,6 +153,34 @@ describe('Collections e2e (real auth guard + real service + temp SQLite)', () =>
       .set('Cookie', sessionCookie(ownerId)).send({ name: 'Colosseo' });
     expect(patched.status).toBe(200);
     expect(db.prepare('SELECT status FROM collection_places WHERE id = ?').get(placeId)).toEqual({ status: 'want' });
+  });
+
+  // #1870: the address was missing from the update contract, so the pipe stripped
+  // it and the column never moved. A saved address was effectively read-only.
+  it('COLLECTIONS-E2E-013: PATCH address corrects a saved place and survives the validation pipe', async () => {
+    const col = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Addresses' })).body;
+    const saved = await request(server).post('/api/addons/collections/places')
+      .set('Cookie', sessionCookie(ownerId)).send({ collection_id: col.id, name: 'Trattoria', address: 'Via Vechia 1' });
+    expect(saved.status).toBe(200);
+    const placeId = saved.body.place.id;
+
+    const patched = await request(server).patch(`/api/addons/collections/places/${placeId}`)
+      .set('Cookie', sessionCookie(ownerId)).send({ address: 'Via Nuova 1' });
+    expect(patched.status).toBe(200);
+    expect(patched.body.address).toBe('Via Nuova 1');
+    expect(db.prepare('SELECT address FROM collection_places WHERE id = ?').get(placeId)).toEqual({ address: 'Via Nuova 1' });
+
+    // A rename must not wipe the address that was just corrected.
+    const renamed = await request(server).patch(`/api/addons/collections/places/${placeId}`)
+      .set('Cookie', sessionCookie(ownerId)).send({ name: 'Trattoria da Enzo' });
+    expect(renamed.status).toBe(200);
+    expect(db.prepare('SELECT address FROM collection_places WHERE id = ?').get(placeId)).toEqual({ address: 'Via Nuova 1' });
+
+    // null clears it again.
+    const cleared = await request(server).patch(`/api/addons/collections/places/${placeId}`)
+      .set('Cookie', sessionCookie(ownerId)).send({ address: null });
+    expect(cleared.status).toBe(200);
+    expect(db.prepare('SELECT address FROM collection_places WHERE id = ?').get(placeId)).toEqual({ address: null });
   });
 
   // ── Cross-user isolation ─────────────────────────────────────────────────
@@ -237,6 +275,161 @@ describe('Collections e2e (real auth guard + real service + temp SQLite)', () =>
     const res = await request(server).post('/api/addons/collections/labels')
       .set('Cookie', sessionCookie(otherId)).send({ collection_id: col.id, name: 'Nope' });
     expect(res.status).toBe(404);
+  });
+
+  // ── import preview ───────────────────────────────────────────────────────
+  it('COLLECTIONS-E2E-070: the preview marks scheduled places and carries the day they sit on', async () => {
+    const col = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Rome ideas' })).body;
+    const trip = createTrip(db as never, ownerId);
+    const day = createDay(db as never, trip.id, { day_number: 2, date: '2026-05-02' });
+    const planned = createPlace(db as never, trip.id, { name: 'Colosseum', lat: 41.89, lng: 12.49 });
+    createPlace(db as never, trip.id, { name: 'Testaccio Market', lat: 41.87, lng: 12.47 });
+    createDayAssignment(db as never, day.id, planned.id);
+
+    const res = await request(server).get(`/api/addons/collections/${col.id}/importable/${trip.id}`).set('Cookie', sessionCookie(ownerId));
+    expect(res.status).toBe(200);
+
+    const byName = Object.fromEntries(res.body.places.map((p: { name: string }) => [p.name, p]));
+    expect(byName['Colosseum'].scheduled).toBe(true);
+    expect(byName['Colosseum'].day_number).toBe(2);
+    expect(byName['Colosseum'].date).toBe('2026-05-02');
+    // The one no day holds — what the import is for, so the dialog can pre-select it.
+    expect(byName['Testaccio Market'].scheduled).toBe(false);
+    expect(byName['Testaccio Market'].day_number).toBeNull();
+  });
+
+  it('COLLECTIONS-E2E-071: the preview verdict is the one the import then acts on', async () => {
+    const col = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Paris ideas' })).body;
+    const trip = createTrip(db as never, ownerId);
+    const a = createPlace(db as never, trip.id, { name: 'Musée Rodin', lat: 48.85, lng: 2.31 });
+    const b = createPlace(db as never, trip.id, { name: 'Rue Cler', lat: 48.85, lng: 2.30 });
+
+    // Save one of them first, so the list already holds it.
+    await request(server).post('/api/addons/collections/places')
+      .set('Cookie', sessionCookie(ownerId)).send({ collection_id: col.id, name: 'Musée Rodin', lat: 48.85, lng: 2.31 });
+
+    const preview = await request(server).get(`/api/addons/collections/${col.id}/importable/${trip.id}`).set('Cookie', sessionCookie(ownerId));
+    const flagged = preview.body.places.filter((p: { already_in_list: boolean }) => p.already_in_list).map((p: { name: string }) => p.name);
+    expect(flagged).toEqual(['Musée Rodin']);
+
+    // Importing both must skip exactly what the preview greyed out, and copy the rest.
+    const imported = await request(server).post('/api/addons/collections/places/from-trip-many')
+      .set('Cookie', sessionCookie(ownerId)).send({ collection_id: col.id, source_trip_id: trip.id, source_place_ids: [a.id, b.id] });
+    expect(imported.status).toBe(200);
+    expect(imported.body.copied).toBe(1);
+    expect(imported.body.skipped.map((s: { name: string }) => s.name)).toEqual(['Musée Rodin']);
+  });
+
+  // ── bulk visited (#1469) ─────────────────────────────────────────────────
+  it('COLLECTIONS-E2E-073: a trip selection can be marked visited in every list holding it', async () => {
+    const paris = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Paris' })).body;
+    const museums = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Museums' })).body;
+    const trip = createTrip(db as never, ownerId);
+    const louvre = createPlace(db as never, trip.id, { name: 'Louvre', lat: 48.8606, lng: 2.3376 });
+
+    for (const col of [paris, museums]) {
+      await request(server).post('/api/addons/collections/places/from-trip')
+        .set('Cookie', sessionCookie(ownerId)).send({ collection_id: col.id, source_trip_id: trip.id, source_place_id: louvre.id });
+    }
+
+    const res = await request(server).post('/api/addons/collections/places/status-from-trip')
+      .set('Cookie', sessionCookie(ownerId)).send({ trip_id: trip.id, place_ids: [louvre.id], status: 'visited' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ updated: 2, places: 1 });
+
+    // …and the dialog's per-list view now says so.
+    const membership = await request(server).get('/api/addons/collections/membership')
+      .query({ lat: 48.8606, lng: 2.3376 }).set('Cookie', sessionCookie(ownerId));
+    expect(membership.body.lists.map((l: { status: string }) => l.status)).toEqual(['visited', 'visited']);
+  });
+
+  it('COLLECTIONS-E2E-074: status-many refuses a list the caller may only read', async () => {
+    const col = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Shared' })).body;
+    await request(server).post('/api/addons/collections/invite').set('Cookie', sessionCookie(ownerId)).send({ collection_id: col.id, user_id: otherId, role: 'viewer' });
+    await request(server).post('/api/addons/collections/invite/accept').set('Cookie', sessionCookie(otherId)).send({ collection_id: col.id });
+    const place = (await request(server).post('/api/addons/collections/places')
+      .set('Cookie', sessionCookie(ownerId)).send({ collection_id: col.id, name: 'Louvre' })).body.place;
+
+    const res = await request(server).post('/api/addons/collections/places/status-many')
+      .set('Cookie', sessionCookie(otherId)).send({ ids: [place.id], status: 'visited' });
+    expect(res.status).toBe(403);
+  });
+
+  it('COLLECTIONS-E2E-072: a trip the caller cannot see is a 404, and so is a foreign list', async () => {
+    const col = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Private' })).body;
+    const foreignTrip = createTrip(db as never, otherId);
+
+    expect((await request(server).get(`/api/addons/collections/${col.id}/importable/${foreignTrip.id}`).set('Cookie', sessionCookie(ownerId))).status).toBe(404);
+    expect((await request(server).get(`/api/addons/collections/${col.id}/importable/${tripId}`).set('Cookie', sessionCookie(otherId))).status).toBe(404);
+  });
+
+  // ── GPX (#2301) ──────────────────────────────────────────────────────────
+  it('COLLECTIONS-E2E-080: a list goes out as GPX and comes back through the reader and the import', async () => {
+    const as = (userId: number) => ({ Cookie: sessionCookie(userId) });
+    const col = (await request(server).post('/api/addons/collections').set(as(ownerId)).send({ name: 'Round trip' })).body;
+    await request(server).post('/api/addons/collections/places').set(as(ownerId))
+      .send({ collection_id: col.id, name: 'Pinned', lat: 41.9, lng: 12.48, status: 'want' });
+    await request(server).post('/api/addons/collections/places').set(as(ownerId)).send({ collection_id: col.id, name: 'Vague' });
+
+    const exported = await request(server).get(`/api/addons/collections/${col.id}/export/gpx`).set(as(ownerId));
+    expect(exported.status).toBe(200);
+    expect(exported.body).toMatchObject({ name: 'Round trip', waypoints: 1, omitted: 1 });
+
+    const read = await request(server).post('/api/addons/collections/gpx/read').set(as(otherId))
+      .send({ gpx: exported.body.gpx, file_name: 'round-trip.gpx' });
+    expect(read.status).toBe(200);
+    expect(read.body).toMatchObject({ skipped: 0, track_points: 0 });
+
+    const imported = await request(server).post('/api/addons/collections/import').set(as(otherId)).send({ file: read.body.file });
+    expect(imported.status).toBe(201);
+    expect(imported.body).toMatchObject({ imported: 1, skipped: 0 });
+    const detail = await request(server).get(`/api/addons/collections/${imported.body.collection.id}`).set(as(otherId));
+    expect(detail.body.places).toEqual([expect.objectContaining({ name: 'Pinned', lat: 41.9, lng: 12.48, status: 'want' })]);
+  });
+
+  it('COLLECTIONS-E2E-081: a refused GPX says why in a code, a body without one is refused by the contract', async () => {
+    const hostile = '<?xml version="1.0"?><!DOCTYPE gpx [<!ENTITY x SYSTEM "file:///etc/passwd">]>'
+      + '<gpx><wpt lat="1" lon="1"><name>&x;</name></wpt></gpx>';
+    const refused = await request(server).post('/api/addons/collections/gpx/read').set('Cookie', sessionCookie(ownerId)).send({ gpx: hostile });
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({ error: expect.any(String), code: 'unreadable' });
+
+    expect((await request(server).post('/api/addons/collections/gpx/read').set('Cookie', sessionCookie(ownerId)).send({})).status).toBe(400);
+    expect((await request(server).post('/api/addons/collections/gpx/read').send({ gpx: '<gpx/>' })).status).toBe(401);
+  });
+
+  it('COLLECTIONS-E2E-082: a list the caller cannot see has no GPX either', async () => {
+    const col = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Mine' })).body;
+    expect((await request(server).get(`/api/addons/collections/${col.id}/export/gpx`).set('Cookie', sessionCookie(otherId))).status).toBe(404);
+  });
+
+  it('COLLECTIONS-E2E-083: a file goes into a list that already exists, without touching what is in it', async () => {
+    const as = (userId: number) => ({ Cookie: sessionCookie(userId) });
+    const col = (await request(server).post('/api/addons/collections').set(as(ownerId)).send({ name: 'Keep me' })).body;
+    await request(server).post('/api/addons/collections/places').set(as(ownerId))
+      .send({ collection_id: col.id, name: 'Pinned', lat: 41.9, lng: 12.48, status: 'want' });
+
+    const file = {
+      format: 'trek.collection', version: 1, name: 'From a friend', color: '#ef4444',
+      places: [{ name: 'Pinned', lat: 41.9, lng: 12.48 }, { name: 'New one' }],
+    };
+    const added = await request(server).post(`/api/addons/collections/${col.id}/import`).set(as(ownerId)).send({ file });
+
+    expect(added.status).toBe(200);
+    expect(added.body).toMatchObject({ imported: 1, skipped: 0, duplicates: 1 });
+    expect(added.body.collection).toMatchObject({ id: col.id, name: 'Keep me' });
+    const detail = await request(server).get(`/api/addons/collections/${col.id}`).set(as(ownerId));
+    expect(detail.body.places.map((p: { name: string }) => p.name)).toEqual(['Pinned', 'New one']);
+    expect(detail.body.places[0]).toMatchObject({ status: 'want' });
+  });
+
+  it('COLLECTIONS-E2E-084: a list the caller may only read, or cannot see at all, takes no file', async () => {
+    const col = (await request(server).post('/api/addons/collections').set('Cookie', sessionCookie(ownerId)).send({ name: 'Mine' })).body;
+    const file = { format: 'trek.collection', version: 1, name: 'Theirs', places: [{ name: 'Belém' }] };
+
+    expect((await request(server).post(`/api/addons/collections/${col.id}/import`).set('Cookie', sessionCookie(otherId)).send({ file })).status).toBe(404);
+    expect((await request(server).post(`/api/addons/collections/${col.id}/import`).send({ file })).status).toBe(401);
+    expect((await request(server).post(`/api/addons/collections/${col.id}/import`).set('Cookie', sessionCookie(ownerId)).send({ file: { name: 'no format' } })).status).toBe(400);
   });
 
   // ── delete ───────────────────────────────────────────────────────────────

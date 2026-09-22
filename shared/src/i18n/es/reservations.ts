@@ -31,6 +31,7 @@ const reservations: TranslationStrings = {
   'reservations.type.cruise': 'Crucero',
   'reservations.type.event': 'Evento',
   'reservations.type.tour': 'Excursión',
+  'reservations.type.parking': 'Aparcamiento',
   'reservations.type.other': 'Otro',
   'reservations.type.bus': 'Autobús',
   'reservations.type.ferry': 'Ferry',
@@ -88,6 +89,7 @@ const reservations: TranslationStrings = {
   'reservations.span.arrival': 'Llegada',
   'reservations.span.inTransit': 'En tránsito',
   'reservations.span.pickup': 'Recogida',
+  'reservations.span.dropOff': 'Entrega',
   'reservations.span.return': 'Devolución',
   'reservations.span.active': 'Activo',
   'reservations.span.start': 'Inicio',
@@ -163,6 +165,8 @@ const reservations: TranslationStrings = {
     'Sincronizado desde AirTrail: las ediciones se mantienen sincronizadas en ambos sentidos.',
   'reservations.airtrail.notSynced': 'No sincronizado',
   'reservations.airtrail.notSyncedHint': 'Este vuelo se eliminó en AirTrail y ya no se sincroniza.',
+  'reservations.airtrail.layoverHint':
+    'Importado desde AirTrail. Un vuelo de varios tramos con escala no tiene un único vuelo de AirTrail con el que sincronizarse, por lo que se mantiene como una importación única.',
   'reservations.airtrail.loadError': 'No se pudieron cargar tus vuelos de AirTrail.',
   'reservations.airtrail.imported': '{count} vuelo(s) importado(s)',
   'reservations.airtrail.skippedDuplicate': '{count} ya en este viaje, omitido(s)',
@@ -182,5 +186,8 @@ const reservations: TranslationStrings = {
   'reservations.removeExpense': 'Remove expense',
   'reservations.urlLabel': 'Enlace',
   'reservations.urlPlaceholder': 'https://...',
+  'reservations.travelers.label': 'Viajeros',
+  'reservations.travelers.assign': 'Asignar viajeros',
+  'reservations.travelers.none': 'Aún no hay viajeros en el viaje.',
 };
 export default reservations;

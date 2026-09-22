@@ -99,6 +99,7 @@ const dashboard: TranslationStrings = {
   'dashboard.useUnsplashPhoto': 'Χρήση φωτογραφίας Unsplash από {photographer}',
   'dashboard.titleRequired': 'Ο τίτλος είναι υποχρεωτικός',
   'dashboard.endDateError': 'Η ημερομηνία λήξης πρέπει να είναι μετά την ημερομηνία έναρξης',
+  'dashboard.tripTooLong': 'Ένα ταξίδι μπορεί να διαρκεί το πολύ {days} ημέρες',
   'dashboard.dateShiftTitle': 'Νέα ημερομηνία έναρξης',
   'dashboard.dateShiftIntro':
     'Αλλάξατε την ημερομηνία έναρξης αυτού του ταξιδιού. Πώς θέλετε να ακολουθήσουν τα σχέδιά σας τις νέες ημερομηνίες;',
@@ -119,6 +120,7 @@ const dashboard: TranslationStrings = {
   'dashboard.mobile.places': 'Τοποθεσίες',
   'dashboard.mobile.buddies': 'Συνταξιδιώτες',
   'dashboard.mobile.newTrip': 'Νέο Ταξίδι',
+  'dashboard.mobile.addCoverImage': 'Προσθήκη εικόνας εξωφύλλου',
   'dashboard.mobile.currency': 'Νόμισμα',
   'dashboard.mobile.timezone': 'Ζώνη ώρας',
   'dashboard.mobile.upcomingTrips': 'Επερχόμενα Ταξίδια',
@@ -133,9 +135,15 @@ const dashboard: TranslationStrings = {
   'dashboard.mobile.tomorrow': 'Αύριο',
   'dashboard.mobile.inDays': 'Σε {count} ημέρες',
   'dashboard.mobile.inMonths': 'Σε {count} μήνες',
+  'dashboard.mobile.spotlightDayOf': 'Ημέρα {day} από {total}',
+  'dashboard.mobile.spotlightDayOne': '{count} ημέρα',
+  'dashboard.mobile.spotlightDaysMany': '{count} ημέρες',
   'dashboard.mobile.completed': 'Ολοκληρώθηκε',
   'dashboard.mobile.currencyConverter': 'Μετατροπέας Νομισμάτων',
   'dashboard.newTripSub': 'Plan a new trip from scratch', // en-fallback
+  'dashboard.subscribeAllTrips': 'Εγγραφή σε όλα τα ταξίδια',
+  'dashboard.subscribeAllTripsDesc':
+    'Μία ροή ημερολογίου για όλα τα ενεργά σας ταξίδια, η οποία διατηρείται αυτόματα συγχρονισμένη. Εξαιρούνται τα αρχειοθετημένα ταξίδια και τα ταξίδια που ολοκληρώθηκαν πριν από περισσότερες από 90 ημέρες.',
   'dashboard.filter.planned': 'Planned', // en-fallback
   'dashboard.hero.badgeLive': 'LIVE NOW', // en-fallback
   'dashboard.hero.badgeToday': 'STARTS TODAY', // en-fallback

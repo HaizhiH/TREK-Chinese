@@ -5,6 +5,7 @@ import { useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
 import { useContextMenu } from '../shared/ContextMenu'
 import { placesApi } from '../../api/client'
+import { collectionsApi } from '../../api/collections'
 import { useTripStore } from '../../store/tripStore'
 import { useCanDo } from '../../store/permissionsStore'
 import { useAuthStore } from '../../store/authStore'
@@ -13,16 +14,38 @@ import { useSaveToCollectionStore } from '../../store/saveToCollectionStore'
 import { placeToSaveTarget } from '../Collections/saveTarget'
 import type { Place, Category, Day, AssignmentsMap } from '../../types'
 import { getGoogleMapsUrlForPlace } from './placeGoogleMaps'
+import { safeHttpUrl } from '../../utils/safeUrl'
+import { plannedPlaceIds, plannedPlaceIdsForDay, type PlannedAccommodation } from '../../utils/plannedPlaces'
+
+/** Stable identity — a fresh [] default would invalidate the planned memo on every render. */
+const NO_ACCOMMODATIONS: PlannedAccommodation[] = []
 
 export interface PlacesSidebarProps {
   tripId: number
   places: Place[]
+  /** The trip's stays — hook-local state in useTripPlanner, so it arrives as a prop. */
+  accommodations?: PlannedAccommodation[]
   categories: Category[]
   assignments: AssignmentsMap
   selectedDayId: number | null
   selectedPlaceId: number | null
   onPlaceClick: (placeId: number | null) => void
   onAddPlace: () => void
+  /**
+   * Create a place and drop it straight into the day that is open.
+   *
+   * Only reachable while a day is selected, which is what the split button in
+   * the header is about: the pool is one click away from the plan, and adding a
+   * place you already know belongs to today should not need a second trip
+   * through the day picker.
+   */
+  onAddPlaceToSelectedDay?: () => void
+  /**
+   * Close the open day, from the note that says the pool is showing only that day.
+   * Absent leaves the note without its dismiss, which is what the mobile day picker
+   * wants: there the day is closed by the picker itself.
+   */
+  onClearSelectedDay?: () => void
   onAssignToDay: (placeId: number, dayId: number) => void
   onEditPlace: (place: Place) => void
   onDeletePlace: (placeId: number) => void
@@ -31,8 +54,6 @@ export interface PlacesSidebarProps {
   onBulkChangeCategory?: (ids: number[], categoryId: number | null) => void
   days: Day[]
   isMobile: boolean
-  /** Primary pointer is coarse — HTML5 drag would swallow the scroll gesture (#1432). */
-  isTouch?: boolean
   pushUndo?: (label: string, undoFn: () => Promise<void> | void) => void
   initialScrollTop?: number
   onScrollTopChange?: (top: number) => void
@@ -45,20 +66,24 @@ export interface PlacesSidebarProps {
  */
 export function usePlacesSidebar(props: PlacesSidebarProps) {
   const {
-    tripId, places, assignments, selectedDayId,
+    tripId, places, assignments, selectedDayId, days, accommodations = NO_ACCOMMODATIONS,
     pushUndo, initialScrollTop, onScrollTopChange,
   } = props
   const { t } = useTranslation()
   const toast = useToast()
   const ctxMenu = useContextMenu()
   const trip = useTripStore((s) => s.trip)
+  // A booking plans the place it points at, so the pool has to see them (#2072).
+  const reservations = useTripStore((s) => s.reservations)
   const loadTrip = useTripStore((s) => s.loadTrip)
   const can = useCanDo()
   const canEditPlaces = can('place_edit', trip)
   const collectionsEnabled = useAddonStore((s) => s.isEnabled('collections'))
-  // Places-API enrichment (#886) needs a Google Maps key; gate the toggle on it.
+  // Places-API enrichment (#886) needs a Google Maps key. Not the places
+  // *provider* choice: enrichment's photos and summary come from Google (and,
+  // keyless, from Wikimedia), which is independent of which provider answers
+  // search — an Amap install with a Google key still enriches through Google.
   const canEnrichImport = useAuthStore((s) => s.hasMapsKey)
-  const isNaverListImportEnabled = true
 
   const [fileImportOpen, setFileImportOpen] = useState(false)
   const [sidebarDropFile, setSidebarDropFile] = useState<File | null>(null)
@@ -106,19 +131,13 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
   const [listImportLoading, setListImportLoading] = useState(false)
   const [listImportProvider, setListImportProvider] = useState<'google' | 'naver'>('google')
   const [listImportEnrich, setListImportEnrich] = useState(false)
-  const availableListImportProviders: Array<'google' | 'naver'> = isNaverListImportEnabled ? ['google', 'naver'] : ['google']
+  const availableListImportProviders: Array<'google' | 'naver'> = ['google', 'naver']
   const hasMultipleListImportProviders = availableListImportProviders.length > 1
-
-  useEffect(() => {
-    if (!isNaverListImportEnabled && listImportProvider === 'naver') {
-      setListImportProvider('google')
-    }
-  }, [isNaverListImportEnabled, listImportProvider])
 
   const handleListImport = async () => {
     if (!listImportUrl.trim()) return
     setListImportLoading(true)
-    const provider = listImportProvider === 'naver' && isNaverListImportEnabled ? 'naver' : 'google'
+    const provider = listImportProvider
     try {
       const enrich = listImportEnrich && canEnrichImport
       const result = provider === 'google'
@@ -155,12 +174,42 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
   const categoryFilters = useTripStore((s) => s.placesCategoryFilter)
   const setCategoryFilters = useTripStore((s) => s.setPlacesCategoryFilter)
   const [selectMode, setSelectMode] = useState(false)
+  // Star sort (#1435): list-only toggle, so it stays local (the map keeps its order).
+  // Minimum average stars, matching the collections filter (#1435): 'all', or a
+  // floor of 1..5 that unrated places fall through. It replaced a sort toggle,
+  // which put the best first but still left everything else on the list — no
+  // help at all when the point is to see only what the group actually rated.
+  const [ratingFilter, setRatingFilter] = useState<number | 'all'>('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[] | null>(null)
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false)
   const [saveToListOpen, setSaveToListOpen] = useState(false)
 
+  const [markVisitedBusy, setMarkVisitedBusy] = useState(false)
+
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()) }
+
+  /**
+   * "I have been to these" for the selection, applied wherever the places are
+   * saved in the library (#1469). The server does the matching, so a place saved
+   * under a different name in a list is still found.
+   */
+  const markSelectionVisited = useCallback(async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0 || markVisitedBusy) return
+    setMarkVisitedBusy(true)
+    try {
+      const { updated, places: matchedPlaces } = await collectionsApi.setStatusFromTrip(props.tripId, ids, 'visited')
+      if (updated === 0) toast.info(t('collections.markVisitedNone'))
+      else toast.success(t('collections.markedVisitedTrip', { count: matchedPlaces ?? 0 }))
+      exitSelectMode()
+    } catch {
+      toast.error(t('common.error'))
+    } finally {
+      setMarkVisitedBusy(false)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds, markVisitedBusy, props.tripId, t])
 
   // Auto-exit when all selected places have been removed from the store (e.g. after bulk delete)
   useEffect(() => {
@@ -184,30 +233,57 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
     if (next.has(catId)) next.delete(catId); else next.add(catId)
     setCategoryFilters(next)
   }
-  const [dayPickerPlace, setDayPickerPlace] = useState(null)
+  const [dayPickerPlace, setDayPickerPlace] = useState<Place | null>(null)
   const [catDropOpen, setCatDropOpen] = useState(false)
+  const [starDropOpen, setStarDropOpen] = useState(false)
   const [mobileShowDays, setMobileShowDays] = useState(false)
 
   // Alle geplanten Ort-IDs abrufen (einem Tag zugewiesen)
   const hasTracks = useMemo(() => places.some(p => p.route_geometry), [places])
   useEffect(() => { if (filter === 'tracks' && !hasTracks) setFilter('all') }, [hasTracks, filter])
 
-  const plannedIds = useMemo(() => new Set(
-    Object.values(assignments).flatMap(da => da.map(a => a.place?.id).filter(Boolean))
-  ), [assignments])
+  const plannedIds = useMemo(
+    () => plannedPlaceIds({ assignments, accommodations, reservations }),
+    [assignments, accommodations, reservations],
+  )
 
-  const filtered = useMemo(() => places.filter(p => {
-    if (filter === 'unplanned' && plannedIds.has(p.id)) return false
-    if (filter === 'tracks' && !p.route_geometry) return false
-    if (categoryFilters.size > 0) {
-      if (p.category_id == null) {
-        if (!categoryFilters.has('uncategorized')) return false
-      } else if (!categoryFilters.has(String(p.category_id))) return false
-    }
-    if (search && !p.name.toLowerCase().includes(search.toLowerCase()) &&
-        !(p.address || '').toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  }), [places, filter, categoryFilters, search, plannedIds])
+  /**
+   * What "planned" means while a day is open: that day's plan, not the whole trip's.
+   *
+   * The map has narrowed to the selected day since #2024, and the list did not, which is
+   * how a trip with 55 planned places showed 55 in the pool and five pins on the map with
+   * nothing to explain the gap — read, reasonably, as the map being broken. The list now
+   * follows the map, and `dayScoped` tells the header to say so.
+   *
+   * Only "planned" narrows. "Unplanned" stays trip-wide on purpose: a place assigned to
+   * some other day is planned, whichever day happens to be open.
+   */
+  const plannedInDayIds = useMemo(
+    () => (selectedDayId
+      ? plannedPlaceIdsForDay(selectedDayId, days, { assignments, accommodations, reservations })
+      : null),
+    [selectedDayId, days, assignments, accommodations, reservations],
+  )
+  const plannedFilterIds = plannedInDayIds ?? plannedIds
+  const dayScoped = filter === 'planned' && plannedInDayIds !== null
+
+  const filtered = useMemo(() => {
+    const list = places.filter(p => {
+      if (filter === 'unplanned' && plannedIds.has(p.id)) return false
+      if (filter === 'planned' && !plannedFilterIds.has(p.id)) return false
+      if (filter === 'tracks' && !p.route_geometry) return false
+      if (categoryFilters.size > 0) {
+        if (p.category_id == null) {
+          if (!categoryFilters.has('uncategorized')) return false
+        } else if (!categoryFilters.has(String(p.category_id))) return false
+      }
+      if (search && !p.name.toLowerCase().includes(search.toLowerCase()) &&
+          !(p.address || '').toLowerCase().includes(search.toLowerCase())) return false
+      if (ratingFilter !== 'all' && (p.rating_avg == null || p.rating_avg < ratingFilter)) return false
+      return true
+    })
+    return list
+  }, [places, filter, categoryFilters, search, plannedIds, plannedFilterIds, ratingFilter])
 
   const registerPlaceRow = useCallback((placeId: number, element: HTMLDivElement | null) => {
     if (element) {
@@ -231,16 +307,24 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
     lastAutoScrolledPlaceIdRef.current = props.selectedPlaceId
   }, [filtered, props.selectedPlaceId])
 
-  const isAssignedToSelectedDay = (placeId) =>
-    selectedDayId && (assignments[String(selectedDayId)] || []).some(a => a.place?.id === placeId)
-
   const selectedDayIdRef = useRef<number | null>(selectedDayId)
   useEffect(() => { selectedDayIdRef.current = selectedDayId }, [selectedDayId])
 
+  // The day list handed in is the one the planner shows, and in the day view that
+  // list leaves out the stop a booking wrote. The store still holds it, so the set
+  // that decides between "in the day" and the add button reads the day from there
+  // as well: on the list alone the hotel of a booked night offered "add to day" on
+  // its own check-in day, and taking that offer put a second row beside the night.
+  const storedDayAssignments = useTripStore((s) => (selectedDayId ? s.assignments[String(selectedDayId)] : undefined))
+
   const inDaySet = useMemo(() => {
     if (!selectedDayId) return new Set<number>()
-    return new Set<number>((assignments[String(selectedDayId)] || []).map((a: any) => a.place?.id).filter(Boolean))
-  }, [assignments, selectedDayId])
+    const ids = new Set<number>((assignments[String(selectedDayId)] || []).map((a: any) => a.place?.id).filter(Boolean))
+    for (const a of storedDayAssignments ?? []) if (a.place?.id) ids.add(a.place.id)
+    return ids
+  }, [assignments, storedDayAssignments, selectedDayId])
+
+  const isAssignedToSelectedDay = (placeId) => inDaySet.has(placeId)
 
   const openContextMenu = useCallback((e: React.MouseEvent, place: Place) => {
     const selDayId = selectedDayIdRef.current
@@ -248,7 +332,7 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
     ctxMenu.open(e, [
       canEditPlaces && { label: t('common.edit'), icon: Pencil, onClick: () => props.onEditPlace(place) },
       selDayId && { label: t('planner.addToDay'), icon: CalendarDays, onClick: () => props.onAssignToDay(place.id, selDayId) },
-      place.website && { label: t('inspector.website'), icon: ExternalLink, onClick: () => window.open(place.website, '_blank') },
+      safeHttpUrl(place.website) && { label: t('inspector.website'), icon: ExternalLink, onClick: () => window.open(safeHttpUrl(place.website)!, '_blank', 'noopener,noreferrer') },
       googleMapsUrl && { label: t('inspector.google'), icon: Navigation, onClick: () => window.open(googleMapsUrl, '_blank') },
       collectionsEnabled && { label: t('inspector.saveToCollection'), icon: Bookmark, onClick: () => useSaveToCollectionStore.getState().open(placeToSaveTarget(place)) },
       { divider: true },
@@ -267,12 +351,15 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
     listImportEnrich, setListImportEnrich, canEnrichImport,
     availableListImportProviders, hasMultipleListImportProviders, handleListImport,
     search, setSearch, filter, setFilter, categoryFilters, setCategoryFilters,
+    ratingFilter, setRatingFilter,
+    starDropOpen, setStarDropOpen,
     selectMode, setSelectMode, selectedIds, setSelectedIds, pendingDeleteIds, setPendingDeleteIds,
     categoryPickerOpen, setCategoryPickerOpen,
     saveToListOpen, setSaveToListOpen, collectionsEnabled, tripId,
+    markSelectionVisited, markVisitedBusy,
     exitSelectMode, toggleSelected, toggleCategoryFilter, dayPickerPlace, setDayPickerPlace,
     catDropOpen, setCatDropOpen, mobileShowDays, setMobileShowDays,
-    hasTracks, plannedIds, filtered, registerPlaceRow, isAssignedToSelectedDay, inDaySet, openContextMenu,
+    hasTracks, plannedIds, plannedFilterIds, dayScoped, filtered, registerPlaceRow, isAssignedToSelectedDay, inDaySet, openContextMenu,
   }
 }
 

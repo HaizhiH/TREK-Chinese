@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pluginsEnabled } from './kill-switch';
 import { PluginRuntimeService } from './plugin-runtime.service';
 import { pluginCodeDir } from './paths';
+import { Public } from '../auth/public.decorator';
 
 /**
  * Serves a page/widget plugin's static client from /plugin-frame/:id/* (#plugins,
@@ -32,6 +33,7 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
+@Public('serves the sandboxed iframe document itself; the RPC inside it is authenticated')
 @Controller('plugin-frame/:pluginId')
 export class PluginFrameController {
   constructor(private readonly runtime: PluginRuntimeService) {}
@@ -55,6 +57,23 @@ export class PluginFrameController {
     }
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
       res.status(404).send('Not found');
+      return;
+    }
+    // The check above is lexical, and statSync follows links, so a symlink inside
+    // client/ still reads whatever it points at. Re-check both sides resolved:
+    // a dev-linked plugin is a symlinked tree, so comparing against the raw root
+    // would reject it.
+    let realRoot: string;
+    let realFile: string;
+    try {
+      realRoot = fs.realpathSync(path.resolve(clientDir));
+      realFile = fs.realpathSync(resolved);
+    } catch {
+      res.status(404).send('Not found');
+      return;
+    }
+    if (realFile !== realRoot && !realFile.startsWith(realRoot + path.sep)) {
+      res.status(403).send('Forbidden');
       return;
     }
 
