@@ -130,16 +130,28 @@ jobs:
         run: |
           set -euo pipefail
           short_sha="${GITHUB_SHA::12}"
-          
-          # Build list of digests, enforcing amd64 first
+          shopt -s nullglob
+          dirs=(*)
+          if [ "${#dirs[@]}" -ne 2 ]; then
+            echo "::error::Expected two architecture digest directories"
+            exit 1
+          fi
+
           declare -A platform_digests
           for platform in linux-amd64 linux-arm64; do
             dir="digests-$platform"
             [ -d "$dir" ] || { echo "::error::missing digest artifact for $platform"; exit 1; }
-            for f in "$dir"/*; do
-              [ -e "$f" ] || { echo "::error::no digest file in $dir"; exit 1; }
-              platform_digests[$platform]="$(basename "$f")"
-            done
+            files=("$dir"/*)
+            if [ "${#files[@]}" -ne 1 ]; then
+              echo "::error::Expected exactly one digest file in $dir"
+              exit 1
+            fi
+            digest="$(basename "${files[0]}")"
+            if [[ ! -f "${files[0]}" || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::Invalid architecture digest: $digest"
+              exit 1
+            fi
+            platform_digests[$platform]="$digest"
           done
 
           for image in "$IMAGE_NAME" "$ACR_IMAGE"; do
