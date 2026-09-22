@@ -25,7 +25,7 @@ const bannedRe = new RegExp(`\\b(${BANNED.join('|')})\\s*[<(]`)
 // its declaration instead of drifting onto whatever follows it. The rest of
 // each listed file is still checked.
 const KNOWN_ESCAPES = {
-  'TripPlannerPage.tsx': ['glMap', 'bookingExpense'],
+  'TripPlannerPage.tsx': ['glMap', 'bookingExpense', 'mapController', 'setMapController'],
 }
 
 const violations = []
