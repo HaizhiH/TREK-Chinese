@@ -1,3 +1,4 @@
+import { readEnv } from '../app-config/env';
 import { encrypt_api_key } from '../nest/common/crypto/apiKeyCrypto';
 import { seedDocumentProviders } from './document-provider-seed';
 
@@ -2731,7 +2732,7 @@ function runMigrations(db: Database.Database): void {
         `CREATE TABLE IF NOT EXISTS migrations (id integer PRIMARY KEY AUTOINCREMENT NOT NULL, timestamp bigint NOT NULL, name varchar NOT NULL);`,
       );
       db.exec(`INSERT INTO migrations (timestamp, name) VALUES (1777810195344, 'InitialSchema1777810195344');`);
-      db.exec(`INSERT INTO app_settings (key, value) VALUES ('app_version', '${process.env.APP_VERSION || '3.0.14'}')`);
+      db.exec(`INSERT INTO app_settings (key, value) VALUES ('app_version', '${readEnv().app.appVersion || '3.0.14'}')`);
     },
     // trim leading/trailing whitespace from stored usernames and emails
     () => {
@@ -2749,7 +2750,7 @@ function runMigrations(db: Database.Database): void {
       db.exec(`INSERT INTO schema_version_new (version) SELECT version FROM schema_version`);
       db.exec(`DROP TABLE schema_version`);
       db.exec(`ALTER TABLE schema_version_new RENAME TO schema_version`);
-      db.exec(`UPDATE app_settings SET value = '${process.env.APP_VERSION || '3.0.15'}' WHERE key = 'app_version'`);
+      db.exec(`UPDATE app_settings SET value = '${readEnv().app.appVersion || '3.0.15'}' WHERE key = 'app_version'`);
     },
     // Migration: OAuth 2.0 client_credentials grant — allow user-owned confidential
     // clients to skip the browser consent flow entirely and obtain tokens directly
