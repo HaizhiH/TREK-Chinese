@@ -52,7 +52,7 @@ The compose file reads variables from a `.env` file placed alongside `docker-com
 
 ```bash
 # .env
-TREK_IMAGE=registry.cn-guangzhou.aliyuncs.com/tsugar/trek:sha-<12-character-commit>
+TREK_IMAGE=huahaizhi/trek-chinese:sha-<12-character-commit>
 ENCRYPTION_KEY=<output of: openssl rand -hex 32>
 TZ=Europe/Berlin
 ALLOWED_ORIGINS=https://trek.example.com
@@ -63,25 +63,21 @@ Uncomment and fill in the OIDC, initial setup, or MCP variables as needed. For a
 
 ## Image Tags
 
-The checked-in Compose file defaults to Alibaba Cloud ACR for faster pulls from
-mainland China. Both registries carry the same tags; set `TREK_IMAGE` in `.env`
-to select a registry and tag. For production, prefer the immutable `sha-*` tag
-for the main commit you approved:
+The checked-in Compose file pulls from Docker Hub by default. Set `TREK_IMAGE`
+in `.env` to select a tag. For production, prefer the immutable `sha-*` tag for
+the main commit you approved:
 
-| Registry | Example |
+| Tag | Example |
 |---|---|
-| Alibaba Cloud ACR (mainland China default) | `registry.cn-guangzhou.aliyuncs.com/tsugar/trek:sha-<12-character-commit>` |
-| Docker Hub fallback | `huahaizhi/trek-chinese:sha-<12-character-commit>` |
+| Commit | `huahaizhi/trek-chinese:sha-<12-character-commit>` |
+| Major version | `huahaizhi/trek-chinese:4` |
+| Full version | `huahaizhi/trek-chinese:4.3.0` |
 
-The same registry selection also supports moving release tags such as `latest`
-and major versions, plus immutable full-version tags. To switch registries
-without editing `docker-compose.yml`, keep the tag identical:
+`latest` and major-version tags move as releases are published. Full-version
+and `sha-*` tags identify a specific build. To pin a commit without editing
+`docker-compose.yml`:
 
 ```bash
-# ACR preferred
-TREK_IMAGE=registry.cn-guangzhou.aliyuncs.com/tsugar/trek:sha-abc123def456
-
-# Docker Hub fallback for the exact same build
 TREK_IMAGE=huahaizhi/trek-chinese:sha-abc123def456
 ```
 

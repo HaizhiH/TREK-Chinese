@@ -21,7 +21,7 @@ jobs:
         with:
           ruby-version: '3.3'
 
-      - name: Verify dual-registry publish and security contracts
+      - name: Verify Docker Hub publish and security contracts
         run: ruby scripts/test-docker-publish.rb
 
       - name: Verify multi-architecture manifest assembly

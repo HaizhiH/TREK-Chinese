@@ -18,7 +18,6 @@ permissions:
 
 env:
   IMAGE_NAME: huahaizhi/trek-chinese
-  ACR_IMAGE: ${{ vars.ACR_IMAGE }}
 
 concurrency:
   group: release-build
@@ -38,18 +37,13 @@ jobs:
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate registry configuration
+      - name: Validate Docker Hub credentials
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
-          ACR_USERNAME: ${{ vars.ACR_USERNAME }}
-          ACR_PASSWORD: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
         run: |
-          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ] || \
-             [ -z "$ACR_IMAGE" ] || [ -z "$ACR_REGISTRY" ] || \
-             [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
-            echo "::error::Docker Hub credentials and ACR_IMAGE, ACR_REGISTRY, ACR_USERNAME, and ACR_REDACTED_CREDENTIAL must be configured"
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be configured"
             exit 1
           fi
 
@@ -145,22 +139,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to Alibaba Cloud ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ vars.ACR_REGISTRY }}
-          username: ${{ vars.ACR_USERNAME }}
-          password: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
-
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          outputs: type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
-          provenance: false
-          sbom: false
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           no-cache: true
           build-args: |
             APP_VERSION=${{ needs.version-bump.outputs.version }}
@@ -204,13 +189,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to Alibaba Cloud ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ vars.ACR_REGISTRY }}
-          username: ${{ vars.ACR_USERNAME }}
-          password: ${{ secrets.ACR_REDACTED_CREDENTIAL }}
-
       - name: Commit version and atomically push git refs
         id: release
         run: |
@@ -239,26 +217,22 @@ jobs:
             exit 1
           fi
           MAJOR_TAG="$(echo "$VERSION" | cut -d. -f1)"
-          for image in "$IMAGE_NAME" "$ACR_IMAGE"; do
-            digests=()
-            for digest in "${digest_files[@]}"; do
-              if [[ ! -f "$digest" || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
-                echo "::error::Invalid architecture digest: $digest"
-                exit 1
-              fi
-              digests+=("$image@sha256:$digest")
-            done
-            docker buildx imagetools create \
-              -t "$image:latest" \
-              -t "$image:$MAJOR_TAG" \
-              -t "$image:$VERSION" \
-              "${digests[@]}"
+          digests=()
+          for digest in "${digest_files[@]}"; do
+            if [[ ! -f "$digest" || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::Invalid architecture digest: $digest"
+              exit 1
+            fi
+            digests+=("$IMAGE_NAME@sha256:$digest")
           done
+          docker buildx imagetools create \
+            -t "$IMAGE_NAME:latest" \
+            -t "$IMAGE_NAME:$MAJOR_TAG" \
+            -t "$IMAGE_NAME:$VERSION" \
+            "${digests[@]}"
 
-      - name: Inspect manifests
-        run: |
-          docker buildx imagetools inspect "$IMAGE_NAME:latest"
-          docker buildx imagetools inspect "$ACR_IMAGE:latest"
+      - name: Inspect manifest
+        run: docker buildx imagetools inspect "$IMAGE_NAME:latest"
 
   release-helm:
     runs-on: ubuntu-latest
