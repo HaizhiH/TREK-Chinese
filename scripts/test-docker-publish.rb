@@ -2,58 +2,46 @@ require "yaml"
 
 workflow_dir = File.expand_path("../.github/workflows", __dir__)
 publish_files = %w[docker-publish.yml docker.yml docker-dev.yml]
-acr_login = {
-  "registry" => "${{ vars.ACR_REGISTRY }}",
-  "username" => "${{ vars.ACR_USERNAME }}",
-  "password" => "${{ secrets.ACR_REDACTED_CREDENTIAL }}",
+docker_hub_login = {
+  "username" => "${{ secrets.DOCKERHUB_USERNAME }}",
+  "password" => "${{ secrets.DOCKERHUB_TOKEN }}",
 }
-required_references = [
-  "${{ vars.ACR_IMAGE }}",
-  "${{ vars.ACR_REGISTRY }}",
-  "${{ vars.ACR_USERNAME }}",
-  "${{ secrets.ACR_REDACTED_CREDENTIAL }}",
-]
 
 publish_files.each do |filename|
   path = File.join(workflow_dir, filename)
   raw = File.read(path)
   workflow = YAML.load_file(path)
 
-  required_references.each do |reference|
-    abort "FAIL #{filename}: missing #{reference}" unless raw.include?(reference)
-  end
   abort "FAIL #{filename}: must not use pull_request_target" if raw.include?("pull_request_target")
   abort "FAIL #{filename}: registry failures must not be ignored" if raw.include?("continue-on-error")
-  unless workflow.fetch("env").fetch("ACR_IMAGE") == "${{ vars.ACR_IMAGE }}"
-    abort "FAIL #{filename}: ACR_IMAGE must come from the repository variable"
+  unless workflow.fetch("env") == { "IMAGE_NAME" => "huahaizhi/trek-chinese" }
+    abort "FAIL #{filename}: IMAGE_NAME must be the only registry target"
   end
 
   steps = workflow.fetch("jobs").values.flat_map { |job| job.fetch("steps", []) }
   logins = steps.select { |step| step["uses"] == "docker/login-action@v3" }
-  acr_logins = logins.select { |step| step["name"] == "Log in to Alibaba Cloud ACR" }
-  expected_acr_logins = 2
-  unless acr_logins.length == expected_acr_logins && acr_logins.all? { |step| step.fetch("with") == acr_login }
-    abort "FAIL #{filename}: every publishing job must log in to ACR with repository settings"
+  unless logins.length == 2 && logins.all? { |step| step.fetch("with") == docker_hub_login }
+    abort "FAIL #{filename}: publishing jobs must authenticate only to Docker Hub"
   end
 
-  validation = steps.find { |step| step["name"] == "Validate registry configuration" }
-  abort "FAIL #{filename}: missing registry configuration validation" unless validation
-  %w[ACR_IMAGE ACR_REGISTRY ACR_USERNAME ACR_PASSWORD].each do |name|
+  validation = steps.find { |step| step["name"] == "Validate Docker Hub credentials" }
+  abort "FAIL #{filename}: missing Docker Hub credential validation" unless validation
+  %w[DOCKERHUB_USERNAME DOCKERHUB_TOKEN].each do |name|
     abort "FAIL #{filename}: validation does not reject missing #{name}" unless validation.fetch("run").include?(name)
   end
 
   builds = steps.select { |step| step["uses"] == "docker/build-push-action@v6" }
   abort "FAIL #{filename}: expected one build invocation" unless builds.length == 1
   build = builds.first.fetch("with")
-  unless build.values_at("provenance", "sbom") == [false, false]
-    abort "FAIL #{filename}: provenance and SBOM attestations must be explicitly disabled for ACR compatibility"
+  if build["provenance"] == false || build["sbom"] == false
+    abort "FAIL #{filename}: provenance and SBOM attestations must not be disabled"
   end
 
   output = build.fetch("outputs")
-  expected_output = 'type=image,"name=${{ env.IMAGE_NAME }},${{ env.ACR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true'
-  abort "FAIL #{filename}: architecture build must export one digest to both registries" unless output == expected_output
+  expected_output = "type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true"
+  abort "FAIL #{filename}: architecture build must export one Docker Hub digest" unless output == expected_output
 
-  puts "PASS #{filename}: dual-registry publish contract with attestations disabled"
+  puts "PASS #{filename}: Docker Hub-only publish contract"
 end
 
 security = YAML.load_file(File.join(workflow_dir, "security.yml"))
