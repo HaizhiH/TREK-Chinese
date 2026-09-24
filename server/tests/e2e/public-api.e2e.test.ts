@@ -40,6 +40,7 @@ const { db } = vi.hoisted(() => {
     CREATE TABLE places (id INTEGER PRIMARY KEY AUTOINCREMENT, trip_id INTEGER NOT NULL,
       name TEXT NOT NULL, address TEXT, lat REAL, lng REAL, category_id INTEGER,
       place_time TEXT, end_time TEXT, duration_minutes INTEGER, notes TEXT, transport_mode TEXT,
+      geo_provider TEXT, provider_place_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
     CREATE TABLE day_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, day_id INTEGER NOT NULL,
