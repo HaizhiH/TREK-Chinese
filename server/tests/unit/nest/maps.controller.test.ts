@@ -409,17 +409,39 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
         provider: 'openstreetmap', crs: 'wgs84', geometry: [], distance: 0, duration: 0, legs: [],
       });
       const waypoints = Array.from({ length: count }, (_, index) => ({ lat: 50 + index / 100, lng: 8 }));
-      await makeController({ route }).route(waypoints, 'driving');
+      await makeController({ route }).route({ waypoints, profile: 'driving' });
       expect(route).toHaveBeenCalledWith(waypoints, 'driving');
     });
 
     it('rejects routes beyond the public request limit', async () => {
       const route = vi.fn();
       const waypoints = Array.from({ length: 101 }, (_, index) => ({ lat: 50 + index / 100, lng: 8 }));
-      expect(await thrown(() => makeController({ route }).route(waypoints, 'driving'))).toEqual({
+      expect(await thrown(() => makeController({ route }).route({ waypoints, profile: 'driving' }))).toEqual({
         status: 400, body: { error: 'Between 2 and 100 valid WGS-84 waypoints are required' },
       });
       expect(route).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /convert/amap-to-wgs84', () => {
+    it('converts the complete DTO point list and returns the WGS-84 contract', () => {
+      const converted = [{ lat: 39.9028, lng: 116.4012 }];
+      const amapPointsToWgs84 = vi.fn().mockReturnValue(converted);
+      const points = [{ lat: 39.9042, lng: 116.4074 }];
+
+      expect(makeController({ amapPointsToWgs84 }).convertAmapToWgs84({ points })).toEqual({
+        points: converted,
+        crs: 'wgs84',
+      });
+      expect(amapPointsToWgs84).toHaveBeenCalledWith(points);
+    });
+
+    it('preserves the controller guard for an invalid direct invocation', async () => {
+      const amapPointsToWgs84 = vi.fn();
+      expect(
+        await thrown(async () => makeController({ amapPointsToWgs84 }).convertAmapToWgs84({ points: [] })),
+      ).toEqual({ status: 400, body: { error: 'Between 1 and 100 valid points are required' } });
+      expect(amapPointsToWgs84).not.toHaveBeenCalled();
     });
   });
 

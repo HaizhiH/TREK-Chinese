@@ -54,6 +54,25 @@ export const adminFeatureToggleRequestSchema = z.object({
 });
 export type AdminFeatureToggleRequest = z.infer<typeof adminFeatureToggleRequestSchema>;
 
+// AmapConfigService deliberately owns the field-level validation here. In
+// particular, it returns the established `enabled must be a boolean` response
+// and ignores non-string credential updates. Keep the values unknown so the
+// DTO adds the required body-contract metatype without pre-empting that
+// behavior in the global validation pipe.
+export const adminAmapUpdateRequestSchema = z.object({
+  enabled: z.unknown().optional(),
+  js_key: z.unknown().optional(),
+  security_code: z.unknown().optional(),
+  web_service_key: z.unknown().optional(),
+});
+export type AdminAmapUpdateRequest = z.infer<typeof adminAmapUpdateRequestSchema>;
+
+// The controller keeps its bespoke `valid must be a boolean` error envelope.
+export const adminAmapJsValidationRequestSchema = z.object({
+  valid: z.unknown(),
+});
+export type AdminAmapJsValidationRequest = z.infer<typeof adminAmapJsValidationRequestSchema>;
+
 // Shared by all six packing-template create/update routes. `name` is optional so
 // the service's 'Name is required' / 'Category name is required' / 'Item name is
 // required' 400s stay the contract, and so the update routes keep treating a

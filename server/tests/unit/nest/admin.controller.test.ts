@@ -110,6 +110,48 @@ describe('AdminController permissions + oidc + misc', () => {
   });
 
 
+  it('updates Amap settings and audits the effective credential state', () => {
+    const updateAmapConfig = vi.fn().mockReturnValue({
+      enabled: true,
+      js_key: 'js',
+      security_code: 'security',
+      web_service_key_set: true,
+    });
+    const c = adminCtl(svc({ updateAmapConfig } as Partial<AdminService>));
+
+    expect(c.updateAmap(user, { enabled: true, js_key: 'js' }, req)).toEqual({
+      enabled: true,
+      js_key: 'js',
+      security_code: 'security',
+      web_service_key_set: true,
+    });
+    expect(updateAmapConfig).toHaveBeenCalledWith({ enabled: true, js_key: 'js' });
+    expect(writeAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'admin.amap_update',
+        details: {
+          enabled: true,
+          js_key_set: true,
+          security_code_set: true,
+          web_service_key_set: true,
+        },
+      }),
+    );
+  });
+
+  it('records Amap JS validation from the DTO body and preserves its bespoke 400', () => {
+    const recordAmapJsValidation = vi.fn((valid: boolean) => ({ valid }));
+    const c = adminCtl(svc({ recordAmapJsValidation } as Partial<AdminService>));
+
+    expect(c.validateAmapJs(user, { valid: true }, req)).toEqual({ valid: true });
+    expect(recordAmapJsValidation).toHaveBeenCalledWith(true);
+    expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'admin.amap_validate_js' }));
+    expect(thrown(() => c.validateAmapJs(user, { valid: 'yes' }, req))).toEqual({
+      status: 400,
+      body: { error: 'valid must be a boolean' },
+    });
+  });
+
   it('save-demo-baseline maps error, else returns message', () => {
     expect(thrown(() => adminCtl(svc({ saveDemoBaseline: vi.fn().mockReturnValue({ error: 'not demo', status: 400 }) } as Partial<AdminService>)).saveDemoBaseline(user, req))).toEqual({ status: 400, body: { error: 'not demo' } });
     expect(adminCtl(svc({ saveDemoBaseline: vi.fn().mockReturnValue({ message: 'saved' }) } as Partial<AdminService>)).saveDemoBaseline(user, req)).toEqual({ success: true, message: 'saved' });
