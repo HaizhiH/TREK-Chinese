@@ -4,6 +4,8 @@ import {
   adminPermissionsRequestSchema,
   adminInviteCreateRequestSchema,
   adminFeatureToggleRequestSchema,
+  adminAmapJsValidationRequestSchema,
+  adminAmapUpdateRequestSchema,
   adminTemplateNameRequestSchema,
   adminOidcUpdateRequestSchema,
   adminAddonUpdateRequestSchema,
@@ -75,6 +77,27 @@ describe('adminFeatureToggleRequestSchema', () => {
     expect(adminFeatureToggleRequestSchema.safeParse({ enabled: true }).success).toBe(true);
     expect(adminFeatureToggleRequestSchema.safeParse({ enabled: 'yes' }).success).toBe(false);
     expect(adminFeatureToggleRequestSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('adminAmapUpdateRequestSchema', () => {
+  it('keeps the Amap service in charge of field-level validation', () => {
+    expect(
+      adminAmapUpdateRequestSchema.parse({
+        enabled: 'true',
+        js_key: 42,
+        security_code: null,
+        web_service_key: false,
+        extra: 'discarded',
+      }),
+    ).toEqual({ enabled: 'true', js_key: 42, security_code: null, web_service_key: false });
+  });
+});
+
+describe('adminAmapJsValidationRequestSchema', () => {
+  it('leaves the bespoke boolean validation to the controller', () => {
+    expect(adminAmapJsValidationRequestSchema.safeParse({ valid: true }).success).toBe(true);
+    expect(adminAmapJsValidationRequestSchema.safeParse({ valid: 'yes' }).success).toBe(true);
   });
 });
 

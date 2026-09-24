@@ -15,6 +15,8 @@ import {
   AdminTemplateNameDto,
   AdminOidcUpdateDto,
   AdminAddonUpdateDto,
+  AdminAmapUpdateDto,
+  AdminAmapJsValidationDto,
   AdminCollabFeaturesDto,
   AdminNotificationPreferencesDto,
   AdminDefaultUserSettingsDto,
@@ -149,7 +151,7 @@ export class AdminController {
   }
 
   @Put('amap')
-  updateAmap(@CurrentUser() user: User, @Body() body: Record<string, unknown>, @Req() req: Request) {
+  updateAmap(@CurrentUser() user: User, @Body() body: AdminAmapUpdateDto, @Req() req: Request) {
     const result = this.admin.updateAmapConfig(body);
     this.audit.writeAudit({
       userId: user.id,
@@ -180,7 +182,8 @@ export class AdminController {
 
   @Post('amap/validate-js')
   @HttpCode(200)
-  validateAmapJs(@CurrentUser() user: User, @Body('valid') valid: unknown, @Req() req: Request) {
+  validateAmapJs(@CurrentUser() user: User, @Body() body: AdminAmapJsValidationDto, @Req() req: Request) {
+    const { valid } = body;
     if (typeof valid !== 'boolean') throw new HttpException({ error: 'valid must be a boolean' }, 400);
     const result = this.admin.recordAmapJsValidation(valid);
     this.audit.writeAudit({ userId: user.id, action: 'admin.amap_validate_js', ip: getClientIp(req), details: { valid } });

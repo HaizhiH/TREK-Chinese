@@ -146,6 +146,11 @@ export const mapsRouteRequestSchema = z.object({
 });
 export type MapsRouteRequest = z.infer<typeof mapsRouteRequestSchema>;
 
+export const mapsConvertAmapToWgs84RequestSchema = z.object({
+  points: z.array(geoPointSchema).min(1).max(100),
+});
+export type MapsConvertAmapToWgs84Request = z.infer<typeof mapsConvertAmapToWgs84RequestSchema>;
+
 export const mapsRouteStepSchema = z.object({
   instruction: z.string().nullable(),
   distance: z.number(),

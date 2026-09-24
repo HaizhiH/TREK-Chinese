@@ -31,7 +31,13 @@ import { StorageService } from '../storage/storage.service';
 import { isClientAbortError } from '../storage/storage.types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { MapsSearchDto, MapsAutocompleteDto, MapsResolveUrlDto } from './maps.dto';
+import {
+  MapsAutocompleteDto,
+  MapsConvertAmapToWgs84Dto,
+  MapsResolveUrlDto,
+  MapsRouteDto,
+  MapsSearchDto,
+} from './maps.dto';
 
 /** Google's session-token shape: URL-safe ASCII, at most 36 characters. The
  *  autocomplete body is validated by the Zod pipe; the details query is not,
@@ -204,7 +210,8 @@ export class MapsController {
 
   @Post('route')
   @HttpCode(200)
-  async route(@Body('waypoints') waypoints: unknown, @Body('profile') profile: unknown): Promise<MapsRouteResult> {
+  async route(@Body() body: MapsRouteDto): Promise<MapsRouteResult> {
+    const { waypoints, profile } = body;
     if (
       !Array.isArray(waypoints) ||
       waypoints.length < 2 ||
@@ -225,7 +232,8 @@ export class MapsController {
 
   @Post('convert/amap-to-wgs84')
   @HttpCode(200)
-  convertAmapToWgs84(@Body('points') points: unknown): { points: GeoPoint[]; crs: 'wgs84' } {
+  convertAmapToWgs84(@Body() body: MapsConvertAmapToWgs84Dto): { points: GeoPoint[]; crs: 'wgs84' } {
+    const { points } = body;
     if (
       !Array.isArray(points) ||
       points.length < 1 ||

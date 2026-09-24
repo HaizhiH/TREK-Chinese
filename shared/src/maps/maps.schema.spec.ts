@@ -5,6 +5,7 @@ import {
   mapsReverseQuerySchema,
   mapsResolveUrlRequestSchema,
   mapsRouteRequestSchema,
+  mapsConvertAmapToWgs84RequestSchema,
   mapsPlaceEnrichmentRequestSchema,
   mapsPlaceEnrichmentResultSchema,
   placePhotoCandidateSchema,
@@ -199,6 +200,16 @@ describe('mapsRouteRequestSchema', () => {
     expect(mapsRouteRequestSchema.safeParse({ waypoints: Array(101).fill(waypoint), profile: 'driving' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('mapsConvertAmapToWgs84RequestSchema', () => {
+  it('accepts 1 to 100 finite coordinate pairs', () => {
+    const point = { lat: 39.9042, lng: 116.4074 };
+    expect(mapsConvertAmapToWgs84RequestSchema.safeParse({ points: [point] }).success).toBe(true);
+    expect(mapsConvertAmapToWgs84RequestSchema.safeParse({ points: [] }).success).toBe(false);
+    expect(mapsConvertAmapToWgs84RequestSchema.safeParse({ points: Array(101).fill(point) }).success).toBe(false);
+    expect(mapsConvertAmapToWgs84RequestSchema.safeParse({ points: [{ lat: null, lng: 1 }] }).success).toBe(false);
   });
 });
 

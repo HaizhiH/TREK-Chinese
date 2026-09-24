@@ -8,6 +8,8 @@ import {
   adminTemplateNameRequestSchema,
   adminOidcUpdateRequestSchema,
   adminAddonUpdateRequestSchema,
+  adminAmapJsValidationRequestSchema,
+  adminAmapUpdateRequestSchema,
   adminCollabFeaturesRequestSchema,
   adminNotificationPreferencesRequestSchema,
   adminDefaultUserSettingsRequestSchema,
@@ -21,7 +23,7 @@ import {
  * parameter typed with one of these classes by metatype — the Zod schemas in
  * shared/ remain the single source of truth for the wire contract.
  *
- * Thirteen classes cover the AdminController body contracts:
+ * Fifteen classes cover the AdminController body contracts:
  * the four feature toggles share AdminFeatureToggleDto and the six
  * packing-template create/update routes share AdminTemplateNameDto.
  */
@@ -33,6 +35,8 @@ export class AdminFeatureToggleDto extends createZodDto(adminFeatureToggleReques
 export class AdminTemplateNameDto extends createZodDto(adminTemplateNameRequestSchema) {}
 export class AdminOidcUpdateDto extends createZodDto(adminOidcUpdateRequestSchema) {}
 export class AdminAddonUpdateDto extends createZodDto(adminAddonUpdateRequestSchema) {}
+export class AdminAmapUpdateDto extends createZodDto(adminAmapUpdateRequestSchema) {}
+export class AdminAmapJsValidationDto extends createZodDto(adminAmapJsValidationRequestSchema) {}
 export class AdminCollabFeaturesDto extends createZodDto(adminCollabFeaturesRequestSchema) {}
 export class AdminNotificationPreferencesDto extends createZodDto(adminNotificationPreferencesRequestSchema) {}
 export class AdminDefaultUserSettingsDto extends createZodDto(adminDefaultUserSettingsRequestSchema) {}
