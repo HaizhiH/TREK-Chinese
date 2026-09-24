@@ -44,6 +44,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Kijelölt állomások használata',
   'reservations.12306.missingInput': 'Először válassz indulási dátumot, és adj meg egy vonatszámot.',
   'reservations.12306.lookupError': 'Nem sikerült betölteni ezt a vonatot a 12306-ból.',
+  'reservations.12306.lookupTimeout': 'A 12306-kérés időtúllépés miatt megszakadt. Próbáld újra.',
+  'reservations.12306.notFound':
+    'Ehhez a vonathoz és dátumhoz nem található menetrend. A 12306 csak körülbelül 15 napon belüli menetrendeket biztosít.',
   'reservations.12306.selectTwo': 'Válassz legalább két állomást.',
   'reservations.12306.geocodeError':
     'Nem sikerült megtalálni ezt az állomást: {station}. Ellenőrizd az Amap beállításait, vagy válaszd ki kézzel az állomást.',

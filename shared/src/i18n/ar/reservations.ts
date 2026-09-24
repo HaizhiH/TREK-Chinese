@@ -42,6 +42,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'استخدام المحطات المحددة',
   'reservations.12306.missingInput': 'اختر تاريخ المغادرة وأدخل رقم القطار أولاً.',
   'reservations.12306.lookupError': 'تعذّر تحميل هذا القطار من 12306.',
+  'reservations.12306.lookupTimeout': 'انتهت مهلة طلب 12306. يُرجى المحاولة مرة أخرى.',
+  'reservations.12306.notFound':
+    'لم يتم العثور على جدول لهذا القطار في التاريخ المحدد. يوفّر 12306 الجداول للتواريخ الواقعة ضمن نحو 15 يومًا فقط.',
   'reservations.12306.selectTwo': 'اختر محطتين على الأقل.',
   'reservations.12306.geocodeError': 'تعذّر تحديد موقع {station}. تحقّق من إعدادات Amap أو اختر المحطة يدويًا.',
   'reservations.12306.applied': 'تمت إضافة {count} محطة من 12306.',

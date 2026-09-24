@@ -42,6 +42,8 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': '使用所選車站',
   'reservations.12306.missingInput': '請先選擇出發日期並輸入車次。',
   'reservations.12306.lookupError': '無法從 12306 取得該車次。',
+  'reservations.12306.lookupTimeout': '12306 請求逾時，請重試。',
+  'reservations.12306.notFound': '找不到該車次在所選日期的時刻表。12306 僅開放約 15 天內的車次時刻查詢。',
   'reservations.12306.selectTwo': '請至少選擇兩個車站。',
   'reservations.12306.geocodeError': '無法定位「{station}」，請檢查高德地圖設定或手動選擇車站。',
   'reservations.12306.applied': '已從 12306 新增 {count} 個車站。',

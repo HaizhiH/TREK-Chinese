@@ -42,6 +42,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': '선택한 역 사용',
   'reservations.12306.missingInput': '먼저 출발일을 선택하고 열차 번호를 입력하세요.',
   'reservations.12306.lookupError': '12306에서 이 열차를 불러올 수 없습니다.',
+  'reservations.12306.lookupTimeout': '12306 요청 시간이 초과되었습니다. 다시 시도하세요.',
+  'reservations.12306.notFound':
+    '이 열차와 날짜의 시간표를 찾을 수 없습니다. 12306은 약 15일 이내 날짜의 시간표만 제공합니다.',
   'reservations.12306.selectTwo': '역을 두 곳 이상 선택하세요.',
   'reservations.12306.geocodeError':
     '{station}의 위치를 찾을 수 없습니다. Amap 설정을 확인하거나 역을 직접 선택하세요.',

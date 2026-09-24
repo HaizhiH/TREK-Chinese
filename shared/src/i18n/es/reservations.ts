@@ -118,6 +118,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Usar las estaciones seleccionadas',
   'reservations.12306.missingInput': 'Elige una fecha de salida e introduce primero un número de tren.',
   'reservations.12306.lookupError': 'No se pudo cargar este tren desde 12306.',
+  'reservations.12306.lookupTimeout': 'La solicitud a 12306 agotó el tiempo de espera. Inténtalo de nuevo.',
+  'reservations.12306.notFound':
+    'No se encontró un horario para este tren y fecha. 12306 solo ofrece horarios para fechas dentro de unos 15 días.',
   'reservations.12306.selectTwo': 'Selecciona al menos dos estaciones.',
   'reservations.12306.geocodeError':
     'No se pudo localizar {station}. Comprueba la configuración de Amap o selecciona la estación manualmente.',

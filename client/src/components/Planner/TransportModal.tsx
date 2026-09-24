@@ -454,9 +454,21 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       if (sequence !== chinaRailSequence.current) return
       setChinaRailStops(timetable.stops)
       setSelectedChinaRailStops(new Set(timetable.stops.map(stop => stop.sequence)))
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (sequence !== chinaRailSequence.current) return
-      toast.error(err?.response?.data?.error || t('reservations.12306.lookupError'))
+      const requestError = err as {
+        code?: unknown
+        response?: { status?: unknown; data?: { code?: unknown; error?: unknown } }
+      }
+      const response = requestError?.response
+      if (requestError?.code === 'ECONNABORTED' || requestError?.code === 'ETIMEDOUT') {
+        toast.error(t('reservations.12306.lookupTimeout'))
+      } else if (response?.status === 404 || response?.data?.code === 'CHINA_RAIL_TRAIN_NOT_FOUND') {
+        toast.error(t('reservations.12306.notFound'))
+      } else {
+        const serverError = response?.data?.error
+        toast.error(typeof serverError === 'string' ? serverError : t('reservations.12306.lookupError'))
+      }
       setChinaRailStops([])
     } finally {
       if (sequence === chinaRailSequence.current) setChinaRailLoading(false)

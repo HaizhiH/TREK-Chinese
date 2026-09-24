@@ -42,6 +42,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Використати вибрані станції',
   'reservations.12306.missingInput': 'Спочатку виберіть дату відправлення та введіть номер поїзда.',
   'reservations.12306.lookupError': 'Не вдалося завантажити цей поїзд із 12306.',
+  'reservations.12306.lookupTimeout': 'Час очікування запиту до 12306 вичерпано. Спробуйте ще раз.',
+  'reservations.12306.notFound':
+    'Розклад для цього поїзда на вибрану дату не знайдено. 12306 надає розклади лише приблизно на 15 днів.',
   'reservations.12306.selectTwo': 'Виберіть щонайменше дві станції.',
   'reservations.12306.geocodeError':
     'Не вдалося знайти станцію {station}. Перевірте налаштування Amap або виберіть станцію вручну.',
