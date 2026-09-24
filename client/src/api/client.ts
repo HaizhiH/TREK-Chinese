@@ -1437,7 +1437,12 @@ export const reservationsApi = {
   setTravelers: (tripId: number | string, id: number, userIds: number[]) => apiClient.put(`/trips/${tripId}/reservations/${id}/travelers`, { user_ids: userIds }).then(r => r.data),
   updatePositions: (tripId: number | string, positions: { id: number; day_plan_position: number }[], dayId?: number) => apiClient.put(`/trips/${tripId}/reservations/positions`, { positions, day_id: dayId }).then(r => r.data),
   chinaRailTimetable: (tripId: number | string, trainNumber: string, date: string) =>
-    apiClient.get(`/trips/${tripId}/reservations/train/12306`, { params: { trainNumber, date } }).then(r => r.data as {
+    apiClient.get(`/trips/${tripId}/reservations/train/12306`, {
+      params: { trainNumber, date },
+      // The server performs two sequential 12306 requests, each with its own
+      // 8-second upstream deadline. Keep the client deadline above both.
+      timeout: 25000,
+    }).then(r => r.data as {
       trainNumber: string
       date: string
       from: string

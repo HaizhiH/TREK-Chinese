@@ -43,6 +43,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Geselecteerde stations gebruiken',
   'reservations.12306.missingInput': 'Kies eerst een vertrekdatum en voer een treinnummer in.',
   'reservations.12306.lookupError': 'Deze trein kon niet vanuit 12306 worden geladen.',
+  'reservations.12306.lookupTimeout': 'Er is een time-out opgetreden bij het verzoek aan 12306. Probeer het opnieuw.',
+  'reservations.12306.notFound':
+    'Er is geen dienstregeling gevonden voor deze trein en datum. 12306 biedt alleen dienstregelingen voor ongeveer 15 dagen.',
   'reservations.12306.selectTwo': 'Selecteer ten minste twee stations.',
   'reservations.12306.geocodeError':
     '{station} kon niet worden gevonden. Controleer je Amap-configuratie of selecteer het station handmatig.',

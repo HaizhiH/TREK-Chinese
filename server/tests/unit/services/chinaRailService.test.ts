@@ -49,7 +49,7 @@ describe('queryChinaRailTrain', () => {
       });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(queryChinaRailTrain('g1', '2026-08-26')).resolves.toEqual({
+    await expect(queryChinaRailTrain('g 1', '2026-08-26')).resolves.toEqual({
       trainNumber: 'G1',
       date: '2026-08-26',
       from: '北京南',
@@ -60,6 +60,36 @@ describe('queryChinaRailTrain', () => {
       ],
     });
     expect(String(fetchMock.mock.calls[1][0])).toContain('train_no=internal-id');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('keyword=G1');
+  });
+
+  it('matches one number from a slash-separated compound train code', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [{ station_train_code: 'G1234/G1235', train_no: 'compound-id' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            data: [
+              { station_no: '01', station_name: '北京南', start_time: '08:00' },
+              { station_no: '02', station_name: '天津南', arrive_time: '08:30' },
+            ],
+          },
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(queryChinaRailTrain('G1235', '2026-08-26')).resolves.toMatchObject({
+      trainNumber: 'G1235',
+      stops: [{ name: '北京南' }, { name: '天津南' }],
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain('train_no=compound-id');
   });
 
   it('rejects malformed input before contacting 12306', async () => {
@@ -71,7 +101,11 @@ describe('queryChinaRailTrain', () => {
 
   it('reports a missing exact train as not found', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) }));
-    await expect(queryChinaRailTrain('G1', '2026-08-26')).rejects.toMatchObject({ status: 404 });
+    await expect(queryChinaRailTrain('G1', '2026-08-26')).rejects.toMatchObject({
+      status: 404,
+      code: 'CHINA_RAIL_TRAIN_NOT_FOUND',
+      message: expect.stringContaining('15 days'),
+    });
   });
 });
 

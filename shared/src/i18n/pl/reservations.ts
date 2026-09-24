@@ -40,6 +40,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Użyj wybranych stacji',
   'reservations.12306.missingInput': 'Najpierw wybierz datę odjazdu i wpisz numer pociągu.',
   'reservations.12306.lookupError': 'Nie udało się wczytać tego pociągu z 12306.',
+  'reservations.12306.lookupTimeout': 'Upłynął limit czasu żądania do 12306. Spróbuj ponownie.',
+  'reservations.12306.notFound':
+    'Nie znaleziono rozkładu dla tego pociągu i daty. 12306 udostępnia rozkłady tylko dla okresu około 15 dni.',
   'reservations.12306.selectTwo': 'Wybierz co najmniej dwie stacje.',
   'reservations.12306.geocodeError':
     'Nie udało się zlokalizować stacji {station}. Sprawdź konfigurację Amap lub wybierz stację ręcznie.',

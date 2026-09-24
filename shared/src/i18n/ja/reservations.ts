@@ -42,6 +42,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': '選択した駅を使用',
   'reservations.12306.missingInput': '出発日を選択し、列車番号を入力してください。',
   'reservations.12306.lookupError': '12306からこの列車を読み込めませんでした。',
+  'reservations.12306.lookupTimeout': '12306へのリクエストがタイムアウトしました。もう一度お試しください。',
+  'reservations.12306.notFound':
+    'この列車と日付の時刻表が見つかりませんでした。12306で提供される時刻表は約15日以内の日付に限られます。',
   'reservations.12306.selectTwo': '駅を2つ以上選択してください。',
   'reservations.12306.geocodeError':
     '{station}の場所を特定できませんでした。Amapの設定を確認するか、駅を手動で選択してください。',

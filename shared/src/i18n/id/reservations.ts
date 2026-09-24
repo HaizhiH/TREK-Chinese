@@ -43,6 +43,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Gunakan stasiun terpilih',
   'reservations.12306.missingInput': 'Pilih tanggal keberangkatan dan masukkan nomor kereta terlebih dahulu.',
   'reservations.12306.lookupError': 'Kereta ini tidak dapat dimuat dari 12306.',
+  'reservations.12306.lookupTimeout': 'Waktu permintaan ke 12306 habis. Silakan coba lagi.',
+  'reservations.12306.notFound':
+    'Jadwal untuk kereta dan tanggal ini tidak ditemukan. 12306 hanya menyediakan jadwal untuk tanggal dalam sekitar 15 hari.',
   'reservations.12306.selectTwo': 'Pilih setidaknya dua stasiun.',
   'reservations.12306.geocodeError':
     '{station} tidak dapat ditemukan. Periksa konfigurasi Amap Anda atau pilih stasiun secara manual.',
