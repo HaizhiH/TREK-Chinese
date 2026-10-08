@@ -30,7 +30,7 @@ export class ReservationsRpc {
   ) {}
 
   @PluginMethod('reservations.create', { permission: 'db:write:reservations' })
-  create(params: Record<string, unknown>, ctx: PluginRpcContext): unknown {
+  async create(params: Record<string, unknown>, ctx: PluginRpcContext): Promise<unknown> {
     const tripId = num(params.tripId, 'tripId');
     const actor = this.guards.requireActor(ctx, 'reservation');
     const parsed = reservationCreateRequestSchema.safeParse(params.input);
@@ -39,10 +39,12 @@ export class ReservationsRpc {
     this.requireValidEndpoints(input.endpoints);
     this.guards.requireTripEdit(tripId, actor, RESERVATION_EDIT_ACTION);
     this.requireOwnReferences(tripId, input);
+    const i = input as { title?: string; type?: string; create_budget_entry?: unknown };
+    // Same as the REST route: the price keeps its currency, at a rate frozen now (#2525).
+    const budgetEntry = await this.reservations.withFrozenRate(tripId, i.create_budget_entry as never);
     const { reservation, accommodationCreated } = this.reservations.create(String(tripId), input as never);
     if (accommodationCreated) this.realtime.broadcast(tripId, 'accommodation:created', {}, undefined);
-    const i = input as { title?: string; type?: string; create_budget_entry?: unknown };
-    this.reservations.syncBudgetOnCreate(String(tripId), reservation.id, i.title ?? '', i.type, i.create_budget_entry as never, undefined);
+    this.reservations.syncBudgetOnCreate(String(tripId), reservation.id, i.title ?? '', i.type, budgetEntry, undefined);
     this.realtime.broadcast(tripId, 'reservation:created', { reservation }, undefined);
     this.notifyBooking(actor, tripId, i.title ?? '', i.type ?? '');
     return reservation;

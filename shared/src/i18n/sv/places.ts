@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Bokningsinformation, bekräftelsenummer...',
   'places.mapsSearchPlaceholder': 'Sök efter platser...',
   'places.mapsSearchError': 'Sökningen efter plats misslyckades.',
+  'places.searchGoogleInstead': 'Inte rätt plats? Sök på Google i stället',
   'places.loadingDetails': 'Hämtar information om platsen…',
   'places.osmHint':
     'Använder OpenStreetMap-sökningen (inga bilder, öppettider eller betyg). Lägg till en Google API-nyckel i inställningarna för fullständig information.',

@@ -76,12 +76,26 @@ const osmAnswer = (rows: unknown[]) => ({ ok: true, json: async () => rows });
 /**
  * Keyed on the statement so the kill switch can be driven without also handing
  * `'false'` to the API-key resolver, which would send the fallback at Google.
+ *
+ * `rows` are the app_settings the instance holds, by key: a Google key, the
+ * provider choice, the Google-only switch. Anything else reads as absent.
  */
-function make(enabled = true) {
+function make(enabled = true, rows: Record<string, string> = {}) {
   trekPlaces.on = enabled;
-  const database = { get: vi.fn(() => undefined) } as unknown as DatabaseService;
+  const database = {
+    get: vi.fn((sql: string, key?: unknown) =>
+      typeof key === 'string' && sql.includes('app_settings') && rows[key] !== undefined ? { value: rows[key] } : undefined,
+    ),
+  } as unknown as DatabaseService;
   return new MapsService(database, {} as PlacePhotoCacheService, {} as never, { getAmapConfig: () => ({ enabled: false }) } as never);
 }
+
+const googleAnswer = (name: string) => ({
+  ok: true,
+  json: async () => ({
+    places: [{ id: 'g1', displayName: { text: name }, formattedAddress: 'Tokyo', location: { latitude: 35.68, longitude: 139.77 } }],
+  }),
+});
 
 beforeEach(() => {
   mockSearch.mockReset();
@@ -193,6 +207,64 @@ describe('MapsService.searchPlaces — the merged path', () => {
     expect(out.places[0].name).toBe('Index 0');
     expect(out.places[1].name).toBe('Osm 0');
     expect(out.places[2].name).toBe('Index 1');
+  });
+
+  it('MAPS-SEARCH-011: the Google-only switch sends the search to Google and asks neither the index nor OpenStreetMap', async () => {
+    mockSearch.mockResolvedValue([indexHit('Weigh station, Ritzville')]);
+    mockNominatim.mockResolvedValue(osmAnswer([osmRow('Some station')]));
+    const fetchMock = vi.fn().mockResolvedValue(googleAnswer('Tokyo Station'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await make(true, { maps_api_key: 'key', places_google_only: 'true' }).searchPlaces(1, 'Tokyo Station');
+
+    expect(mockSearch).not.toHaveBeenCalled();
+    expect(mockNominatim).not.toHaveBeenCalled();
+    expect(out.source).toBe('google');
+    expect(out.places[0].name).toBe('Tokyo Station');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('places:searchText');
+    vi.unstubAllGlobals();
+  });
+
+  it('MAPS-SEARCH-012: the switch changes nothing without a Google key, or when Google does not hold the slot', async () => {
+    mockSearch.mockResolvedValue([indexHit("L'Osteria")]);
+    mockNominatim.mockResolvedValue(osmAnswer([osmRow('Steinstrasse')]));
+
+    // No key at all: the index and OpenStreetMap answer, as before.
+    const keyless = await make(true, { places_google_only: 'true' }).searchPlaces(1, "L'Osteria");
+    expect(keyless.source).toBe('trek-places+openstreetmap');
+
+    // A key, but the admin picked OpenStreetMap as the provider: Google holds
+    // no slot, so there is nothing for the switch to hand the search to.
+    mockSearch.mockClear();
+    const osmOnly = await make(true, { maps_api_key: 'key', places_google_only: 'true', places_provider: 'openstreetmap' })
+      .searchPlaces(1, "L'Osteria");
+    expect(mockSearch).toHaveBeenCalled();
+    expect(osmOnly.source).toBe('trek-places+openstreetmap');
+
+    // A key and the switch off: the index still answers first.
+    mockSearch.mockClear();
+    const off = await make(true, { maps_api_key: 'key', places_google_only: 'false' }).searchPlaces(1, "L'Osteria");
+    expect(mockSearch).toHaveBeenCalled();
+    expect(off.source).toBe('trek-places+openstreetmap');
+  });
+
+  it('MAPS-SEARCH-013: one search sent to Google on purpose goes there alone, and only where Google holds the slot', async () => {
+    mockSearch.mockResolvedValue([indexHit('Weigh station, Ritzville')]);
+    mockNominatim.mockResolvedValue(osmAnswer([osmRow('Some station')]));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(googleAnswer('Tokyo Station')));
+
+    const asked = await make(true, { maps_api_key: 'key' }).searchPlaces(1, 'Tokyo Station', undefined, undefined, { googleOnly: true });
+    expect(mockSearch).not.toHaveBeenCalled();
+    expect(asked.source).toBe('google');
+
+    // The same request on an install without a key is an ordinary search: the
+    // link that sends it is never shown there, and a client that sends it
+    // anyway gets what everybody else gets.
+    mockSearch.mockClear();
+    const keyless = await make(true, {}).searchPlaces(1, 'Tokyo Station', undefined, undefined, { googleOnly: true });
+    expect(mockSearch).toHaveBeenCalled();
+    expect(keyless.source).toBe('trek-places+openstreetmap');
+    vi.unstubAllGlobals();
   });
 
   it('MAPS-SEARCH-007: with the index switched off the query never leaves for it', async () => {

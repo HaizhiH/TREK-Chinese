@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': '予約メモ、確認番号など…',
   'places.mapsSearchPlaceholder': '場所を検索…',
   'places.mapsSearchError': '場所の検索に失敗しました。',
+  'places.searchGoogleInstead': '目的の場所ではない？ Google で検索',
   'places.loadingDetails': '詳細を読み込み中…',
   'places.osmHint':
     'OpenStreetMapで検索しています（写真・営業時間・評価なし）。設定でGoogle APIキーを追加すると詳細が表示されます。',

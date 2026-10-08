@@ -599,6 +599,32 @@ describe('MapView', () => {
     expect(screen.getAllByTestId('polyline').length).toBeGreaterThan(0)
   })
 
+  it('FE-COMP-MAPVIEW-082: a booking switched on for another day keeps drawing unless the map is held to the day', () => {
+    // The desktop passes no scope, so a booking switched on stays drawn on every day.
+    // Only a caller that asks for it drops the booking from a day it does not run on.
+    const days = [{ id: 10, trip_id: 1, day_number: 1 }, { id: 11, trip_id: 1, day_number: 2 }]
+    const reservation = buildReservation({
+      id: 44,
+      type: 'flight',
+      day_id: 10,
+      end_day_id: 10,
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'A', code: 'AAA', lat: 1, lng: 2, timezone: null, local_time: null, local_date: null },
+        { role: 'to', sequence: 1, name: 'B', code: 'BBB', lat: 3, lng: 4, timezone: null, local_time: null, local_date: null },
+      ],
+    })
+    const reservations = [reservation]
+    const ids = [44]
+    const { rerender } = render(<MapView reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={11} />)
+    expect(screen.getAllByTestId('polyline').length).toBeGreaterThan(0)
+
+    rerender(<MapView reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={11} scopeConnectionsToDay />)
+    expect(screen.queryByTestId('polyline')).not.toBeInTheDocument()
+
+    rerender(<MapView reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={10} scopeConnectionsToDay />)
+    expect(screen.getAllByTestId('polyline').length).toBeGreaterThan(0)
+  })
+
   it('FE-COMP-MAPVIEW-073: a category icon that throws leaves the marker circle intact', () => {
     // Icon components come from a lookup table a plugin can extend; one that
     // throws must not take the whole map down, only its own glyph.
@@ -920,6 +946,14 @@ describe('MapView selection panning (#921)', () => {
     expect(mapMock.panTo).toHaveBeenCalledWith([48, 2], { animate: true })
   })
 
+  it('FE-COMP-MAPVIEW-083: pans to a selected stay whose pin a filter keeps off the map', () => {
+    const places = [buildMapPlace({ id: 9, lat: 48, lng: 2 })]
+    const stay = buildMapPlace({ id: 11, lat: 50, lng: 4 })
+    const { rerender } = render(<MapView places={places} selectedPlaceId={null} />)
+    rerender(<MapView places={places} selectedPlaceId={11} selectedPlace={stay} />)
+    expect(mapMock.panTo).toHaveBeenCalledWith([50, 4], { animate: true })
+  })
+
   it('FE-COMP-MAPVIEW-053: a selected place without coordinates is not panned to', () => {
     const places = [buildMapPlace({ id: 10, lat: null, lng: null })]
     const { rerender } = render(<MapView places={places} selectedPlaceId={null} />)
@@ -1028,6 +1062,26 @@ describe('MapView live location', () => {
     render(<MapView />)
     fireEvent.click(screen.getByRole('button', { name: 'Follow my location' }))
     expect(geoMock.cycleMode).toHaveBeenCalled()
+  })
+
+  it('FE-COMP-MAPVIEW-064b: turning the phone sideways and back takes the button with it', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 420 })
+    geoMock.mode = 'off'
+    render(<MapView />)
+    expect(screen.getByRole('button', { name: 'Show my location' })).toBeInTheDocument()
+
+    // landscape crosses the 768px cut without remounting the map
+    act(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 844 })
+      window.dispatchEvent(new Event('resize'))
+    })
+    expect(screen.queryByRole('button', { name: 'Show my location' })).toBeNull()
+
+    act(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 420 })
+      window.dispatchEvent(new Event('resize'))
+    })
+    expect(screen.getByRole('button', { name: 'Show my location' })).toBeInTheDocument()
   })
 
   it('FE-COMP-MAPVIEW-077: the map draws no credit control of its own, on either width', () => {

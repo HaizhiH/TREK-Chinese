@@ -4,6 +4,7 @@ import {
   distanceBetweenGeoPoints,
   groupPhotosByDate,
   matchJourneyEntries,
+  posterlessVideo,
   sortProviderPhotos,
   utcOffsetMinutesForDay,
 } from './JourneyDetailPage.helpers';
@@ -205,5 +206,22 @@ describe('matchJourneyEntries', () => {
 
   it('answers with nothing rather than everything when nothing matches', () => {
     expect(matchJourneyEntries(entries, 'reykjavik')).toEqual([]);
+  });
+});
+
+describe('posterlessVideo (#2341)', () => {
+  it('is a local clip whose poster frame was never grabbed', () => {
+    expect(posterlessVideo({ media_type: 'video', provider: 'local', thumbnail_path: null })).toBe(true);
+    expect(posterlessVideo({ media_type: 'video', provider: 'local' })).toBe(true);
+  });
+
+  it('is not a clip that has its poster, whatever the file is called', () => {
+    expect(posterlessVideo({ media_type: 'video', provider: 'local', thumbnail_path: 'journey/poster.jpg' })).toBe(false);
+  });
+
+  it('is never a photo, and never a provider clip, whose poster the provider serves', () => {
+    expect(posterlessVideo({ media_type: 'image', provider: 'local', thumbnail_path: null })).toBe(false);
+    expect(posterlessVideo({ provider: 'local', thumbnail_path: null })).toBe(false);
+    expect(posterlessVideo({ media_type: 'video', provider: 'immich', thumbnail_path: null })).toBe(false);
   });
 });

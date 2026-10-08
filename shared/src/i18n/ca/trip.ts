@@ -60,7 +60,7 @@ const trip: TranslationStrings = {
   'transit.search': 'Cercar',
   'transit.searching': 'Cercant…',
   'transit.searchError': 'Ha fallat la cerca de la ruta. Torna-ho a provar.',
-  'transit.noResultsVia': 'No s\'ha trobat cap connexió mitjançant {provider}. Prova una altra hora o altres filtres.',
+  'transit.noResultsVia': "No s'ha trobat cap connexió mitjançant {provider}. Prova una altra hora o altres filtres.",
   'transit.noResults': "No s'han trobat connexions. Prova amb un altre horari o filtres.",
   'transit.direct': 'Directe',
   'transit.transfers': '{count} transbords',
@@ -88,7 +88,10 @@ const trip: TranslationStrings = {
   'trip.loadingSteps.road': 'Sortint de camí...',
   'trip.loadingSteps.arrive': 'Gairebé hi som...',
   'trip.toast.tripUpdated': 'Viatge actualitzat',
-  'trip.confirm.deletePlaceNight': 'La nit reservada a «{name}» es perd amb el lloc.',
-  'trip.confirm.deletePlaceBooked': 'La nit reservada a «{name}» es perd amb el lloc, juntament amb la reserva «{booking}» i qualsevol despesa vinculada.',
+  'trip.confirm.deletePlaceNight': 'També s’elimina l’estada reservada a «{name}».',
+  'trip.confirm.deletePlaceBooked':
+    'També s’eliminen l’estada reservada a «{name}», la reserva «{booking}» i qualsevol despesa vinculada.',
+  'trip.confirm.deletePlaceBookedSame':
+    'També s’eliminen l’estada reservada a «{name}», la seva reserva i qualsevol despesa vinculada.',
 };
 export default trip;

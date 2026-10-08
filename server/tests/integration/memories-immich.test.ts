@@ -1126,3 +1126,113 @@ describe('Immich testConnection canonical URL detection', () => {
     expect(res.body.canonicalUrl).toBeUndefined();
   });
 });
+
+// ── Self-signed certificates (#2475) ─────────────────────────────────────────
+
+describe('Immich self-signed certificate switch (#2475)', () => {
+  const LAX = { rejectUnauthorized: false };
+  const STRICT = { rejectUnauthorized: true };
+
+  /** Only what the service and the asset proxy read off a response. */
+  function okJson(json: unknown): Response {
+    return { ok: true, status: 200, url: '', headers: { get: () => null }, json: async () => json, body: null } as unknown as Response;
+  }
+
+  function allowInsecureTls(userId: number): number {
+    return (testDb.prepare('SELECT immich_allow_insecure_tls AS v FROM users WHERE id = ?').get(userId) as { v: number }).v;
+  }
+
+  beforeEach(() => {
+    // Earlier cases leave a fixed response behind; these need a plain answer per path.
+    vi.mocked(safeFetch).mockReset();
+    vi.mocked(safeFetch).mockImplementation(async (url: string) =>
+      String(url).includes('/api/search/metadata') ? okJson({ assets: { items: [] } }) : okJson({}),
+    );
+  });
+
+  it('IMMICH-102: PUT /settings stores the switch and GET /settings reports it', async () => {
+    const { user } = createUser(testDb);
+
+    const put = await request(app)
+      .put(`${IMMICH}/settings`)
+      .set('Cookie', authCookie(user.id))
+      .send({ immich_url: 'https://immich.example.com', immich_api_key: 'k', allow_insecure_tls: true });
+    expect(put.status).toBe(200);
+
+    const get = await request(app).get(`${IMMICH}/settings`).set('Cookie', authCookie(user.id));
+    expect(get.status).toBe(200);
+    expect(get.body.allow_insecure_tls).toBe(true);
+  });
+
+  it('IMMICH-103: a save without the switch keeps it for the same server, a new server or disconnecting clears it', async () => {
+    const { user } = createUser(testDb);
+    const put = (body: Record<string, unknown>) =>
+      request(app).put(`${IMMICH}/settings`).set('Cookie', authCookie(user.id)).send(body);
+
+    await put({ immich_url: 'https://immich.example.com', immich_api_key: 'k', allow_insecure_tls: true });
+    expect(allowInsecureTls(user.id)).toBe(1);
+
+    // What a client that predates the switch sends.
+    await put({ immich_url: 'https://immich.example.com', immich_api_key: 'k' });
+    expect(allowInsecureTls(user.id)).toBe(1);
+
+    // A different server is a different trust decision: without the switch it starts off.
+    await put({ immich_url: 'https://photos.example.com', immich_api_key: 'k' });
+    expect(allowInsecureTls(user.id)).toBe(0);
+    await put({ immich_url: 'https://photos.example.com', immich_api_key: 'k', allow_insecure_tls: true });
+    expect(allowInsecureTls(user.id)).toBe(1);
+
+    await put({ immich_url: '', immich_api_key: 'k', allow_insecure_tls: true });
+    expect(allowInsecureTls(user.id)).toBe(0);
+  });
+
+  it('IMMICH-104: browse, search and the thumbnail proxy follow the stored switch', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    setImmichCredentials(testDb, user.id, 'https://immich.example.com', 'test-api-key');
+    addTripPhoto(testDb, trip.id, user.id, 'asset-tls', 'immich', { shared: false });
+    const cookie = authCookie(user.id);
+
+    const hitEveryPath = async () => {
+      expect((await request(app).get(`${IMMICH}/browse`).set('Cookie', cookie)).status).toBe(200);
+      expect((await request(app).post(`${IMMICH}/search`).set('Cookie', cookie).send({ page: 1, size: 10 })).status).toBe(200);
+      expect((await request(app).get(`${IMMICH}/assets/${trip.id}/asset-tls/${user.id}/thumbnail`).set('Cookie', cookie)).status).toBe(200);
+    };
+
+    testDb.prepare('UPDATE users SET immich_allow_insecure_tls = 1 WHERE id = ?').run(user.id);
+    await hitEveryPath();
+    expect(vi.mocked(safeFetch).mock.calls).toHaveLength(3);
+    for (const call of vi.mocked(safeFetch).mock.calls) expect(call[2]).toEqual(LAX);
+
+    vi.mocked(safeFetch).mockClear();
+    testDb.prepare('UPDATE users SET immich_allow_insecure_tls = 0 WHERE id = ?').run(user.id);
+    await hitEveryPath();
+    expect(vi.mocked(safeFetch).mock.calls).toHaveLength(3);
+    for (const call of vi.mocked(safeFetch).mock.calls) expect(call[2]).toEqual(STRICT);
+  });
+
+  it('IMMICH-105: POST /test probes with the switch in the form, and refuses a value that is not a boolean', async () => {
+    const { user } = createUser(testDb);
+    const test = (allow_insecure_tls: unknown) =>
+      request(app)
+        .post(`${IMMICH}/test`)
+        .set('Cookie', authCookie(user.id))
+        .send({ immich_url: 'https://immich.example.com', immich_api_key: 'k', allow_insecure_tls });
+
+    const lax = await test(true);
+    expect(lax.status).toBe(200);
+    expect(lax.body.connected).toBe(true);
+    expect(vi.mocked(safeFetch).mock.calls[0][2]).toEqual(LAX);
+
+    const strict = await test(false);
+    expect(strict.status).toBe(200);
+    expect(vi.mocked(safeFetch).mock.calls[1][2]).toEqual(STRICT);
+
+    // Only a real boolean: the form has always sent one, and anything else
+    // must not be read as either answer.
+    for (const value of ['true', 'yes']) {
+      expect((await test(value)).status).toBe(400);
+    }
+    expect(vi.mocked(safeFetch)).toHaveBeenCalledTimes(2);
+  });
+});

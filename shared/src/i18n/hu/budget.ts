@@ -157,6 +157,7 @@ const budget: TranslationStrings = {
   'costs.noReceipts': 'Nincsenek csatolt nyugták',
   'costs.deleteReceipt': 'Nyugta eltávolítása',
   'costs.viewReceipt': 'Nyugta megtekintése',
-  'costs.receiptLeftBehind': 'A mentés nem sikerült, és {count} feltöltött blokk még ott van. Törölje őket a Fájlok fülön.',
+  'costs.receiptLeftBehind':
+    'A mentés nem sikerült, és {count} feltöltött blokk még ott van. Törölje őket a Fájlok fülön.',
 };
 export default budget;

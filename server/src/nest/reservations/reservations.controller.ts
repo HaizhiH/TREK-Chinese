@@ -28,7 +28,7 @@ import {
 type ReservationBody = Record<string, unknown> & {
   title?: string;
   type?: string;
-  create_budget_entry?: { total_price?: number; category?: string };
+  create_budget_entry?: { total_price?: number; category?: string; currency?: string | null };
 };
 
 /**
@@ -89,7 +89,7 @@ export class ReservationsController {
 
   @RequirePermission('reservation_edit')
   @Post()
-  create(
+  async create(
     @CurrentUser() user: User,
     @Param('tripId') tripId: string,
     @Body() rawBody: ReservationCreateDto,
@@ -97,11 +97,14 @@ export class ReservationsController {
   ) {
     const body = rawBody as ReservationBody & { title: string };
     this.rejectForeignReferences(tripId, body);
+    // Before the synchronous writes: the price keeps the currency it was quoted in,
+    // at a rate frozen now (#2525).
+    const budgetEntry = await this.reservations.withFrozenRate(tripId, body.create_budget_entry);
     const { reservation, accommodationCreated } = this.reservations.create(tripId, body as never);
     if (accommodationCreated) {
       this.reservations.broadcast(tripId, 'accommodation:created', {}, socketId);
     }
-    this.reservations.syncBudgetOnCreate(tripId, reservation.id, body.title, body.type, body.create_budget_entry, socketId);
+    this.reservations.syncBudgetOnCreate(tripId, reservation.id, body.title, body.type, budgetEntry, socketId);
     this.reservations.broadcast(tripId, 'reservation:created', { reservation }, socketId);
     this.reservations.notifyBookingChange(tripId, user.id, body.title, body.type ?? '');
     return { reservation };

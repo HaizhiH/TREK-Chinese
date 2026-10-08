@@ -129,36 +129,22 @@ const admin: TranslationStrings = {
     'TREK مفتوح المصدر ولسنا محايدين هنا. بهذا الحجم لا توجد التقييمات وصور المحال العادية إلا لدى Google، وهذا هو الاحتكار. الحقل موجود لانعدام البديل، لا لأننا نوصي به. عندئذ يذهب كل استعلام إلى Google.',
   'admin.trekApi.tagline':
     'فهرس الأماكن الخاص بـ TREK. بحث بلا مفتاح من Google، بلا حصة، وبلا أن يُحصي أحد عمليات بحثك.',
-  'admin.trekApi.factPlaces':
-    '73.6 مليون مكان حول العالم',
-  'admin.trekApi.factNoKey':
-    'بلا مفتاح وبلا حصة',
-  'admin.trekApi.factOffline':
-    'حِزَم الدول تعمل دون اتصال',
-  'admin.trekApi.factPrivacy':
-    'لا تُسجَّل عمليات البحث أبدًا',
-  'admin.trekApi.more':
-    'ماذا يحتوي',
-  'admin.trekApi.fieldPhone':
-    'هاتف',
-  'admin.trekApi.fieldStableId':
-    'معرّف ثابت',
-  'admin.trekApi.includedNote':
-    'الأوصاف تأتي من موقع المكان نفسه، وساعات العمل من OpenStreetMap حيث تكون مُدخَلة.',
-  'admin.trekApi.notRatings':
-    'التقييمات',
-  'admin.trekApi.notPhotos':
-    'صور المحال العادية',
+  'admin.trekApi.factPlaces': '73.6 مليون مكان حول العالم',
+  'admin.trekApi.factNoKey': 'بلا مفتاح وبلا حصة',
+  'admin.trekApi.factOffline': 'حِزَم الدول تعمل دون اتصال',
+  'admin.trekApi.factPrivacy': 'لا تُسجَّل عمليات البحث أبدًا',
+  'admin.trekApi.more': 'ماذا يحتوي',
+  'admin.trekApi.fieldPhone': 'هاتف',
+  'admin.trekApi.fieldStableId': 'معرّف ثابت',
+  'admin.trekApi.includedNote': 'الأوصاف تأتي من موقع المكان نفسه، وساعات العمل من OpenStreetMap حيث تكون مُدخَلة.',
+  'admin.trekApi.notRatings': 'التقييمات',
+  'admin.trekApi.notPhotos': 'صور المحال العادية',
   'admin.trekApi.notIncludedNote':
     'لا يوفّر أيًّا منهما أي مصدر مفتوح بأي ثمن. يبقى مفتاح Google هو السبيل الوحيد إليهما.',
-  'admin.trekApi.sourcesLabel':
-    'المصادر',
-  'admin.trekApi.sourcesNote':
-    'كل حقل في الاستجابة يذكر من أيٍّ منها جاء.',
-  'admin.trekApi.included':
-    'مشمول',
-  'admin.trekApi.notIncluded':
-    'غير مشمول',
+  'admin.trekApi.sourcesLabel': 'المصادر',
+  'admin.trekApi.sourcesNote': 'كل حقل في الاستجابة يذكر من أيٍّ منها جاء.',
+  'admin.trekApi.included': 'مشمول',
+  'admin.trekApi.notIncluded': 'غير مشمول',
   'admin.mapsKey': 'مفتاح Google Maps API',
   'admin.mapsKeyHint': 'مطلوب للبحث عن الأماكن. احصل عليه من console.cloud.google.com',
   'admin.mapsKeyHintLong':
@@ -178,7 +164,8 @@ const admin: TranslationStrings = {
   'admin.placesProvider.google': 'Google Places',
   'admin.placesProvider.amap': 'Amap (高德地图)',
   'admin.placesProvider.openstreetmap': 'OpenStreetMap',
-  'admin.placesProvider.missingKey': 'لا يوجد مفتاح API للمزوّد المختار، لذا يجيب عن البحث عن الأماكن فهرس TREK وOpenStreetMap وحدهما.',
+  'admin.placesProvider.missingKey':
+    'لا يوجد مفتاح API للمزوّد المختار، لذا يجيب عن البحث عن الأماكن فهرس TREK وOpenStreetMap وحدهما.',
   'admin.placesProvider.saved': 'تم حفظ مزوّد البحث عن الأماكن',
   'admin.validateKey': 'اختبار',
   'admin.keyValid': 'متصل',
@@ -209,14 +196,24 @@ const admin: TranslationStrings = {
   'admin.placesEnrich.title': 'إثراء الأماكن',
   'admin.placesEnrich.subtitle':
     'يعرض صورًا ووصفًا أثناء إضافة مكان. تُستخدم ويكيبيديا وOpenStreetMap دائمًا، وتُضاف Google عند تفعيل صور الأماكن أو تفاصيل الأماكن.',
+  'admin.placesGoogleOnly.title': 'البحث عبر Google فقط',
+  'admin.placesGoogleOnly.subtitle':
+    'كل بحث وكل اقتراح يذهب إلى Google Places. عند الإيقاف يجيب فهرس TREK وOpenStreetMap أولًا، ولا يُسأل Google إلا إذا لم يجدا شيئًا.',
+  'admin.placesGoogleOnly.missingKey':
+    'يتطلب مفتاح Google Maps API. من دونه يعمل البحث عبر فهرس TREK وOpenStreetMap مهما كان وضع هذا المفتاح.',
+  'admin.placesGoogleOnly.otherProvider':
+    'يتطلب Google كمزود للأماكن. عند اختيار Amap أو OpenStreetMap لا يذهب أي بحث إلى Google مهما كان وضع هذا المفتاح.',
   'admin.transitProvider.title': 'مزود النقل العام',
   'admin.transitProvider.subtitle': 'الخدمة التي تجيب على بحث النقل العام.',
   'admin.transitProvider.transitous': 'Transitous (مجاني)',
   'admin.transitProvider.google': 'Google',
   'admin.transitProvider.transitousHint': 'تغذيات GTFS مجتمعية. مجانية وبدون مفتاح، وأفضل تغطية في أوروبا.',
-  'admin.transitProvider.googleHint': 'يستخدم مفتاح Google أعلاه للمناطق التي لا تتوفر لها بيانات في Transitous. يُحاسب على كل بحث — ويُستخدم Transitous ما دام لا يوجد مفتاح.',
-  'admin.transitProvider.noKeyWarning': 'تم اختيار Google، لكن لا يوجد مفتاح Google مُهيأ — لا يزال بحث النقل يستخدم Transitous. أضف مفتاحًا ضمن مفاتيح API أعلاه.',
-  'admin.transitProvider.personalKeyWarning': 'مفتاح Google الخاص بك وحده مضبوط، لذا يعود بحث النقل لبقية الأعضاء إلى Transitous. احفظ المفتاح أعلاه كمسؤول لتطبيقه على مستوى المثيل.',
+  'admin.transitProvider.googleHint':
+    'يستخدم مفتاح Google أعلاه للمناطق التي لا تتوفر لها بيانات في Transitous. يُحاسب على كل بحث — ويُستخدم Transitous ما دام لا يوجد مفتاح.',
+  'admin.transitProvider.noKeyWarning':
+    'تم اختيار Google، لكن لا يوجد مفتاح Google مُهيأ — لا يزال بحث النقل يستخدم Transitous. أضف مفتاحًا ضمن مفاتيح API أعلاه.',
+  'admin.transitProvider.personalKeyWarning':
+    'مفتاح Google الخاص بك وحده مضبوط، لذا يعود بحث النقل لبقية الأعضاء إلى Transitous. احفظ المفتاح أعلاه كمسؤول لتطبيقه على مستوى المثيل.',
   'admin.placeShadow.title': 'سجل البحث عن الأماكن',
   'admin.placeShadow.subtitle':
     'تسجيل نتيجة البحث التي جرى اختيارها، حتى يمكن لاحقًا قياس فهرس أماكن آخر على عمليات بحث حقيقية. لا يغادر أي شيء هذا الخادم، ويمكن للمشرف تصدير السجل أو حذفه في أي وقت.',
@@ -517,7 +514,8 @@ const admin: TranslationStrings = {
   'admin.plugins.changeVersion': 'تغيير الإصدار…',
   'admin.plugins.noVersions': 'لم يتم العثور على إصدارات منشورة في السجل.',
   'admin.plugins.downgradeTitle': 'التراجع عن هذه الإضافة؟',
-  'admin.plugins.downgradeBody': 'التبديل من v{from} إلى v{to}: تبقى البيانات المكتوبة بواسطة الإصدار الأحدث في مكانها، وقد لا يفهمها الإصدار الأقدم.',
+  'admin.plugins.downgradeBody':
+    'التبديل من v{from} إلى v{to}: تبقى البيانات المكتوبة بواسطة الإصدار الأحدث في مكانها، وقد لا يفهمها الإصدار الأقدم.',
   'admin.plugins.downgradeConfirm': 'تراجع',
   'admin.plugins.updatesHeld': 'التحديثات متوقفة عند v{version}',
   'admin.plugins.resumeUpdates': 'استئناف التحديثات',
@@ -616,7 +614,8 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.collab.name': 'التعاون',
   'admin.addons.catalog.collab.description': 'ملاحظات واستطلاعات ومحادثة واقتراحات للتخطيط المشترك',
   'admin.addons.catalog.roadtrip.name': 'رحلة برية',
-  'admin.addons.catalog.roadtrip.description': 'خطّط رحلات القيادة مع محطات توقف، وتُحدَّث أوقات القيادة والوصول تلقائيًا',
+  'admin.addons.catalog.roadtrip.description':
+    'خطّط رحلات القيادة مع محطات توقف، وتُحدَّث أوقات القيادة والوصول تلقائيًا',
   'admin.addons.catalog.memories.name': 'صور (Immich)',
   'admin.addons.catalog.memories.description': 'شارك صور رحلتك عبر Immich',
   'admin.addons.catalog.mcp.description': 'بروتوكول سياق النموذج لتكامل مساعد الذكاء الاصطناعي',
@@ -630,7 +629,8 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.dawarich.description':
     'قراءة الزيارات والمسارات المسجَّلة من خادم Dawarich يربطه كل قارئ بنفسه',
   'admin.addons.catalog.llm_parsing.name': 'التحليل بالذكاء الاصطناعي',
-  'admin.addons.catalog.llm_parsing.description': 'يقرأ الحجوزات التي يعجز المحلل المدمج عن فهمها، بنموذج ذكاء اصطناعي تختاره',
+  'admin.addons.catalog.llm_parsing.description':
+    'يقرأ الحجوزات التي يعجز المحلل المدمج عن فهمها، بنموذج ذكاء اصطناعي تختاره',
   'admin.addons.enabled': 'مفعّل',
   'admin.addons.disabled': 'معطّل',
   'admin.addons.type.trip': 'رحلة',

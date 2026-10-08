@@ -42,14 +42,18 @@ export function formatDurationShort(seconds: number): string {
  * Whether this stop's arrival is a time somebody chose, rather than one the chain
  * worked out from the stop before it.
  *
- * A check-in counts. Every schedule already anchors on `time ?? checkInTime`, so a
- * booked night starts its day exactly like a pinned stop does; asking only about
- * `time` here made the rail print that chosen hour in the grey it reserves for
- * computed ones. One function because the answer was spelled out separately in each
- * of the three schedulers, and two of them spelled it differently from the anchor
- * they had just used.
+ * A check-in counts. Every schedule anchors on `time ?? checkInTime`, so a booked
+ * night holds its hour exactly like a pinned stop does; asking only about `time`
+ * here made the rail print that chosen hour in the grey it reserves for computed
+ * ones. One function because the answer was spelled out separately in each of the
+ * three schedulers, and two of them spelled it differently from the anchor they had
+ * just used.
  */
-export function hasChosenArrival(stop: { time?: string | null; checkInTime?: string | null; automaticNight?: unknown }): boolean {
+export function hasChosenArrival(stop: {
+  time?: string | null;
+  checkInTime?: string | null;
+  automaticNight?: unknown;
+}): boolean {
   if (stop.automaticNight) return false;
   return (stop.time ?? null) !== null || (stop.checkInTime ?? null) !== null;
 }
@@ -83,15 +87,13 @@ export interface ScheduleStop {
    */
   departureAt?: number;
   /** A time somebody fixed this stop to. The chain restarts from it, and arriving
-   *  after it is being late. */
+   *  after it is being late. A booked night's check-in is one of these. */
   anchor: string | null;
-
   /**
-   * The earliest this stop can be entered, when something says so — a check-in is
-   * the hour a room becomes available, not an appointment. Arriving before it means
-   * waiting for it; arriving after it means arriving, with nothing to report.
+   * The anchor is a timetable's, on this stop's own day: a ride's departure terminal. Any
+   * other anchor is a time of day and counts at its passing nearest the drive.
    */
-  earliest?: string | null;
+  dated?: boolean;
 
   dwellMinutes: number | null;
 }
@@ -168,12 +170,15 @@ function resolveArrival(
   anchor: number | null,
   cursor: number | null,
   dayOffset: number,
+  dated = false,
 ): { arrival: number | null; lateBy: number | null } {
   if (anchor === null) return { arrival: cursor, lateBy: null };
 
   if (cursor === null) return { arrival: anchor + dayOffset * DAY_MINUTES, lateBy: null };
 
-  const k = Math.round((cursor - anchor) / DAY_MINUTES);
+  // A dated anchor stays on its day: a flight is not caught by reaching the airport a day
+  // late, and one reached at dawn for the afternoon is waited for, not read as yesterday's.
+  const k = dated ? 0 : Math.round((cursor - anchor) / DAY_MINUTES);
   const anchorAt = anchor + k * DAY_MINUTES;
   return {
     arrival: anchorAt,
@@ -222,19 +227,30 @@ export function leaveAfter(
 /**
  * The part of a road trip stop the schedule reads.
  *
+ * A booked night's check-in is the hour the traveller said they are at the hotel, so
+ * it holds the stop the way a pinned time does: the day is built around it, and a
+ * drive that gets there later is late. Read as a mere floor it held nothing once
+ * anything before it set the clock, and a night booked for ten in the morning was
+ * reported reached at a quarter past twelve, with the rest of the day lined up
+ * behind that. A time pinned on the stop itself still wins.
+ *
  * A visit's end time is when the drive leaves it. It is the traveller's own statement
  * about this visit, unlike the check-out that used to feed `departureAt` (the LATEST a
  * room has to be handed back, which is why #2357 took it out of the drive).
+ *
+ * A ride's departure terminal is pinned on the day its timetable names (`dated`). The
+ * arrival terminal is not: the chain reaches it from the departure, on the ride's own
+ * minutes, and a landing booked on the day it left but past midnight is the next morning.
  */
 export function scheduleStopOf(
-  stop: Pick<RoadtripStop, 'time' | 'checkInTime' | 'dwellMinutes' | 'leaveAt'>,
+  stop: Pick<RoadtripStop, 'time' | 'checkInTime' | 'dwellMinutes' | 'leaveAt' | 'carrier'>,
 ): ScheduleStop {
   const leave = parseClock(stop.leaveAt);
   return {
-    anchor: stop.time ?? null,
-    earliest: stop.checkInTime ?? null,
+    anchor: stop.time ?? stop.checkInTime ?? null,
     dwellMinutes: stop.dwellMinutes,
     ...(leave === null ? {} : { departureAt: leave }),
+    ...(stop.carrier?.role === 'departure' ? { dated: true } : {}),
   };
 }
 
@@ -267,22 +283,7 @@ export function computeSchedule(
   for (let i = 0; i < stops.length; i++) {
     const stop = stops[i]!;
     const anchor = parseClock(stop.anchor);
-    const resolved = resolveArrival(anchor, cursor, dayOffset);
-    // A door that opens at eleven is not an appointment at eleven. Reaching the stop
-    // later than that is simply reaching it; only a time somebody pinned can be missed.
-    const opens = parseClock(stop.earliest ?? null);
-    // With nothing before it deciding the hour, the door IS the hour: a night booked
-    // to check in at ten starts the day at ten rather than being worked backwards out
-    // of whatever comes after it. Reached later, it is only a floor, and a floor below
-    // the arrival changes nothing.
-    const waited = anchor === null && opens !== null
-      ? resolved.arrival === null
-        ? opens + dayOffset * DAY_MINUTES
-        : opens + Math.round((resolved.arrival - opens) / DAY_MINUTES) * DAY_MINUTES
-      : null;
-    const held = waited !== null && (resolved.arrival === null || waited > resolved.arrival);
-    const arrival = held ? waited : resolved.arrival;
-    const lateBy = resolved.lateBy;
+    const { arrival, lateBy } = resolveArrival(anchor, cursor, dayOffset, stop.dated);
     if (lateBy !== null) warnings.push({ index: i, code: 'late', minutes: lateBy });
 
     if (arrival === null) {
@@ -302,9 +303,7 @@ export function computeSchedule(
     if (offset > dayOffset) dayOffset = offset;
 
     arrivals[i]! = arrival;
-    // Ink for a time somebody decided: a pinned one always, a check-in only where the
-    // drive actually had to wait for it.
-    anchored[i]! = anchor !== null || held;
+    anchored[i]! = anchor !== null;
 
     let departure = arrival + (stop.dwellMinutes ?? 0);
     if (stop.departureAt !== undefined) {
@@ -383,6 +382,34 @@ export function computeSchedule(
   }
 
   return { entries, warnings, endsAt };
+}
+
+/**
+ * Whether a stop is one somebody stored on the day: an assignment, filed at its own
+ * index. Not an automatic night, a terminal or a booked night at a day's edge, which the
+ * plan seats between the stored stops and which borrow a stored stop's index to be seated
+ * by. A reader looking a stop up by its day and index has to pass those three over, or it
+ * finds the marker, the airport or the hotel in front of the stop it meant.
+ *
+ * Asked of the shape rather than of the id's sign: a stop added a moment ago carries a
+ * temporary negative id until the server answers, and is stored all the same.
+ */
+export function isStoredStop(stop: Pick<RoadtripStop, 'automaticNight' | 'carrier' | 'bookend'>): boolean {
+  return !stop.automaticNight && !stop.carrier && !stop.bookend;
+}
+
+/**
+ * Whether the rail lists this day among the days, rather than as a quiet placeholder
+ * asking for stops.
+ *
+ * Two stops make a drive. A booked night makes a day on its own: the day you arrive
+ * somewhere and go no further, or the one you check in at ten and set out from. It
+ * used to need company, and a hotel entered under Days for the arrival day was filed
+ * at the bottom of the rail under "only X so far", which reads as the hotel missing
+ * from the road trip altogether.
+ */
+export function standsAsDay(stops: readonly { night?: boolean }[]): boolean {
+  return stops.length > 1 || stops.some((stop) => stop.night === true);
 }
 
 export function splitIntoRuns<T>(stops: T[], modeOfLeg: (from: T, to: T) => string): { stops: T[]; mode: string }[] {
@@ -546,6 +573,60 @@ export interface Reanchoring {
 
 const EMPTY_REANCHORING: Reanchoring = { vias: [], remove: [] };
 
+/**
+ * Where a via filed behind a day's last stop goes once the day's stops change: from its
+ * old index `from` to `to`, the index that stop has now. Null when the stop is no longer
+ * the day's last, and such a via then goes (`seamViaIndex`).
+ *
+ * Such a via bends no leg of its own day. It shapes the drive from the day's last stop
+ * into the next day, on a trip with connected days or a night drive: the planner files a
+ * point dropped on that drive there (`anchorFor`), and a way chosen for it is written
+ * there. Read as a leg it leads nowhere and is dropped, which is right for a stop that has
+ * just become last and wrong for one that was last already: sorting the day, or taking a
+ * stop out of its middle, deleted a drive into tomorrow somebody had picked. And a last
+ * stop taken out, or dragged up the day, left its via on a number no stop has, bending
+ * nothing at all.
+ *
+ * `previousIds` and `nextIds` are the day's located stops in order, before and after.
+ */
+export function carriedSeam(
+  previousIds: readonly number[],
+  nextIds: readonly number[],
+): { from: number; to: number } | null {
+  const from = previousIds.length - 1;
+  const to = nextIds.length - 1;
+  return from >= 0 && to >= 0 && previousIds[from] === nextIds[to] ? { from, to } : null;
+}
+
+/**
+ * What becomes of a via pinned behind stop `index` of the old order when that stop was
+ * the day's last: the index it is carried to while the stop is still last
+ * (`carriedSeam`), or null when it goes. Undefined for a via on a leg of the day, which
+ * each writer reads by its own rule.
+ *
+ * It goes once its stop is no longer last, whichever way that came about. It was never a
+ * leg of the day: it lies on the road to tomorrow, and read as the leg its stop leaves by
+ * now it bent a drive within the day through a point on that road, for everybody on the
+ * trip. Which of the two happened used to depend on the surface: a stop dragged up the
+ * rail dropped the via, while the same stop dragged up the list under Days, or given an
+ * earlier hour, kept it on its new leg.
+ *
+ * The one rule for every writer that renumbers a day: the planner's drags and removals
+ * (`reanchorAfterReorder`, `reanchorAfterRemove`), the list's reorder and the server's
+ * sorts (`reanchorByStopOrder`), and the nights the server seats (`carryVias`).
+ */
+export function seamViaIndex(
+  index: number,
+  previousIds: readonly number[],
+  nextIds: readonly number[],
+): number | null | undefined {
+  if (index !== previousIds.length - 1) return undefined;
+  return carriedSeam(previousIds, nextIds)?.to ?? null;
+}
+
+/** The stops of a day as their own positions, for asking `seamViaIndex` about a positional edit. */
+const positions = (count: number): number[] => Array.from({ length: count }, (_, i) => i);
+
 function collect(vias: AnchoredVia[], at: (index: number) => number | null): Reanchoring {
   const moved: ReanchoredVia[] = [];
   const remove: number[] = [];
@@ -578,8 +659,14 @@ export function reanchorAfterInsert(
 export function reanchorAfterRemove(vias: AnchoredVia[], position: number, stopCount: number): Reanchoring {
   if (!vias.length) return EMPTY_REANCHORING;
 
-  if (stopCount <= 2) return { vias: [], remove: vias.map((v) => v.id) };
+  const before = positions(stopCount);
+  const after = before.filter((i) => i !== position);
+  // A day left with one stop has no leg, and only the drive out of it into the next day
+  // can keep its points.
+  if (stopCount <= 2) return collect(vias, (i) => seamViaIndex(i, before, after) ?? null);
   return collect(vias, (i) => {
+    const seam = seamViaIndex(i, before, after);
+    if (seam !== undefined) return seam;
     if (position === 0) return i === 0 ? null : i - 1;
     if (position === stopCount - 1) return i === position - 1 ? null : i;
     if (i === position) return position - 1;
@@ -592,6 +679,12 @@ export function reanchorByStopOrder(vias: AnchoredVia[], previousIds: number[], 
   const moved: ReanchoredVia[] = [];
   const remove: number[] = [];
   for (const via of vias) {
+    const seam = seamViaIndex(via.after_order_index, previousIds, nextIds);
+    if (seam !== undefined) {
+      if (seam === null) remove.push(via.id);
+      else if (seam !== via.after_order_index) moved.push({ id: via.id, after_order_index: seam });
+      continue;
+    }
     const stopId = previousIds[via.after_order_index]!;
     const next = stopId === undefined ? -1 : nextIds.indexOf(stopId);
 
@@ -607,25 +700,40 @@ export function reanchorByStopOrder(vias: AnchoredVia[], previousIds: number[], 
 export function reanchorAfterReorder(vias: AnchoredVia[], from: number, to: number, stopCount: number): Reanchoring {
   if (!vias.length || from === to) return EMPTY_REANCHORING;
 
-  if (stopCount <= 2) return EMPTY_REANCHORING;
-  const afterRemove = reanchorAfterRemove(vias, from, stopCount);
+  // The drive into the next day is settled first, by the one rule for it (`seamViaIndex`):
+  // it stays behind the last stop while that stop is still last and goes otherwise, be it
+  // dragged up the day or passed by another. A move keeps the count, so a via that stays
+  // keeps its number. Everything else is on a leg of the day and is worked out below.
+  const before = positions(stopCount);
+  const after = before.filter((i) => i !== from);
+  after.splice(to, 0, from);
+  const seamGone: number[] = [];
+  const legs: AnchoredVia[] = [];
+  for (const via of vias) {
+    const seam = seamViaIndex(via.after_order_index, before, after);
+    if (seam === null) seamGone.push(via.id);
+    else if (seam === undefined) legs.push(via);
+  }
+  // Two stops swapped keep their one leg, driven the other way round.
+  if (stopCount <= 2 || !legs.length) return seamGone.length ? { vias: [], remove: seamGone } : EMPTY_REANCHORING;
+  const afterRemove = reanchorAfterRemove(legs, from, stopCount);
   const dropped = new Set(afterRemove.remove);
   const movedTo = new Map(afterRemove.vias.map((v) => [v.id, v.after_order_index] as const));
 
-  const shifted: AnchoredVia[] = vias
+  const shifted: AnchoredVia[] = legs
     .filter((v) => !dropped.has(v.id))
     .map((v) => ({ ...v, after_order_index: movedTo.get(v.id) ?? v.after_order_index }));
   const afterInsert = reanchorAfterInsert(shifted, to, () => true);
   const finalIndex = new Map(afterInsert.vias.map((v) => [v.id, v.after_order_index] as const));
 
   const result: ReanchoredVia[] = [];
-  for (const via of vias) {
+  for (const via of legs) {
     if (dropped.has(via.id)) continue;
     const mid = movedTo.get(via.id) ?? via.after_order_index;
     const end = finalIndex.get(via.id) ?? mid;
     if (end !== via.after_order_index) result.push({ id: via.id, after_order_index: end });
   }
-  return { vias: result, remove: afterRemove.remove };
+  return { vias: result, remove: [...afterRemove.remove, ...seamGone] };
 }
 
 export function isEmptyReanchoring(r: Reanchoring): boolean {

@@ -1,5 +1,5 @@
-// FE-PLANNER-TRANSMODAL-001 to FE-PLANNER-TRANSMODAL-064
-import { render, screen, waitFor, fireEvent, within } from '../../../tests/helpers/render';
+// FE-PLANNER-TRANSMODAL-001 to FE-PLANNER-TRANSMODAL-070
+import { render, screen, waitFor, fireEvent, within, act } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
@@ -7,6 +7,8 @@ import { useAuthStore } from '../../store/authStore';
 import { useTripStore } from '../../store/tripStore';
 import { useAddonStore } from '../../store/addonStore';
 import { reservationsApi } from '../../api/client';
+import { useSettingsStore } from '../../store/settingsStore';
+import { isBlurred } from '../../../tests/helpers/bookingCodeBlur';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
 import {
   buildUser,
@@ -40,8 +42,13 @@ vi.mock('./AirportSelect', () => ({
 }));
 
 vi.mock('./LocationSelect', () => ({
-  default: ({ onChange }: { onChange: (l: any) => void }) => (
-    <input data-testid="location-select" type="text" onChange={e => onChange({ name: e.target.value, lat: 0, lng: 0, address: null })} />
+  default: ({ onChange, places }: { onChange: (l: any) => void; places?: { name: string }[] }) => (
+    <input
+      data-testid="location-select"
+      data-picks={(places ?? []).map(p => p.name).join('|')}
+      type="text"
+      onChange={e => onChange({ name: e.target.value, lat: 0, lng: 0, address: null })}
+    />
   ),
 }));
 
@@ -87,6 +94,36 @@ describe('TransportModal', () => {
     const res = buildReservation({ title: 'Paris Flight', type: 'flight' });
     render(<TransportModal {...defaultProps} reservation={res} />);
     expect(screen.getByText(/Edit transport/i)).toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-003b: shows a delete action when editing with onDelete', () => {
+    const res = buildReservation({ title: 'Paris Flight', type: 'flight' });
+    render(<TransportModal {...defaultProps} reservation={res} onDelete={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-003c: no delete action when creating, or when onDelete is omitted', () => {
+    const res = buildReservation({ title: 'Paris Flight', type: 'flight' });
+    const { rerender } = render(<TransportModal {...defaultProps} reservation={null} onDelete={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+    rerender(<TransportModal {...defaultProps} reservation={res} />);
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-003d: confirming delete calls onDelete then onClose', async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const res = buildReservation({ title: 'Paris Flight', type: 'flight' });
+    render(<TransportModal {...defaultProps} reservation={res} onDelete={onDelete} onClose={onClose} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /delete/i }));
+    expect(screen.getByText('Delete booking?')).toBeInTheDocument();
+
+    const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+    await userEvent.click(deleteButtons[deleteButtons.length - 1]);
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('FE-PLANNER-TRANSMODAL-004: title input is required — onSave not called with empty title', async () => {
@@ -1172,7 +1209,9 @@ describe('TransportModal', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(onSave.mock.calls[0][0].create_budget_entry).toEqual({ total_price: 189.5, category: 'flights' });
+    // The parsed currency travels with the price (#2525), or the server would store
+    // it in whatever the trip currency is.
+    expect(onSave.mock.calls[0][0].create_budget_entry).toEqual({ total_price: 189.5, category: 'flights', currency: 'EUR' });
   });
 
   // ── File edge cases ─────────────────────────────────────────────────────────
@@ -1445,5 +1484,109 @@ describe('TransportModal', () => {
     expect(screen.getByText('Eiffel Tower')).toBeInTheDocument();
     expect(screen.getByText(/Orsay/)).toBeInTheDocument();
     expect(screen.queryByText('Louvre')).not.toBeInTheDocument();
+  });
+
+  // ── Blur booking codes in the edit form (#2457) ─────────────────────────────
+
+  describe('blur booking codes (#2457)', () => {
+    const blurOn = (on: boolean) => seedStore(useSettingsStore, { settings: { time_format: '24h', blur_booking_codes: on } });
+    const codeFields = () => screen.getAllByPlaceholderText('e.g. ABC12345') as HTMLInputElement[];
+
+    function multiLegTrain(): Reservation {
+      const res = buildReservation({ id: 32, title: 'Osaka → Kyoto → Nara', type: 'train' });
+      return Object.assign(res, {
+        day_id: 10,
+        end_day_id: 10,
+        confirmation_number: 'RAIL-BOOK',
+        metadata: {
+          legs: [
+            { from: 'Osaka', to: 'Kyoto', train_number: 'JR 1', confirmation_number: 'RAIL-LEG1', dep_day_id: 10, dep_time: '08:00', arr_day_id: 10, arr_time: '08:30' },
+            { from: 'Kyoto', to: 'Nara', train_number: 'JR 2', confirmation_number: 'RAIL-LEG2', dep_day_id: 10, dep_time: '09:00', arr_day_id: 10, arr_time: '09:45' },
+          ],
+        },
+        endpoints: [
+          { id: 11, reservation_id: 32, role: 'from', sequence: 0, name: 'Osaka Station', code: null, lat: 34.7, lng: 135.5, timezone: 'Asia/Tokyo', local_date: '2026-08-01', local_time: '08:00' },
+          { id: 12, reservation_id: 32, role: 'stop', sequence: 1, name: 'Kyoto Station', code: null, lat: 34.98, lng: 135.75, timezone: 'Asia/Tokyo', local_date: '2026-08-01', local_time: '09:00' },
+          { id: 13, reservation_id: 32, role: 'to', sequence: 2, name: 'Nara Station', code: null, lat: 34.68, lng: 135.82, timezone: 'Asia/Tokyo', local_date: '2026-08-01', local_time: '09:45' },
+        ],
+      }) as unknown as Reservation;
+    }
+
+    it('FE-PLANNER-TRANSMODAL-065: the flight booking code field is blurred while the setting is on', () => {
+      blurOn(true);
+      const res = buildReservation({ title: 'LH 400', type: 'flight', confirmation_number: 'FLY-SECRET' });
+      render(<TransportModal {...defaultProps} reservation={res} />);
+      expect(isBlurred(screen.getByDisplayValue('FLY-SECRET'))).toBe(true);
+    });
+
+    it('FE-PLANNER-TRANSMODAL-066: every per-segment code of a stopover flight is blurred as well', () => {
+      blurOn(true);
+      render(<TransportModal {...defaultProps} days={routeDays} reservation={multiLegFlight()} />);
+      const codes = codeFields();
+      expect(codes.map(i => i.value)).toEqual(['ABC123', 'XYZ789', 'BOOK1']);
+      expect(codes.map(i => isBlurred(i))).toEqual([true, true, true]);
+    });
+
+    it('FE-PLANNER-TRANSMODAL-067: every per-segment code of a multi-leg train is blurred as well', () => {
+      blurOn(true);
+      render(<TransportModal {...defaultProps} days={routeDays} reservation={multiLegTrain()} />);
+      const codes = codeFields();
+      expect(codes.map(i => i.value)).toEqual(['RAIL-LEG1', 'RAIL-LEG2', 'RAIL-BOOK']);
+      expect(codes.map(i => isBlurred(i))).toEqual([true, true, true]);
+    });
+
+    it('FE-PLANNER-TRANSMODAL-068: focusing a code field reveals it for editing, leaving it hides it again', () => {
+      blurOn(true);
+      const res = buildReservation({ title: 'LH 400', type: 'flight', confirmation_number: 'FLY-SECRET' });
+      render(<TransportModal {...defaultProps} reservation={res} />);
+      const code = screen.getByDisplayValue('FLY-SECRET') as HTMLInputElement;
+      expect(isBlurred(code)).toBe(true);
+      act(() => code.focus());
+      expect(isBlurred(code)).toBe(false);
+      act(() => code.blur());
+      expect(isBlurred(code)).toBe(true);
+    });
+
+    it('FE-PLANNER-TRANSMODAL-069: with the setting off every code field stays plain', () => {
+      blurOn(false);
+      render(<TransportModal {...defaultProps} days={routeDays} reservation={multiLegFlight()} />);
+      expect(codeFields().map(i => isBlurred(i))).toEqual([false, false, false]);
+    });
+
+    it('FE-PLANNER-TRANSMODAL-070: blurred codes still save unchanged', async () => {
+      blurOn(true);
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      render(<TransportModal {...defaultProps} days={routeDays} reservation={multiLegFlight()} onSave={onSave} />);
+      await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+      await waitFor(() => expect(onSave).toHaveBeenCalled());
+      const payload = onSave.mock.calls[0][0];
+      expect(payload.metadata.legs.map((l: { confirmation_number?: string }) => l.confirmation_number)).toEqual(['ABC123', 'XYZ789']);
+      expect(payload.confirmation_number).toBe('BOOK1');
+    });
+  });
+
+  it('FE-PLANNER-TRANSMODAL-071: the manual From and To fields offer the trip places that have a location, each once (#2468)', async () => {
+    const places = [
+      buildPlace({ id: 1, name: 'Louvre', lat: 48.86, lng: 2.33 }),
+      buildPlace({ id: 2, name: 'No pin yet', lat: null, lng: null }),
+      buildPlace({ id: 3, name: 'Louvre', lat: 48.86, lng: 2.33 }),
+    ];
+    render(<TransportModal {...defaultProps} places={places} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Bus$/i }));
+
+    const fields = screen.getAllByTestId('location-select');
+    expect(fields).toHaveLength(2);
+    for (const field of fields) expect(field).toHaveAttribute('data-picks', 'Louvre');
+  });
+
+  it('FE-PLANNER-TRANSMODAL-072: every train station field offers the trip places too', async () => {
+    const places = [buildPlace({ id: 1, name: 'Berlin Hbf', lat: 52.52, lng: 13.37 })];
+    render(<TransportModal {...defaultProps} places={places} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
+
+    const stations = screen.getAllByTestId('location-select');
+    expect(stations).toHaveLength(3);
+    for (const station of stations) expect(station).toHaveAttribute('data-picks', 'Berlin Hbf');
   });
 });

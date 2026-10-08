@@ -27,7 +27,7 @@ Each sidebar has a drag handle on its inner edge for resizing.
 
 A **Day Detail panel** floats over the map area when you open a specific day, showing the weather forecast, that day's reservations, and the accommodation block. It can be collapsed to a slim header bar without closing it.
 
-Opening a day also narrows the Places sidebar. With a day selected, the **Planned** filter lists and counts only the places on that day's plan, the same set the map draws, and a line under the filter tabs says **Showing the open day only**. Its **X** closes the day again, so list, count and map return to the whole trip. **All** and **Unplanned** stay trip-wide on purpose: a place on some other day is planned, whichever day happens to be open.
+Opening a day also narrows the Places sidebar. With a day selected, the **Planned** filter lists and counts only the places on that day's plan, the same set the map draws, and a line under the places filter (the select that offers **All**, **Unplanned** and **Planned**, plus **Tracks** once the trip has one, each with its count in the menu) says **Showing the open day only**. Its **X** closes the day again, so list, count and map return to the whole trip. **All** and **Unplanned** stay trip-wide on purpose: a place on some other day is planned, whichever day happens to be open.
 
 ## Tabs
 
@@ -81,6 +81,8 @@ On screens narrower than 768 px, TREK does not squeeze the three-pane layout —
 
 The planner tracks your recent actions — adding places, assigning them to days, reordering, and removing assignments — in a short undo ring. The **Undo** button sits in the Day Plan Sidebar toolbar (at the top of the sidebar); it is greyed out until an undoable action is available. It shows the name of the last action as a tooltip on hover and reverses it when clicked.
 
+Deleting a day is not in the ring. The question before the delete lists what goes with the day instead; see [Deleting a day](Day-Plans-and-Notes#deleting-a-day). An earlier reorder of the days can still be undone afterwards, minus the day that is gone.
+
 ## Splash Screen
 
 When you first open a trip, a brief loading screen appears while the planner data and place photos are fetched. This screen shows the trip title and a loading animation. Once data is ready and a short grace period for photos has elapsed, the planner workspace appears.
@@ -108,7 +110,11 @@ Driving settings includes **Show hazard areas**, off by default and shared by th
 - [Reservations-and-Bookings](Reservations-and-Bookings)
 - [Admin-Addons](Admin-Addons)
 
-Driving settings also controls **Show in Days too** under **Service stops**. It is on by default and applies to every service stop in the trip, including existing stops. Turn it off to keep service stops exclusively in the Roadtrip view and omit them from the normal Days view and its route. Turning it on restores their visibility without creating duplicates. The setting is shared with fellow travellers and can also be changed through `update_roadtrip_settings` using `roadtrip_service_stops_in_days`.
+Driving settings also controls **Show in Days too** under **Service stops**. It is on by default and applies to every service stop in the trip, including existing stops. Turn it off to keep service stops exclusively in the Roadtrip view and omit them from the normal Days view and its route. Hotels, and any place a booking points at, stay in the places list and on the Days map either way. Turning it on restores their visibility without creating duplicates. The setting is shared with fellow travellers and can also be changed through `update_roadtrip_settings` using `roadtrip_service_stops_in_days`.
+
+**Start and end each day at your stay**, under **Route line** in Driving settings, starts each Roadtrip day after a booked night at that hotel and ends each day before one there. It is off by default and shared by the trip. The hotel rows are drawn from the booking, not stored as stops, so the Days view stays as it is and switching it off gives the drive exactly as before. On the phone it is the one switch in **Driving figures**. See [Road-Trip](Road-Trip#starting-and-ending-the-day-at-the-stay).
+
+> **AI / MCP:** Set `roadtrip_hotel_bookends` through `update_roadtrip_settings`; a missing value means off. `calculate_roadtrip` returns the hotel rows as stops carrying `bookend`.
 
 **Looking for** in Roadtrip also searches installed place-search plugins. Plugin results show their source and can be added like other stops. Search remains online-only and runs on request. Results outside the chosen corridor are removed, and failed sources are shown beside the remaining results. It opens on Charging when the trip's vehicle is electric and on Fuel otherwise, and the choice is yours from then on.
 
@@ -136,7 +142,7 @@ The Add as a stop dialog offers trivago and CHECK24 for hotels, or PiNCAMP and P
 
 All Looking for categories, including accommodation, are added as Roadtrip service stops. In Roadtrip mode, Edit in a planned place's details opens the stop dialog with its saved duration and check-in time. Saving updates the existing stop; More details still opens the full place editor. The shared stop-type contract also accepts hotel through MCP.
 
-A booked night uses its check-in as the earliest arrival and the place's STAY as its length. The drive never reads the check-out: it is the latest the room has to be handed back, not the time anybody drives on, so it stays a booking detail under Days. To leave at a set hour, give the visit an End, see [Road-Trip](Road-Trip#leaving-at-a-set-time). Explicit arrival times remain authoritative. Browser planning and MCP use the same scheduling logic.
+A booked night is anchored on its check-in the way a pinned time anchors any other stop, and takes the place's STAY as its length: the day is built to be there by then, and a drive that gets there later is reported late rather than moving the stop. A time pinned on the stop itself wins over the check-in. The drive never reads the check-out: it is the latest the room has to be handed back, not the time anybody drives on, so it stays a booking detail under Days. To leave at a set hour, give the visit an End, see [Road-Trip](Road-Trip#leaving-at-a-set-time). Browser planning and MCP use the same scheduling logic.
 
 The overnight dialog prefills check-in from the calculated arrival when available; existing manual check-in values take priority. Before adding a corridor result, the suggested arrival is estimated along the current routed leg.
 

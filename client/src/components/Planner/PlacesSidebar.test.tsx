@@ -1,5 +1,5 @@
 // FE-COMP-PLACES-001 to FE-COMP-PLACES-015 + FE-PLANNER-SIDEBAR-016 to 043
-import { render, screen, fireEvent, waitFor, act } from '../../../tests/helpers/render';
+import { render, screen, fireEvent, waitFor, act, within } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { useAuthStore } from '../../store/authStore';
@@ -49,6 +49,12 @@ beforeEach(() => {
   seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true });
   seedStore(useTripStore, { trip: buildTrip({ id: 1 }) });
 });
+
+/** The filter is one select now: open it, then pick the option by its label. */
+async function pickFilter(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(within(screen.getByTestId('places-filter')).getByRole('button'));
+  await user.click(await screen.findByRole('button', { name: new RegExp(`^${label}`) }));
+}
 
 describe('PlacesSidebar', () => {
   it('FE-COMP-PLACES-001: renders without crashing', () => {
@@ -251,7 +257,7 @@ describe('Filter tabs', () => {
     const unplanned = buildPlace({ name: 'Unplanned Place' });
     const assignments = { '1': [buildAssignment({ place: planned, day_id: 1 })] };
     render(<PlacesSidebar {...defaultProps} places={[planned, unplanned]} assignments={assignments} />);
-    await user.click(screen.getByRole('button', { name: /Unplanned/i }));
+    await pickFilter(user, 'Unplanned');
     expect(screen.queryByText('Planned Place')).not.toBeInTheDocument();
     expect(screen.getByText('Unplanned Place')).toBeInTheDocument();
   });
@@ -262,8 +268,8 @@ describe('Filter tabs', () => {
     const unplanned = buildPlace({ name: 'Unplanned Place' });
     const assignments = { '1': [buildAssignment({ place: planned, day_id: 1 })] };
     render(<PlacesSidebar {...defaultProps} places={[planned, unplanned]} assignments={assignments} />);
-    await user.click(screen.getByRole('button', { name: /Unplanned/i }));
-    await user.click(screen.getByRole('button', { name: /^All/i }));
+    await pickFilter(user, 'Unplanned');
+    await pickFilter(user, 'All');
     expect(screen.getByText('Planned Place')).toBeInTheDocument();
     expect(screen.getByText('Unplanned Place')).toBeInTheDocument();
   });
@@ -273,7 +279,7 @@ describe('Filter tabs', () => {
     const place = buildPlace({ name: 'Assigned Place' });
     const assignments = { '1': [buildAssignment({ place, day_id: 1 })] };
     render(<PlacesSidebar {...defaultProps} places={[place]} assignments={assignments} />);
-    await user.click(screen.getByRole('button', { name: /Unplanned/i }));
+    await pickFilter(user, 'Unplanned');
     expect(screen.getByText(/All places are planned/i)).toBeInTheDocument();
   });
 
@@ -515,7 +521,7 @@ describe('Category filter dropdown', () => {
     const unplanned = buildPlace({ name: 'Unplanned Place' });
     const assignments = { '1': [buildAssignment({ place: planned, day_id: 1 })] };
     const { unmount } = render(<PlacesSidebar {...defaultProps} places={[planned, unplanned]} assignments={assignments} />);
-    await user.click(screen.getByRole('button', { name: /Unplanned/i }));
+    await pickFilter(user, 'Unplanned');
     expect(screen.queryByText('Planned Place')).not.toBeInTheDocument();
     unmount();
     render(<PlacesSidebar {...defaultProps} places={[planned, unplanned]} assignments={assignments} />);

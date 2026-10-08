@@ -573,6 +573,23 @@ describe('updateTime', () => {
     expect(update.vias?.vias.map(v => [v.id, v.after_order_index])).toEqual([[afterB, 2], [intoTomorrow, 3]]);
   });
 
+  it('ASG-SVC-042: a sort that moves the last stop up the day takes the drive behind it along, never leaving it on no stop', () => {
+    // The rule the planner applies too (seamViaIndex): a via behind the last stop stays
+    // there only while that stop is last. Once another stop is, it goes: it lies on the
+    // road to tomorrow, and read as the leg its stop leaves by now it would bend the
+    // drive from C to A through a point on that road.
+    const { day, ids: [a, b, c] } = dayOf([['09:00', 0], ['12:00', 1], ['18:00', 2]]);
+    const afterA = addVia(day.id, 0);
+    const intoTomorrow = addVia(day.id, 2);
+
+    const update = svc.updateTime(c, '08:00', null);
+
+    expect(dayOrder(day.id)).toEqual([c, a, b]);
+    expect(viaAnchors(day.id)).toEqual([{ id: afterA, after_order_index: 1, sequence: 0 }]);
+    expect(viaAnchors(day.id).map(via => via.id)).not.toContain(intoTomorrow);
+    expect(update.vias?.dayId).toBe(day.id);
+  });
+
   it('ASG-SVC-040: an End saved with the start as it stood leaves a day dragged out of time order alone', () => {
     // B belongs first by time, and the traveller put it second on purpose.
     const { day, ids: [a, b, c] } = dayOf([['14:00', 0], ['10:00', 1], ['16:00', 2]]);

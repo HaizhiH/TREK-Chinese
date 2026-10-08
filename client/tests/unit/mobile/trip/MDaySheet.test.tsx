@@ -9,8 +9,9 @@ import { useTripStore } from '../../../../src/store/tripStore'
 import type { Accommodation, Assignment, Day, DayNote, Reservation } from '../../../../src/types'
 import { resetAllStores, seedStore } from '../../../helpers/store'
 import { act, fireEvent, render, screen, waitFor } from '../../../helpers/render'
+import { isBlurred } from '../../../helpers/bookingCodeBlur'
 
-// FE-MOB-DAYSH-001 to FE-MOB-DAYSH-028
+// FE-MOB-DAYSH-001 to FE-MOB-DAYSH-030
 
 const DAYS = [
   { id: 1, trip_id: 5, day_number: 1, date: '2026-05-01', title: null },
@@ -417,5 +418,23 @@ describe('MDaySheet', () => {
     ] as unknown as Day[]
     await renderSheet(makePlanner({ days, tripAccommodations: [] }))
     expect(screen.getByRole('dialog', { name: 'Day 2' })).toBeInTheDocument()
+  })
+
+  // ── Blur booking codes on the stay tile (#2457) ────────────────────────────
+
+  it('FE-MOB-DAYSH-029: with the blur on, the linked booking code under the stay is blurred like the stay code', async () => {
+    seedStore(useSettingsStore, { settings: { blur_booking_codes: true } })
+    await renderSheet()
+    // The stay's own code already honours the setting ...
+    expect(isBlurred(screen.getByText('ABC123'))).toBe(true)
+    // ... the linked booking's code right below it did not.
+    expect(isBlurred(screen.getByText(/#X9/))).toBe(true)
+  })
+
+  it('FE-MOB-DAYSH-030: with the blur off both codes stay plain', async () => {
+    seedStore(useSettingsStore, { settings: { blur_booking_codes: false } })
+    await renderSheet()
+    expect(isBlurred(screen.getByText('ABC123'))).toBe(false)
+    expect(isBlurred(screen.getByText(/#X9/))).toBe(false)
   })
 })

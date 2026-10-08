@@ -26,7 +26,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': 'Виберіть шаблон...',
   'settings.mapDefaultHint': 'Залиште порожнім для OpenStreetMap (за замовчуванням)',
   'settings.routingBase': 'Власний сервер маршрутів',
-  'settings.routingBaseHint': 'Власний примірник OSRM. Порожньо — використовуються публічні сервери з обмеженням близько одного запиту на секунду: на день вистачає, для автоподорожі мало. Діє після перезапуску сервера.',
+  'settings.routingBaseHint':
+    'Власний примірник OSRM. Порожньо — використовуються публічні сервери з обмеженням близько одного запиту на секунду: на день вистачає, для автоподорожі мало. Діє після перезапуску сервера.',
   'settings.valhallaBase': 'Власний сервер Valhalla',
   'settings.valhallaBaseHint':
     'За замовчуванням TREK використовує публічну Valhalla FOSSGIS для уникнення платних доріг, автомагістралей і поромів. Введіть тут URL власної Valhalla, щоб використовувати її замість публічної. Якщо налаштовано лише власний сервер маршрутизації, публічна Valhalla не використовується. Після введення власного URL перезапустіть сервер і оновіть сторінку.',
@@ -511,7 +512,8 @@ const settings: TranslationStrings = {
   'settings.offline.notice.offline': 'Немає з’єднання. Під’єднайтеся, щоб зберегти подорожі офлайн.',
   'settings.offline.notice.signedOut': 'Сеанс завершився. Увійдіть знову, щоб синхронізувати.',
   'settings.offline.notice.failed': 'Не вдалося завершити завантаження. Перевірте з’єднання і спробуйте ще раз.',
-  'settings.offline.notice.loadFailed': 'Не вдалося прочитати офлайн-сховище цього пристрою. Зазвичай допомагає очищення кешу.',
+  'settings.offline.notice.loadFailed':
+    'Не вдалося прочитати офлайн-сховище цього пристрою. Зазвичай допомагає очищення кешу.',
   'settings.offline.clear': 'Очистити кеш',
   'settings.offline.clearConfirm':
     'Очистити всі офлайн-дані поїздок? Ви можете синхронізувати їх будь-коли в режимі онлайн.',
@@ -570,7 +572,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': 'Список бажань',
   'settings.apiScopes.stats': 'Підсумки',
   'settings.apiKeys.title': 'Ключі API',
-  'settings.apiKeys.description': 'Ключі для публічного API, щоб інші програми могли читати ваші подорожі. Лише читання: ключ нічого не змінить і не видалить.',
+  'settings.apiKeys.description':
+    'Ключі для публічного API, щоб інші програми могли читати ваші подорожі. Лише читання: ключ нічого не змінить і не видалить.',
   'settings.apiKeys.create': 'Створити ключ',
   'settings.apiKeys.empty': 'Ключів ще немає. Створіть один, щоб підключити іншу програму.',
   'settings.apiKeys.createdAt': 'створено',
@@ -585,7 +588,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.endpoint': 'Ендпоінт',
   'settings.apiKeys.neverUsed': 'не використовувався',
   'settings.apiKeys.loadFailed': 'Не вдалося завантажити ключі. Оновіть сторінку, щоб спробувати ще раз.',
-  'settings.apiKeys.limitReached': 'У вас {max} ключів, це максимум для одного облікового запису. Видаліть непотрібний ключ, щоб створити новий.',
+  'settings.apiKeys.limitReached':
+    'У вас {max} ключів, це максимум для одного облікового запису. Видаліть непотрібний ключ, щоб створити новий.',
   'settings.apiKeys.copyFailed': 'Не вдалося скопіювати. Виділіть текст і скопіюйте його вручну.',
   'settings.apiKeys.modal.createTitle': 'Створити ключ API',
   'settings.apiKeys.modal.name': 'Назва',

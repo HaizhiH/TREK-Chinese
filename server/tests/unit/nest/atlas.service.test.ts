@@ -1155,6 +1155,60 @@ describe('getVisitedRegions', () => {
   });
 });
 
+// ── A place that moves (#2527) ───────────────────────────────────────────────
+
+describe('a place that moves keeps no stale region', () => {
+  function cachedCountryOf(placeId: number): string | undefined {
+    const row = testDb.prepare('SELECT country_code FROM place_regions WHERE place_id = ?').get(placeId) as
+      | { country_code: string }
+      | undefined;
+    return row?.country_code;
+  }
+
+  // The lookup runs in the background; the first one in a worker also loads the admin-1 bundle.
+  async function settledCountryOf(placeId: number): Promise<string | undefined> {
+    for (let i = 0; i < 150; i++) {
+      const code = cachedCountryOf(placeId);
+      if (code) return code;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return undefined;
+  }
+
+  it('ATLAS-SVC-2527a: a lookup still running when the place moves does not write the old country back', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Lyon, then Munich' });
+    const place = insertPlaceWithCoords(testDb, trip.id, 'Hotel', 45.764, 4.8357, 'Lyon, France');
+
+    // The Atlas load starts resolving Lyon, and the place is corrected before it answers.
+    const pending = atlas.visitedRegions(user.id);
+    testDb
+      .prepare('UPDATE places SET lat = ?, lng = ?, address = ? WHERE id = ?')
+      .run(48.1374, 11.5755, 'Marienplatz, Munich, Germany', place.id);
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(cachedCountryOf(place.id)).toBeUndefined();
+
+    // The next load resolves where the place is now.
+    expect((await atlas.stats(user.id)).countries.map((c) => c.code)).toEqual(['DE']);
+    await atlas.visitedRegions(user.id);
+    expect(await settledCountryOf(place.id)).toBe('DE');
+  });
+
+  it('ATLAS-SVC-2527b: a place deleted while its lookup runs leaves nothing behind', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Cancelled' });
+    const place = insertPlaceWithCoords(testDb, trip.id, 'Hotel', 43.2965, 5.3698, 'Marseille, France');
+
+    const pending = atlas.visitedRegions(user.id);
+    testDb.prepare('DELETE FROM places WHERE id = ?').run(place.id);
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(testDb.prepare('SELECT COUNT(*) AS n FROM place_regions').get()).toEqual({ n: 0 });
+  });
+});
+
 // ── unmarkRegionVisited — tombstones + country cascade ──────────────────────
 
 // Places are region-resolved by a fire-and-forget background task (see reverseGeocodeRegion

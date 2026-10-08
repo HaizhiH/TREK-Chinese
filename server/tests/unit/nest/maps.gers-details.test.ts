@@ -120,6 +120,19 @@ describe('MapsService.getPlaceDetails for a gers: id', () => {
     expect(out.place?.opening_hours).toBeTruthy();
   });
 
+  // #2483: the place from the issue, whose index record carries its website
+  // without a scheme. Both halves of the merge hand it over completed.
+  it('MAPS-GERS-010: the merged website has its scheme, from the index or else from OSM', async () => {
+    const site = 'fr.wikipedia.org/wiki/Chapelle_Sainte-Barbe_du_Faouët';
+    mockById.mockResolvedValue({ ...PLACE, gers: 'ceba0e62-172b-4343-bb3b-78b915a18383', contact: { ...PLACE.contact, website: site } });
+    expect((await make(null).getPlaceDetails(1, 'gers:ceba0e62-172b-4343-bb3b-78b915a18383')).place?.website).toBe(`https://${site}`);
+    expect((await make({ website: 'www.example.fr' }).getPlaceDetails(1, 'gers:ceba0e62-172b-4343-bb3b-78b915a18383')).place?.website).toBe(`https://${site}`);
+
+    mockById.mockResolvedValue({ ...PLACE, contact: { ...PLACE.contact, website: 'javascript:alert(1)' } });
+    expect((await make({ website: 'www.example.fr' }).getPlaceDetails(1, 'gers:abc-123')).place?.website).toBe('https://www.example.fr');
+    expect((await make(null).getPlaceDetails(1, 'gers:abc-123')).place?.website).toBeNull();
+  });
+
   it('MAPS-GERS-009: with the index switched off, opening a saved place asks nobody', async () => {
     // TREK_PLACES_ENABLED=false is the operator's word that nothing leaves for
     // the index. Search, autocomplete and the area download honoured it; the

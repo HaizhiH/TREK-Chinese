@@ -4,13 +4,14 @@ import { mapsApi } from '../../api/client';
 import { useTransportRoutes } from '../../hooks/useTransportRoutes';
 import { useTranslation } from '../../i18n/TranslationContext';
 import { useSettingsStore } from '../../store/settingsStore';
-import type { Place, Reservation } from '../../types';
+import type { Day, Place, Reservation } from '../../types';
 import { visibleRouteReservations } from '../../utils/reservationRoutes';
 import { loadAmap, wgs84ToAmap } from './amapLoader';
 import { addAmapTripLayers, amapEventPoint, type AmapTripLayersProps } from './amapTripLayers';
 import { makePoiDraggable } from './markerDrag';
 import type { Poi } from './poiCategories';
 import { buildReservationItems } from './reservationsMapbox';
+import { selectedPlaceTarget } from './selectedPlaceTarget';
 import { getTransitMapSegments } from './transitGeometry';
 import { useStableVias } from './viaMarkerState';
 
@@ -24,6 +25,10 @@ interface Props extends AmapTripLayersProps {
   dayPlaces?: Place[];
   route?: [number, number][][] | null;
   selectedPlaceId?: number | null;
+  selectedPlace?: Place | null;
+  days?: Day[];
+  selectedDayId?: number | null;
+  scopeConnectionsToDay?: boolean;
   onMarkerClick?: (id: number) => void;
   onMapClick?: (info: { latlng: GeoPoint }) => void;
   onMapContextMenu?: ((event: { latlng: GeoPoint; originalEvent: MouseEvent | TouchEvent }) => void) | null;
@@ -76,6 +81,10 @@ export function MapViewAmap({
   dayPlaces = [],
   route = null,
   selectedPlaceId = null,
+  selectedPlace = null,
+  days = [],
+  selectedDayId = null,
+  scopeConnectionsToDay = false,
   onMarkerClick,
   onMapClick,
   onMapContextMenu,
@@ -112,8 +121,8 @@ export function MapViewAmap({
   const [ready, setReady] = useState(false);
   const showEndpointLabels = useSettingsStore((state) => state.settings.map_booking_labels) === true;
   const visibleReservations = useMemo(
-    () => visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes }),
-    [reservations, visibleConnectionIds, showTransitRoutes]
+    () => visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes, selectedDayId, days, scopeConnectionsToDay }),
+    [reservations, visibleConnectionIds, showTransitRoutes, selectedDayId, days, scopeConnectionsToDay]
   );
   const transportRoutes = useTransportRoutes(visibleReservations);
   const handlersRef = useRef({ onMapClick, onMapContextMenu, onViewportChange });
@@ -280,6 +289,24 @@ export function MapViewAmap({
     if (!map || !AMap) return;
     map.setMapStyle(dark ? 'amap://styles/dark' : 'amap://styles/normal');
   }, [dark, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const AMap = amapRef.current;
+    if (!ready || !map || !AMap || !selectedPlaceId) return;
+    const target = selectedPlaceTarget(selectedPlaceId, places, dayPlaces, selectedPlace);
+    if (target?.lat != null && target?.lng != null) {
+      let cancelled = false;
+      void wgs84ToAmap(AMap, [{ lat: target.lat, lng: target.lng }]).then(([point]) => {
+        if (!cancelled && point) {
+          map.panTo(point);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [ready, selectedPlaceId, places, dayPlaces, selectedPlace]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -40,6 +40,8 @@ import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
 import { createUser, createTrip, createBudgetItem, createPlace, addTripMember } from '../../helpers/factories';
 import { createMcpHarness, parseToolResult, parseResourceResult, type McpHarness } from '../../helpers/mcp-harness';
+import { BudgetService } from '../../../src/nest/budget/budget.service';
+import { invalidatePermissionsCache } from '../../../src/nest/permissions/permissions-cache';
 
 beforeAll(() => {
   createTables(testDb);
@@ -950,6 +952,138 @@ describe('Budget tools: a custom split cannot be certified against a total the r
       expect(row.total_price).toBe(100);
       const shares = testDb.prepare('SELECT user_id, amount FROM budget_item_members WHERE budget_item_id = ? ORDER BY user_id').all(data.item.id) as any[];
       expect(shares.map(s => s.amount)).toEqual([60, 40]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Foreign rows with no exchange rate (the VND/AUD report)
+//
+// The rate cache is module-scoped and outlives a case, so each case below uses a
+// trip currency no other case in this file asks the rates for: AUD is quoted by
+// its stub, NZD is left to the failing fetch every case starts with.
+// ---------------------------------------------------------------------------
+
+/** A trip in `currency` with one unfrozen VND bill and one unfrozen VND transfer. */
+function tripWithVndRows(currency: string) {
+  const { user, other, trip } = tripWithTwo();
+  testDb.prepare('UPDATE trips SET currency = ? WHERE id = ?').run(currency, trip.id);
+  testDb.prepare('DELETE FROM budget_settlements WHERE trip_id = ?').run(trip.id);
+  const item = createBudgetItem(testDb, trip.id, { name: 'Pho', total_price: 8920000 });
+  testDb.prepare("UPDATE budget_items SET currency = 'VND', exchange_rate = 1 WHERE id = ?").run(item.id);
+  testDb.prepare('INSERT INTO budget_item_members (budget_item_id, user_id, paid) VALUES (?, ?, 0), (?, ?, 0)')
+    .run(item.id, user.id, item.id, other.id);
+  testDb.prepare('INSERT INTO budget_item_payers (budget_item_id, user_id, amount) VALUES (?, ?, ?)')
+    .run(item.id, user.id, 8920000);
+  const settlementId = Number(testDb.prepare(
+    "INSERT INTO budget_settlements (trip_id, from_user_id, to_user_id, amount, currency, exchange_rate) VALUES (?, ?, ?, ?, 'VND', 1)",
+  ).run(trip.id, other.id, user.id, 100000).lastInsertRowid);
+  return { user, other, trip, item, settlementId };
+}
+
+describe('Tool: freeze_budget_rates', () => {
+  it('refuses a demo user, a stranger and a member without budget_edit, writing nothing', async () => {
+    const { other, trip, item, settlementId } = tripWithVndRows('AUD');
+    const { user: stranger } = createUser(testDb);
+    const spy = vi.spyOn(BudgetService.prototype, 'freezeMissingRates');
+    try {
+      await withHarness(stranger.id, async (h) => {
+        const result = await h.client.callTool({ name: 'freeze_budget_rates', arguments: { tripId: trip.id } });
+        expect(result.isError).toBe(true);
+      });
+
+      // budget_edit lowered to the owner, the way the admin permission panel does it.
+      testDb.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)').run('perm_budget_edit', 'trip_owner');
+      invalidatePermissionsCache();
+      await withHarness(other.id, async (h) => {
+        const result = await h.client.callTool({ name: 'freeze_budget_rates', arguments: { tripId: trip.id } });
+        expect(result.isError).toBe(true);
+      });
+      testDb.prepare("DELETE FROM app_settings WHERE key = 'perm_budget_edit'").run();
+      invalidatePermissionsCache();
+
+      process.env.DEMO_MODE = 'true';
+      const { user: demo } = createUser(testDb, { email: 'demo@nomad.app' });
+      addTripMember(testDb, trip.id, demo.id);
+      await withHarness(demo.id, async (h) => {
+        const result = await h.client.callTool({ name: 'freeze_budget_rates', arguments: { tripId: trip.id } });
+        expect(result.isError).toBe(true);
+      });
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(itemRow(item.id).exchange_rate).toBe(1);
+      expect(settlementRow(settlementId).exchange_rate).toBe(1);
+    } finally {
+      spy.mockRestore();
+      testDb.prepare("DELETE FROM app_settings WHERE key = 'perm_budget_edit'").run();
+      invalidatePermissionsCache();
+    }
+  });
+
+  it('calls freezeMissingRates without a quote of its own, freezes the server rate and broadcasts', async () => {
+    const { user, trip, item, settlementId } = tripWithVndRows('AUD');
+    stubRates({ VND: 18241.3 });
+    const spy = vi.spyOn(BudgetService.prototype, 'freezeMissingRates');
+    try {
+      await withHarness(user.id, async (h) => {
+        const result = await h.client.callTool({ name: 'freeze_budget_rates', arguments: { tripId: trip.id } });
+        expect(result.isError).toBeFalsy();
+        // No rate table travels with the MCP call: only the server's own rate is frozen.
+        expect(spy.mock.calls).toEqual([[trip.id]]);
+        const data = parseToolResult(result) as { items: { id: number }[]; settlements: { id: number }[]; unresolved: string[] };
+        expect(data.items.map(i => i.id)).toEqual([item.id]);
+        expect(data.settlements.map(s => s.id)).toEqual([settlementId]);
+        expect(data.unresolved).toEqual([]);
+        expect(itemRow(item.id).exchange_rate).toBe(18241.3);
+        expect(settlementRow(settlementId).exchange_rate).toBe(18241.3);
+        expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'budget:updated', expect.objectContaining({ item: expect.objectContaining({ id: item.id }) }));
+        expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'budget:settlement-updated', expect.objectContaining({ settlement: expect.objectContaining({ id: settlementId }) }));
+
+        // Everything is frozen now, so a second call finds nothing to heal.
+        const again = parseToolResult(await h.client.callTool({ name: 'freeze_budget_rates', arguments: { tripId: trip.id } }));
+        expect(again).toEqual({ items: [], settlements: [], unresolved: [] });
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('answers with an error and broadcasts nothing when the trip currency changed during the fetch', async () => {
+    const { user, trip, item, settlementId } = tripWithVndRows('AUD');
+    // The service's own answer for that race (BUDGET-SVC-DB-066): null, nothing written.
+    const spy = vi.spyOn(BudgetService.prototype, 'freezeMissingRates').mockResolvedValueOnce(null);
+    try {
+      await withHarness(user.id, async (h) => {
+        const result = await h.client.callTool({ name: 'freeze_budget_rates', arguments: { tripId: trip.id } });
+        expect(result.isError).toBe(true);
+        expect(errorText(result)).toContain('The trip currency changed');
+      });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(broadcastMock).not.toHaveBeenCalled();
+      expect(itemRow(item.id).exchange_rate).toBe(1);
+      expect(settlementRow(settlementId).exchange_rate).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('Tool: get_settlement_summary (unconverted rows)', () => {
+  it('returns the currency it answers in and the rows no rate could convert', async () => {
+    const { user, trip, item, settlementId } = tripWithVndRows('NZD');
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'get_settlement_summary', arguments: { tripId: trip.id } });
+      const { summary } = parseToolResult(result) as {
+        summary: {
+          currency: string; balances: unknown[]; flows: unknown[];
+          unconverted: { item_ids: number[]; settlement_ids: number[]; currencies: string[] };
+        };
+      };
+      expect(summary.currency).toBe('NZD');
+      expect(summary.unconverted).toEqual({ item_ids: [item.id], settlement_ids: [settlementId], currencies: ['VND'] });
+      // Left out whole: no balance in VND's order of magnitude, and nothing to settle.
+      expect(summary.balances).toEqual([]);
+      expect(summary.flows).toEqual([]);
     });
   });
 });

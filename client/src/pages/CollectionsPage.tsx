@@ -45,12 +45,16 @@ function CollectionsPageDesktop(): React.ReactElement {
   const isRealList = !c.isAllSaved && typeof c.activeId === 'number'
   const canManageLabels = isRealList && c.canEdit
 
-  // Selecting a place toggles it, so clicking it again — or the map background —
-  // clears it. Below the desktop breakpoint the list and map are separate views;
-  // above it the list view is a split with a persistent map that pans to the
-  // selection (the map stays mounted across the list↔map toggle so it animates).
+  // Selecting a place from the list toggles it, so clicking the row again clears
+  // it, as does the map background. A marker click always shows the place: a second
+  // click on the marker of the place that is open read as "the details do not open"
+  // rather than as "close them" (#2431). Below the desktop breakpoint the list and
+  // map are separate views; above it the list view is a split with a persistent map
+  // that pans to the selection (the map stays mounted across the list↔map toggle so
+  // it animates).
   const mappable = c.mappable
   const openPlace = (id: number) => c.setSelectedPlaceId(c.selectedPlaceId === id ? null : id)
+  const showPlace = (id: number) => c.setSelectedPlaceId(id)
   const deselect = () => c.setSelectedPlaceId(null)
   const toggleView = () => {
     // Going to the full-map view closes the (list-docked) detail sheet.
@@ -59,7 +63,7 @@ function CollectionsPageDesktop(): React.ReactElement {
   }
   // Clicking a marker in the full-map view drops back to the split so the list
   // + detail come into view alongside the map.
-  const onMapSelect = (id: number) => { openPlace(id); if (c.view === 'map') c.setView('list') }
+  const onMapSelect = (id: number) => { showPlace(id); if (c.view === 'map') c.setView('list') }
 
   const desktopSplit = c.isWide && c.hasMappable
   const mapShown = c.hasMappable && (c.view === 'map' || c.isWide)

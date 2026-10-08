@@ -232,6 +232,14 @@ describe('buildEmailHtml', () => {
     // Both should have the same footer text
     expect(unknown).toContain('notifications enabled in TREK');
   });
+
+  it('points the header logo at an inline part by Content-ID, not at a data: URI (#2507)', () => {
+    const html = buildEmailHtml('Subject', 'Body', 'en');
+    // Gmail strips data: URIs and Outlook blocks them, which left a broken image
+    // in the header of every mail.
+    expect(html).not.toContain('data:');
+    expect(html).toMatch(/<img src="cid:[^"]+" alt="TREK" width="48" height="48"/);
+  });
 });
 
 // ── SEC: XSS escaping in buildEmailHtml ──────────────────────────────────────

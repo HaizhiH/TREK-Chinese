@@ -27,18 +27,20 @@ import { getCategoryIcon } from '../components/shared/categoryIcons';
 import PublicLanguagePicker from '../components/shared/PublicLanguagePicker';
 import { OFM_POSITRON, DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, MAP_MAX_ZOOM, attributionForTile } from '../constants/mapDefaults';
 import VectorBasemap from '../components/Map/VectorBasemap';
+import { convertBooked, convertedLine } from '../hooks/useExchangeRates';
 import { useTranslation } from '../i18n';
 import { avatarSrc } from '../utils/avatarSrc';
 import { safeHexColor } from '../utils/safeColor';
 import { getMergedItems, getTransportForDay, hidesOnMiddleDay } from '../utils/dayMerge';
 import { isDayInAccommodationRange } from '../utils/dayOrder';
 import { getFlightLegs, getTrainLegs } from '../utils/flightLegs';
-import { splitReservationDateTime } from '../utils/formatters';
+import { currencyDecimals, splitReservationDateTime } from '../utils/formatters';
 import { computeMapViewport, TILE_SIZE_RASTER } from '../utils/mapViewport';
 import { resolveBasemap } from '../utils/tileUrl';
 import { useSharedTrip } from './sharedTrip/useSharedTrip';
 import { SharedPlaceDetails } from './sharedTrip/SharedPlaceDetails';
 import { SharedBookingDetails } from './sharedTrip/SharedBookingDetails';
+import { SharedTripErrorScreen } from './sharedTrip/SharedTripErrorScreen';
 
 const TRANSPORT_ICONS = { flight: Plane, train: Train, bus: Bus, car: Car, cruise: Ship };
 
@@ -98,6 +100,8 @@ export default function SharedTripPage() {
   const {
     data,
     error,
+    retry,
+    retrying,
     base,
     convert,
     selectedDay,
@@ -108,23 +112,7 @@ export default function SharedTripPage() {
     setShowLangPicker,
   } = useSharedTrip();
 
-  if (error)
-    return (
-      <div
-        className="bg-[#f3f4f6]"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}
-      >
-        <div style={{ textAlign: 'center', padding: 40 }}>
-          <div style={{ fontSize: 'calc(48px * var(--fs-scale-title, 1))', marginBottom: 16 }}>🔒</div>
-          <h1 className="text-[#111827]" style={{ fontSize: 'calc(20px * var(--fs-scale-title, 1))', fontWeight: 700 }}>
-            {t('shared.expired')}
-          </h1>
-          <p className="text-[#6b7280]" style={{ marginTop: 8 }}>
-            {t('shared.expiredHint')}
-          </p>
-        </div>
-      </div>
-    );
+  if (error) return <SharedTripErrorScreen reason={error} retrying={retrying} onRetry={retry} />;
 
   if (!data)
     return (
@@ -167,22 +155,33 @@ export default function SharedTripPage() {
   // trip-wide pool has none (it arrives by created_at). The index runs over the full
   // sorted assignment list, like the planner does, so a stop without coordinates still
   // consumes a number and the app and the share link agree on what "3" means.
+  //
+  // The stop a booked night wrote onto its check-in day heads that day since the
+  // reseat, and the planner's numbers leave it out (the day list below does too). So
+  // the numbers and the day line are counted over the traveller's own stops, or the
+  // hotel wore badge 1, every real stop read one higher than in the app, and the line
+  // set off from where the day ends. Its pin stays on the day, unnumbered, the way the
+  // planner keeps the hotel on the map.
   const dayAssignments = selectedDay
     ? [...(assignments[String(selectedDay)] || [])].sort((a: any, b: any) => a.order_index - b.order_index)
     : [];
+  const dayStops = dayAssignments.filter(a => a.accommodation_id == null);
   const dayOrderMap: Record<number, number[]> = {};
-  dayAssignments.forEach((a: any, i: number) => {
+  dayStops.forEach((a, i) => {
     if (!a.place?.id) return;
     (dayOrderMap[a.place.id] ||= []).push(i + 1);
   });
-  const dayPlaces: any[] = [];
-  const seenPlaceIds = new Set<number>();
-  for (const a of dayAssignments as any[]) {
-    const p = a.place;
-    if (!p?.lat || !p?.lng || seenPlaceIds.has(p.id)) continue;
-    seenPlaceIds.add(p.id);
-    dayPlaces.push(p);
-  }
+  // The places these assignments sit on, in their order, each drawn once.
+  const locatedPlaces = (list: typeof dayAssignments) => {
+    const seen = new Set<number>();
+    return list.map(a => a.place).filter(p => {
+      if (!p?.lat || !p?.lng || seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+  };
+  const dayPlaces = locatedPlaces(dayAssignments);
+  const dayLine = locatedPlaces(dayStops);
   const mapPlaces = selectedDay ? dayPlaces : (places || []).filter((p: any) => p?.lat && p?.lng);
 
   // Open framed on the trip's places instead of on Paris. MapContainer only reads center/zoom
@@ -451,9 +450,9 @@ export default function SharedTripPage() {
                   />
                 )}
                 <FitBoundsToPlaces places={mapPlaces} framedOnMount={framed !== null} />
-                {selectedDay && mapPlaces.length > 1 && (
+                {selectedDay && dayLine.length > 1 && (
                   <Polyline
-                    positions={mapPlaces.map((p: any) => [p.lat, p.lng])}
+                    positions={dayLine.map(p => [p.lat, p.lng])}
                     // Dashed and straight on purpose: it shows the order of the day's stops,
                     // not the roads between them. A real route would mean sending the
                     // itinerary to a third party for every anonymous visitor of a shared
@@ -983,16 +982,31 @@ export default function SharedTripPage() {
         {activeTab === 'budget' &&
           (budget || []).length > 0 &&
           (() => {
-            // Pre-rework rows store currency = NULL ("the trip's own currency"); convert
-            // each expense into the owner's display base via live FX, mirroring CostsPanel.
-            const curOf = (i: any) => i.currency || trip.currency || base;
+            // Pre-rework rows store currency = NULL ("the trip's own currency"). Each
+            // expense is read the way CostsPanel reads it (#2525): at the rate frozen when
+            // it was entered, into the trip currency, then into the owner's display base.
+            // Reading it at today's rate alone made the shared page disagree with the
+            // trip's own Costs tab.
+            type Expense = { total_price?: number | string | null; currency?: string | null; exchange_rate?: number | null };
+            const tripCurrency = String(trip.currency || base).toUpperCase();
+            const amountOf = (i: Expense) => Number.parseFloat(String(i.total_price ?? '')) || 0;
+            const valueOf = (i: Expense) => convertBooked(amountOf(i), i.currency, i.exchange_rate, tripCurrency, convert);
+            // Whole cents: a converted amount otherwise printed a third decimal.
+            const money = (v: number) =>
+              v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            // What was entered, beside a row shown converted, as the Costs list prints it.
+            const enteredOf = (i: Expense): string | null => {
+              const entered = convertedLine(amountOf(i), i.currency, i.exchange_rate, tripCurrency, base, valueOf(i))?.entered;
+              if (!entered) return null;
+              const d = currencyDecimals(entered.currency);
+              return `${entered.amount.toLocaleString(locale, { minimumFractionDigits: d, maximumFractionDigits: d })} ${entered.currency}`;
+            };
             const grouped = (budget || []).reduce((g: any, i: any) => {
               const c = i.category || t('shared.other');
               (g[c] = g[c] || []).push(i);
               return g;
             }, {});
-            const sumIn = (items: any[]) =>
-              items.reduce((s: number, i: any) => s + convert(Number.parseFloat(i.total_price) || 0, curOf(i)), 0);
+            const sumIn = (items: any[]) => items.reduce((s: number, i: any) => s + valueOf(i), 0);
             const total = sumIn(budget || []);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1017,7 +1031,7 @@ export default function SharedTripPage() {
                     {t('shared.totalBudget')}
                   </div>
                   <div style={{ fontSize: 'calc(28px * var(--fs-scale-title, 1))', fontWeight: 700, marginTop: 4 }}>
-                    {total.toLocaleString(locale, { minimumFractionDigits: 2 })} {base}
+                    {money(total)} {base}
                   </div>
                 </div>
                 {/* By category */}
@@ -1047,7 +1061,7 @@ export default function SharedTripPage() {
                         className="text-[#6b7280]"
                         style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600 }}
                       >
-                        {sumIn(items).toLocaleString(locale, { minimumFractionDigits: 2 })} {base}
+                        {money(sumIn(items))} {base}
                       </span>
                     </div>
                     {items.map((item: any) => (
@@ -1063,13 +1077,16 @@ export default function SharedTripPage() {
                       >
                         <span className="text-[#111827]" style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))' }}>
                           {item.name}
+                          {item.total_price && enteredOf(item) ? (
+                            <span className="text-content-faint"> · {enteredOf(item)}</span>
+                          ) : null}
                         </span>
                         <span
                           className="text-[#111827]"
                           style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 600 }}
                         >
                           {item.total_price
-                            ? `${convert(Number.parseFloat(item.total_price) || 0, curOf(item)).toLocaleString(locale, { minimumFractionDigits: 2 })} ${base}`
+                            ? `${money(valueOf(item))} ${base}`
                             : '—'}
                         </span>
                       </div>

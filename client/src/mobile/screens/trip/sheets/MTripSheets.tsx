@@ -9,6 +9,7 @@ import { useAuthStore } from '../../../../store/authStore'
 import { useSettingsStore } from '../../../../store/settingsStore'
 import { useTripStore } from '../../../../store/tripStore'
 import MConfirmSheet from '../../settings/MConfirmSheet'
+import MDayImpactList from '../../../components/MDayImpactList'
 import MDaySheet from './MDaySheet'
 import MDaysSheet from './MDaysSheet'
 import MAccommodationSheet from './MAccommodationSheet'
@@ -201,6 +202,22 @@ export default function MTripSheets({ planner, shell }: MTripSheetsProps) {
           planner.setDeletePlaceId(null)
         }}
       />
+
+      {/* Delete-day confirm behind the days sheet's delete buttons. Mounted
+          last, so it opens over that sheet; the list of what goes with the day
+          comes ready made from the planner, the same one the desktop shows. */}
+      <MConfirmSheet
+        open={planner.deleteDayId != null}
+        onClose={() => planner.setDeleteDayId(null)}
+        title={planner.deleteDayTitle}
+        message={t('dayplan.deleteDayBody')}
+        confirmLabel={t('dayplan.deleteDay')}
+        cancelLabel={t('common.cancel')}
+        danger
+        onConfirm={() => { void planner.confirmDeleteDay() }}
+      >
+        <MDayImpactList lines={planner.deleteDayLines} label={planner.deleteDayTitle} />
+      </MConfirmSheet>
     </>
   )
 }

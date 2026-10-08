@@ -17,7 +17,7 @@ describe('Chinese domains after the upstream Nest merge', () => {
     await expect(maps.search(1, '故宫', 'zh', { lat: 39.9, lng: 116.4 })).resolves.toMatchObject({ source: 'amap' });
     expect(fallback).not.toHaveBeenCalled();
     await maps.search(1, 'Paris', 'fr', { lat: 48.8, lng: 2.3 });
-    expect(fallback).toHaveBeenCalledWith(1, 'Paris', 'fr', { lat: 48.8, lng: 2.3 });
+    expect(fallback).toHaveBeenCalledWith(1, 'Paris', 'fr', { lat: 48.8, lng: 2.3 }, { googleOnly: false });
   });
 
   it('keeps every leg when a mainland route exceeds the provider waypoint limit', async () => {

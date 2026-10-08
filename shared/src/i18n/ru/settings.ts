@@ -25,7 +25,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': 'Выберите шаблон...',
   'settings.mapDefaultHint': 'Оставьте пустым для OpenStreetMap (по умолчанию)',
   'settings.routingBase': 'Собственный сервер маршрутов',
-  'settings.routingBaseHint': 'Собственный экземпляр OSRM. Пусто — используются публичные серверы с ограничением около одного запроса в секунду: на день хватает, для автопутешествия мало. Вступает в силу после перезапуска сервера.',
+  'settings.routingBaseHint':
+    'Собственный экземпляр OSRM. Пусто — используются публичные серверы с ограничением около одного запроса в секунду: на день хватает, для автопутешествия мало. Вступает в силу после перезапуска сервера.',
   'settings.valhallaBase': 'Свой сервер Valhalla',
   'settings.valhallaBaseHint':
     'По умолчанию TREK использует публичную Valhalla FOSSGIS для объезда платных дорог, автомагистралей и паромов. Введите здесь URL собственной Valhalla, чтобы использовать её вместо публичной. Если настроен только собственный сервер маршрутизации, публичная Valhalla не используется. После ввода собственного URL перезапустите сервер и обновите страницу.',
@@ -512,7 +513,8 @@ const settings: TranslationStrings = {
   'settings.offline.notice.offline': 'Нет соединения. Подключитесь, чтобы сохранить поездки офлайн.',
   'settings.offline.notice.signedOut': 'Сеанс завершён. Войдите снова, чтобы синхронизировать.',
   'settings.offline.notice.failed': 'Загрузку не удалось завершить. Проверьте соединение и повторите попытку.',
-  'settings.offline.notice.loadFailed': 'Не удалось прочитать офлайн-хранилище этого устройства. Обычно помогает очистка кэша.',
+  'settings.offline.notice.loadFailed':
+    'Не удалось прочитать офлайн-хранилище этого устройства. Обычно помогает очистка кэша.',
   'settings.offline.clear': 'Очистить кэш',
   'settings.offline.clearConfirm':
     'Очистить все офлайн-данные поездок? Вы сможете синхронизировать их снова в любой момент при наличии подключения.',
@@ -571,7 +573,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': 'Список желаний',
   'settings.apiScopes.stats': 'Итоги',
   'settings.apiKeys.title': 'Ключи API',
-  'settings.apiKeys.description': 'Ключи для публичного API, чтобы другие программы могли читать ваши поездки. Только чтение: ключ ничего не изменит и не удалит.',
+  'settings.apiKeys.description':
+    'Ключи для публичного API, чтобы другие программы могли читать ваши поездки. Только чтение: ключ ничего не изменит и не удалит.',
   'settings.apiKeys.create': 'Создать ключ',
   'settings.apiKeys.empty': 'Ключей пока нет. Создайте один, чтобы подключить другую программу.',
   'settings.apiKeys.createdAt': 'создан',
@@ -586,7 +589,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.endpoint': 'Эндпоинт',
   'settings.apiKeys.neverUsed': 'не использовался',
   'settings.apiKeys.loadFailed': 'Не удалось загрузить ключи. Обновите страницу, чтобы попробовать снова.',
-  'settings.apiKeys.limitReached': 'У вас {max} ключей, это максимум для одного аккаунта. Удалите ненужный ключ, чтобы создать новый.',
+  'settings.apiKeys.limitReached':
+    'У вас {max} ключей, это максимум для одного аккаунта. Удалите ненужный ключ, чтобы создать новый.',
   'settings.apiKeys.copyFailed': 'Не удалось скопировать. Выделите текст и скопируйте его вручную.',
   'settings.apiKeys.modal.createTitle': 'Создать ключ API',
   'settings.apiKeys.modal.name': 'Название',
@@ -595,7 +599,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.modal.creating': 'Создание...',
   'settings.apiKeys.modal.create': 'Создать',
   'settings.apiKeys.modal.createdTitle': 'Ключ API создан',
-  'settings.apiKeys.modal.createdWarning': 'Скопируйте ключ сейчас. Он показывается один раз, позже получить его нельзя.',
+  'settings.apiKeys.modal.createdWarning':
+    'Скопируйте ключ сейчас. Он показывается один раз, позже получить его нельзя.',
   'settings.apiKeys.modal.done': 'Готово',
 };
 

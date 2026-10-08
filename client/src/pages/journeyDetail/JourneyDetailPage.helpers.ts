@@ -74,6 +74,21 @@ export function photoUrl(p: { photo_id: number }, size: 'thumbnail' | 'original'
 }
 
 /**
+ * A clip that came up without a poster frame: the browser could not decode it
+ * at upload time, so nothing was grabbed. Its thumbnail route answers 404 on
+ * purpose rather than streaming the whole file, and an <img> pointed at it
+ * shows the broken-image glyph (#2341). A provider clip is not one of these,
+ * its poster comes from the provider whether or not a local path is recorded.
+ */
+export function posterlessVideo(p: {
+  media_type?: string | null;
+  provider?: string | null;
+  thumbnail_path?: string | null;
+}): boolean {
+  return p.media_type === 'video' && p.provider === 'local' && !p.thumbnail_path;
+}
+
+/**
  * Which calendar day a provider photo belongs to.
  *
  * Providers that keep the photographer's wall clock send it along

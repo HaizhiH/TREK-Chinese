@@ -46,3 +46,39 @@ export function linkHost(url: string): string {
     return url
   }
 }
+
+/**
+ * Why the share payload did not arrive (#2505).
+ *
+ * The share endpoint answers 404 with its JSON `{ error }` body for a token
+ * that is unknown, expired or revoked, and that is the only answer that says
+ * anything about the link. A 5xx while the server restarts, a rate limit, a
+ * timeout or no response at all because the viewer is offline says the request
+ * failed, not the link, so the page offers a retry instead of sending the
+ * viewer back to the owner for a new link that would not have been needed.
+ *
+ * A 404 without that body is not TREK talking: a reverse proxy with no
+ * upstream answers one on its own (Traefik while the container is stopped or
+ * still starting, nginx with a missing location), so it counts as a failed
+ * load too.
+ */
+export type SharedTripLoadError = 'expired' | 'unavailable'
+
+export function sharedTripLoadError(err: unknown): SharedTripLoadError {
+  const response = (err as { response?: { status?: number; data?: unknown } } | null | undefined)?.response
+  if (response?.status !== 404) return 'unavailable'
+  return isPlainObject(response.data) && typeof response.data.error === 'string' ? 'expired' : 'unavailable'
+}
+
+/**
+ * Whether a 200 carried the share payload. An auth wall or a captive portal
+ * can answer the API call with its own HTML page, which axios hands over as a
+ * string; the page would crash on it, so the hook treats it as a failed load.
+ */
+export function isSharedTripPayload(payload: unknown): boolean {
+  return isPlainObject(payload) && isPlainObject(payload.trip)
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}

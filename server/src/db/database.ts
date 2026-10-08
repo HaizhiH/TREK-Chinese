@@ -1,7 +1,8 @@
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { readEnv } from '../app-config';
+import { openDatabase } from './connection';
 import { applyDurabilityPragmas } from './durability';
 import { createTables } from './schema';
 import { runMigrations } from './migrations';
@@ -39,7 +40,7 @@ function initDb(): void {
     _db = null;
   }
 
-  _db = new Database(dbPath);
+  _db = openDatabase(dbPath);
   // Ahead of the journal switch now: changing journal_mode needs an exclusive
   // lock, which a sibling process (reset-admin, the rotation script) may hold.
   _db.exec('PRAGMA busy_timeout = 5000');

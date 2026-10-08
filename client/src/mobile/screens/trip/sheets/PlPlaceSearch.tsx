@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import { Loader2, RotateCcw, Search } from 'lucide-react'
 import { mapsApi } from '../../../../api/client'
-import { sourceLabelFor } from '../../../../utils/placeSource'
+import { useAuthStore } from '../../../../store/authStore'
+import { offersGoogleRetry, selectGoogleHoldsSlot, sourceLabelFor } from '../../../../utils/placeSource'
 import { recordPlacePick } from '../../../../api/placeShadow'
 import { PlacesSession } from '../../../../utils/placesSession'
 import { isMapUrl } from '../../../../components/Planner/PlaceFormModal.helpers'
@@ -95,6 +96,9 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
   const acMetaRef = useRef<{ query: string; source: string } | null>(null)
   // The name the whole list carries, for rows that do not name their own index.
   const [acSource, setAcSource] = useState('')
+  // What answered the last full search, for the line that offers Google instead.
+  const [searchSource, setSearchSource] = useState('')
+  const googleAnswers = useAuthStore(selectGoogleHoldsSlot)
 
   const setResolving = useCallback(
     (v: boolean) => {
@@ -168,8 +172,10 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
     setQuery('')
   }
 
-  const handleSearch = async () => {
-    const trimmed = query.trim()
+  const handleSearch = async (provider?: 'google') => {
+    // The retry sends the query the list came from, as the desktop form does:
+    // the list stays on screen while the field is edited or cleared.
+    const trimmed = provider ? (searchMetaRef.current?.query ?? '') : query.trim()
     if (!trimmed) return
     setSuggestions([])
 
@@ -183,7 +189,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
 
     setResolving(true)
     try {
-      if (isMapUrl(trimmed)) {
+      if (!provider && isMapUrl(trimmed)) {
         const resolved = await mapsApi.resolveUrl(trimmed)
         if (resolved.lat && resolved.lng) {
           onPick({
@@ -200,9 +206,10 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
       }
       // Derselbe Hinweis, den die Vervollstaendigung schon bekommt: die Suche
       // braucht ihn genauso, nur als Punkt statt als Kasten.
-      const result = await mapsApi.search(trimmed, language, pointFromBox(locationBias))
+      const result = await mapsApi.search(trimmed, language, pointFromBox(locationBias), provider)
       searchMetaRef.current = { query: trimmed, source: result.source || 'unknown' }
       setResults(result.places || [])
+      setSearchSource(result.source || '')
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
     } finally {
@@ -284,7 +291,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
         />
         <button
           type="button"
-          onClick={handleSearch}
+          onClick={() => handleSearch()}
           disabled={searching}
           aria-label={t('common.search')}
           className="flex h-10 w-10 flex-none items-center justify-center rounded-[12px] bg-m-act text-m-actfg disabled:opacity-60"
@@ -331,6 +338,20 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
             </button>
           ))}
         </div>
+      )}
+      {/* The same quiet line the desktop form has: the index answers first and
+          Google only when it finds nothing, so this is how a list with the wrong
+          place on it reaches Google, where Google holds the key slot. */}
+      {results.length > 0 && offersGoogleRetry(searchSource, googleAnswers) && (
+        <button
+          type="button"
+          onClick={() => handleSearch('google')}
+          disabled={searching}
+          className="mt-2 inline-flex items-center gap-1 font-geist text-[0.6875rem] text-m-muted disabled:opacity-60"
+        >
+          <RotateCcw size={11} strokeWidth={2} aria-hidden="true" />
+          {t('places.searchGoogleInstead')}
+        </button>
       )}
     </div>
   )

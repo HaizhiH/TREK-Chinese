@@ -44,6 +44,12 @@ function rejectsTemperature(detail: string): boolean {
     && /unsupported|not supported|does not support|only the default/i.test(detail);
 }
 
+/** The `response_format` the given attempt carried, by its type. */
+function sentFormat(shape: RequestShape, nuextract: boolean): string {
+  if (nuextract || shape.noResponseFormat) return 'none';
+  return shape.jsonObject ? 'json_object' : 'json_schema';
+}
+
 /**
  * OpenAI-compatible chat-completions client. Covers both the "openai" cloud
  * provider and the "local" provider (Ollama / vLLM / llama.cpp / LM Studio),
@@ -170,6 +176,10 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
     if (!res.ok) {
       throw new Error(`LLM request failed (${res.status}): ${detail.slice(0, 300)}`);
     }
+    // Which rung answered. A report could not tell whether the schema reached the
+    // model at all or the ladder had fallen back to the prompt alone (#2477).
+    // Metadata only, so it is the same on a managed install.
+    console.debug(`[DEBUG] LLM answered with response_format=${sentFormat(shape, nuextract)}`);
 
     const data = (await res.json()) as {
       choices?: { message?: { content?: string } }[];

@@ -3,6 +3,10 @@ import type { TranslationStrings } from '../types';
 const shared: TranslationStrings = {
   'shared.expired': 'Liên kết đã hết hạn hoặc không hợp lệ',
   'shared.expiredHint': 'Liên kết chuyến đi được chia sẻ này không còn hoạt động.',
+  'shared.loadFailed': 'Không thể tải chuyến đi này',
+  'shared.loadFailedHint':
+    'Điều này không có nghĩa là liên kết đã hết hạn. Hãy kiểm tra kết nối và thử lại sau ít phút.',
+  'shared.retry': 'Thử lại',
   'shared.readOnly': 'Chế độ xem chia sẻ chỉ đọc',
   'shared.tabPlan': 'Kế hoạch',
   'shared.tabBookings': 'Đặt chỗ',
