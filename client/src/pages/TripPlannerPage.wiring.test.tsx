@@ -15,6 +15,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { assignmentsApi } from '../api/client'
 import TripPlannerPage from './TripPlannerPage'
 import type { Day, Place, Reservation, Settings } from '../types'
+import type { MapController } from '../components/Map/mapController'
 
 // ── Component stubs ───────────────────────────────────────────────────────────
 // Each stub records the props it was rendered with so the page's inline
@@ -449,7 +450,21 @@ describe('TripPlannerPage — plan tab', () => {
     renderPage()
     expect(screen.queryByTestId('compass-pill')).not.toBeInTheDocument()
 
-    await act(async () => { props('map').onMapReady({ getBearing: () => 0 }) })
+    await act(async () => {
+      props('map').onMapReady({
+        provider: 'maplibre-gl',
+        getView: () => ({ center: { lat: 0, lng: 0 }, zoom: 1 }),
+        setView: vi.fn(),
+        fit: vi.fn(),
+        resize: vi.fn(),
+        compass: {
+          getBearing: () => 0,
+          on: vi.fn(),
+          off: vi.fn(),
+          easeTo: vi.fn(),
+        },
+      } satisfies MapController)
+    })
 
     await waitFor(() => expect(screen.getAllByTestId('compass-pill').length).toBeGreaterThan(0))
   })

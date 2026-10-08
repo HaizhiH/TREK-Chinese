@@ -77,6 +77,7 @@ const { db } = vi.hoisted(() => {
   tmp.exec('CREATE TABLE days (id INTEGER PRIMARY KEY AUTOINCREMENT, trip_id INTEGER NOT NULL, day_number INTEGER, date TEXT);');
   tmp.exec(`CREATE TABLE places (id INTEGER PRIMARY KEY AUTOINCREMENT, trip_id INTEGER NOT NULL, name TEXT,
     image_url TEXT, address TEXT, lat REAL, lng REAL, category_id INTEGER, description TEXT,
+    geo_provider TEXT, provider_place_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP);`);
   // PlacesService.list joins categories and batch-loads tags/ratings.
   tmp.exec('CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, color TEXT, icon TEXT);');
