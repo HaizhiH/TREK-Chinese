@@ -102,14 +102,15 @@ vi.mock('../shared/Toast', () => ({
 
 // ── Permissions mock ────────────────────────────────────────────────────────
 
-// Flipped per test to render the read-only variants of the day rows.
-const mockPermissions = vi.hoisted(() => ({ canEdit: true }))
+// Flipped per test to render the read-only variants of the day rows; `denied`
+// takes single actions away from an otherwise editing member.
+const mockPermissions = vi.hoisted(() => ({ canEdit: true, denied: new Set<string>() }))
 
 vi.mock('../../store/permissionsStore', async (importOriginal) => {
   const actual = await importOriginal() as any
   return {
     ...actual,
-    useCanDo: () => () => mockPermissions.canEdit,
+    useCanDo: () => (action: string) => mockPermissions.canEdit && !mockPermissions.denied.has(action),
   }
 })
 
@@ -183,6 +184,7 @@ beforeEach(() => {
   resetAllStores()
   vi.clearAllMocks()
   mockPermissions.canEdit = true
+  mockPermissions.denied.clear()
   // clearAllMocks keeps implementations, so tests that swap the router out would
   // otherwise leak into the ones after them.
   vi.mocked(calculateRouteWithLegs).mockImplementation(waypoints => Promise.resolve({
@@ -222,6 +224,17 @@ describe('DayPlanSidebar', () => {
   it('FE-PLANNER-DAYPLAN-001: renders without crashing', () => {
     render(<DayPlanSidebar {...makeDefaultProps()} />)
     expect(document.body).toBeInTheDocument()
+  })
+
+  it('FE-PLANNER-DAYPLAN-001b: the panel yields to whatever the desktop shell puts above it', () => {
+    // With the Days / Road trip switch above it, a panel sized by height alone ran the
+    // switch's height past the clipped edge and the last day could never be scrolled
+    // into view. jsdom lays nothing out, so the sizing itself is the assertion.
+    const { container } = render(<DayPlanSidebar {...makeDefaultProps()} />)
+    const panel = container.firstElementChild as HTMLElement
+    expect(panel.style.flex).toBe('1 1 0%')
+    expect(panel.style.minHeight).toBe('0px')
+    expect(panel.style.height).toBe('100%')
   })
 
   it('FE-PLANNER-DAYPLAN-002: renders day titles', () => {
@@ -926,6 +939,18 @@ describe('DayPlanSidebar', () => {
     fireEvent.contextMenu(screen.getByText('Louvre Museum'))
     await user.click(screen.getByText('Edit'))
     expect(onEditPlace).toHaveBeenCalledWith(place, assignment.id)
+  })
+
+  it('FE-PLANNER-DAYPLAN-214: without place_edit the menu still removes from the day but neither edits nor deletes the place (#2446)', () => {
+    mockPermissions.denied.add('place_edit')
+    const place = buildPlace({ id: 42, name: 'Louvre Museum' })
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const assignment = buildAssignment({ id: 99, day_id: 10, order_index: 0, place })
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], places: [place], assignments: { '10': [assignment] } })} />)
+    fireEvent.contextMenu(screen.getByText('Louvre Museum'))
+    expect(screen.getByText(/Remove from day/i)).toBeInTheDocument()
+    expect(screen.queryByText('Edit')).not.toBeInTheDocument()
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument()
   })
 
   // ── Arrow reorder buttons ────────────────────────────────────────────────
@@ -2498,6 +2523,86 @@ describe('DayPlanSidebar', () => {
     expect(stored!.day_plan_position).toBe(positions[1].day_plan_position)
   })
 
+  // The crossing from the report behind #2461: Amsterdam and Newcastle on the day, the
+  // ferry from IJmuiden to the Port of Tyne in the evening. The slot written here is the
+  // one every other reader takes from then on, the road trip included.
+  const crossing = (newcastleAt: string | null, withAmsterdam = true) => {
+    const day = buildDay({ id: 10, date: '2026-10-06', title: 'Day 2' })
+    const amsterdam = buildPlace({ id: 1, name: 'Amsterdam', lat: 52.3731, lng: 4.8926 })
+    const newcastle = buildPlace({ id: 2, name: 'Newcastle', lat: 54.9783, lng: -1.6178, place_time: newcastleAt })
+    const stops = [
+      buildAssignment({ id: 11, day_id: 10, order_index: 0, place: amsterdam }),
+      buildAssignment({ id: 12, day_id: 10, order_index: 1, place: newcastle }),
+    ].filter(a => withAmsterdam || a.id !== 11)
+    const ferry = buildReservation({
+      id: 69, type: 'ferry', title: 'IJmuiden to Newcastle', day_id: 10,
+      reservation_time: '2026-10-06T17:30', reservation_end_time: '2026-10-06T23:00',
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'IJmuiden', code: null, lat: 52.4581, lng: 4.5879, timezone: null, local_date: null, local_time: null },
+        { role: 'to', sequence: 1, name: 'Port of Tyne', code: null, lat: 54.9925, lng: -1.4522, timezone: null, local_date: null, local_time: null },
+      ],
+    })
+    seedStore(useTripStore, { reservations: [ferry] })
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day], places: [amsterdam, newcastle], reservations: [ferry], assignments: { '10': stops },
+    })} />)
+  }
+
+  it('FE-PLANNER-DAYPLAN-218: a ferry between two untimed stops on its two shores is given the slot between them (#2461)', async () => {
+    const { reservationsApi } = await import('../../api/client')
+    crossing(null)
+    await waitFor(() => expect(vi.mocked(reservationsApi.updatePositions)).toHaveBeenCalled())
+    // By the clock alone it closed the day at 2.5, and the drive went overland first.
+    expect(vi.mocked(reservationsApi.updatePositions).mock.calls[0][1]).toEqual([{ id: 69, day_plan_position: 0.5 }])
+    expect(useTripStore.getState().reservations.find(r => r.id === 69)!.day_plan_position).toBe(0.5)
+  })
+
+  it('FE-PLANNER-DAYPLAN-219: a stop timed before the ferry keeps it behind that stop (#2461)', async () => {
+    const { reservationsApi } = await import('../../api/client')
+    crossing('10:00')
+    await waitFor(() => expect(vi.mocked(reservationsApi.updatePositions)).toHaveBeenCalled())
+    expect(vi.mocked(reservationsApi.updatePositions).mock.calls[0][1]).toEqual([{ id: 69, day_plan_position: 1.5 }])
+  })
+
+  it('FE-PLANNER-DAYPLAN-220: a ferry landing next to the only stop of the day opens it (#2461)', async () => {
+    const { reservationsApi } = await import('../../api/client')
+    crossing(null, false)
+    await waitFor(() => expect(vi.mocked(reservationsApi.updatePositions)).toHaveBeenCalled())
+    // Ahead of Newcastle, which is stored at order_index 1 here.
+    expect(vi.mocked(reservationsApi.updatePositions).mock.calls[0][1]).toEqual([{ id: 69, day_plan_position: 0.5 }])
+  })
+
+  it('FE-PLANNER-DAYPLAN-221: the slot is worked out over the hotel the list hides, so it does not land behind it (#2461)', async () => {
+    // The hotel a booking put on the day sits across the water and is no row of the list.
+    // Worked out over Amsterdam alone, the clock closed the day at 1.5: behind the hotel
+    // for the road trip, which then drove to Newcastle overland before the crossing.
+    const { reservationsApi } = await import('../../api/client')
+    const day = buildDay({ id: 10, date: '2026-10-06', title: 'Day 2' })
+    const amsterdam = buildPlace({ id: 1, name: 'Amsterdam', lat: 52.3731, lng: 4.8926 })
+    const hotel = buildPlace({ id: 3, name: 'Hotel Newcastle', lat: 54.975, lng: -1.61 })
+    const ferry = buildReservation({
+      id: 69, type: 'ferry', title: 'IJmuiden to Newcastle', day_id: 10,
+      reservation_time: '2026-10-06T17:30', reservation_end_time: '2026-10-06T23:00',
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'IJmuiden', code: null, lat: 52.4581, lng: 4.5879, timezone: null, local_date: null, local_time: null },
+        { role: 'to', sequence: 1, name: 'Port of Tyne', code: null, lat: 54.9925, lng: -1.4522, timezone: null, local_date: null, local_time: null },
+      ],
+    })
+    seedStore(useTripStore, { reservations: [ferry] })
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day], places: [amsterdam, hotel], reservations: [ferry],
+      accommodations: [{ id: 7, place_id: 3, start_day_id: 10, end_day_id: 11, check_in: null } as never],
+      assignments: {
+        '10': [
+          buildAssignment({ id: 11, day_id: 10, order_index: 0, place: amsterdam }),
+          buildAssignment({ id: 13, day_id: 10, order_index: 1, place: hotel, accommodation_id: 7 } as never),
+        ],
+      },
+    })} />)
+    await waitFor(() => expect(vi.mocked(reservationsApi.updatePositions)).toHaveBeenCalled())
+    expect(vi.mocked(reservationsApi.updatePositions).mock.calls[0][1]).toEqual([{ id: 69, day_plan_position: 0.5 }])
+  })
+
   it('FE-PLANNER-DAYPLAN-204: a rejected slot write puts the bookings back where the server has them', async () => {
     const { reservationsApi } = await import('../../api/client')
     vi.mocked(reservationsApi.updatePositions).mockRejectedValueOnce(new Error('offline'))
@@ -2787,7 +2892,8 @@ describe('DayPlanSidebar', () => {
     expect(onRouteRefresh).toHaveBeenCalled()
     // The store carries the new slot per day so the merged list stays stable.
     expect(useTripStore.getState().reservations[0].day_positions).toEqual({ 10: expect.any(Number) })
-    // Undoing restores the original assignment order.
+    // Undoing restores the original assignment order; the step names its day, so deleting the day drops it.
+    expect(pushUndo.mock.calls[0][2]).toEqual([10])
     const undo = pushUndo.mock.calls[0][1] as () => Promise<void>
     await undo()
     expect(reorderAssignments).toHaveBeenCalledWith(1, 10, [11, 12])
@@ -3320,6 +3426,65 @@ describe('DayPlanSidebar', () => {
     expect(updateReservation).toHaveBeenCalledWith(1, 501, { day_id: 11, end_day_id: 11 })
   })
 
+  // #2455. The list draws a timed stop by its start, the road trip drives the stored
+  // order. A stop with a start moved onto another day has to be stored where the list
+  // will draw it, or the road trip visits it somewhere else and, behind a later start,
+  // reaches it late.
+  describe('a timed stop moved onto another day is stored where the list shows it (#2455)', () => {
+    const setup = (extra: Record<string, unknown> = {}) => {
+      const moveAssignment = vi.fn(async () => undefined)
+      stubTripActions({ moveAssignment })
+      const days = [
+        buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' }),
+        buildDay({ id: 11, date: '2025-06-02', title: 'Day 2' }),
+      ]
+      const moved = buildPlace({ id: 1, name: 'Travemuende Strand', place_time: '10:00' })
+      const early = buildPlace({ id: 2, name: 'Luebeck Dom', place_time: '09:00' })
+      const middle = buildPlace({ id: 3, name: 'Wismar Hafen', place_time: '11:00' })
+      const late = buildPlace({ id: 4, name: 'Rostock Markt', place_time: '14:00' })
+      const assignments = {
+        '10': [buildAssignment({ id: 21, day_id: 10, order_index: 0, place: moved })],
+        '11': [
+          buildAssignment({ id: 31, day_id: 11, order_index: 0, place: early }),
+          buildAssignment({ id: 32, day_id: 11, order_index: 1, place: middle }),
+          buildAssignment({ id: 33, day_id: 11, order_index: 2, place: late }),
+        ],
+      }
+      render(<DayPlanSidebar {...makeDefaultProps({ days, places: [moved, early, middle, late], assignments, ...extra })} />)
+      return moveAssignment
+    }
+
+    it('FE-PLANNER-DAYPLAN-215: dropped on the day body, it lands between the stops its start falls between', () => {
+      const moveAssignment = setup()
+      fireEvent.dragStart(dragRow(screen.getByText('Travemuende Strand')), { dataTransfer: emptyDataTransfer })
+      fireEvent.drop(document.querySelectorAll('[style*="padding-top: 6px"]')[1], { dataTransfer: { getData: vi.fn(() => '') } })
+      // 10:00 sits between 09:00 (index 0) and 11:00, so index 1, not the end of the day.
+      expect(moveAssignment).toHaveBeenCalledWith(1, 21, 10, 11, 1)
+    })
+
+    it('FE-PLANNER-DAYPLAN-216: dropped on a later stop, it still lands where its start puts it', () => {
+      const moveAssignment = setup()
+      fireEvent.dragStart(dragRow(screen.getByText('Travemuende Strand')), { dataTransfer: emptyDataTransfer })
+      fireEvent.drop(dragRow(screen.getByText('Rostock Markt')), { dataTransfer: { getData: vi.fn(() => '') } })
+      expect(moveAssignment).toHaveBeenCalledWith(1, 21, 10, 11, 1)
+    })
+
+    it('FE-PLANNER-DAYPLAN-217: with the planner wired in, the move goes through it so the day keeps its vias', async () => {
+      // Landing in the middle of a day shifts the legs behind it, which only the planner
+      // can correct: it holds the vias. The list still decides where the stop goes.
+      const onMoveToDay = vi.fn(async () => undefined)
+      const pushUndo = vi.fn()
+      const moveAssignment = setup({ onMoveToDay, pushUndo })
+      fireEvent.dragStart(dragRow(screen.getByText('Travemuende Strand')), { dataTransfer: emptyDataTransfer })
+      fireEvent.drop(dayHeader('Day 2'), { dataTransfer: { getData: vi.fn(() => '') } })
+      expect(onMoveToDay).toHaveBeenCalledWith(21, 10, 11, 1)
+      expect(moveAssignment).not.toHaveBeenCalled()
+      // Still offered back once the planner has made the move, tagged with both days it touches.
+      await waitFor(() => expect(pushUndo).toHaveBeenCalledTimes(1))
+      expect(pushUndo.mock.calls[0][2]).toEqual([11, 10])
+    })
+  })
+
   it('FE-PLANNER-DAYPLAN-149: the note context menu edits and asks before deleting', async () => {
     const user = userEvent.setup()
     const note = buildDayNote({ id: 70, day_id: 10, text: 'A note' })
@@ -3772,6 +3937,76 @@ describe('DayPlanSidebar', () => {
     openSpy.mockRestore()
   })
 
+  describe('a moving day with a flight between the two stays (#2476)', () => {
+    // Day 2 checks out of a Munich hotel and into a Hamburg one, and nothing else is
+    // planned on it. The booked night's own stop never reaches the list.
+    const movingDays = [
+      buildDay({ id: 10, date: '2026-11-03', title: 'Day 1' }),
+      buildDay({ id: 11, date: '2026-11-04', title: 'Day 2' }),
+      buildDay({ id: 12, date: '2026-11-05', title: 'Day 3' }),
+    ]
+    const stays: Accommodation[] = [
+      { id: 1, trip_id: 1, start_day_id: 10, end_day_id: 11, place_lat: 48.137, place_lng: 11.575, place_name: 'Hotel A' },
+      { id: 2, trip_id: 1, start_day_id: 11, end_day_id: 12, place_lat: 53.551, place_lng: 9.993, place_name: 'Hotel B' },
+    ]
+    const airport = (role: 'from' | 'to', name: string, lat: number, lng: number) =>
+      ({ role, sequence: role === 'from' ? 0 : 1, name, code: null, lat, lng, timezone: null, local_date: null, local_time: null })
+    const flight = (located: boolean) => buildReservation({
+      id: 77, type: 'flight', title: 'LH 2078', day_id: 11, end_day_id: 11,
+      reservation_time: '2026-11-04T15:15:00', reservation_end_time: '2026-11-04T17:20:00',
+      endpoints: located ? [airport('from', 'MUC', 48.353, 11.786), airport('to', 'HAM', 53.63, 9.988)] : [],
+    })
+
+    it('FE-PLANNER-DAYPLAN-222: offers no Google Maps or CoMaps route from one hotel to the other', () => {
+      for (const located of [true, false]) {
+        const { unmount } = render(<DayPlanSidebar {...makeDefaultProps({
+          days: movingDays, accommodations: stays, reservations: [flight(located)], selectedDayId: 11,
+        })} />)
+        // With its airports the route to and from them can still be shown; without
+        // them there is nothing left to draw, so the tools go as a whole instead of
+        // standing there dead. The hand-offs, which could only ever describe a drive
+        // from Munich to Hamburg, are gone either way.
+        if (located) expect(screen.getByRole('button', { name: 'Route' })).toBeInTheDocument()
+        else expect(screen.queryByRole('button', { name: 'Route' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Open in Google Maps' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Open in CoMaps' })).not.toBeInTheDocument()
+        unmount()
+      }
+    })
+
+    it('FE-PLANNER-DAYPLAN-223: the hotel legs run to the departure airport and from the arrival airport', async () => {
+      render(<DayPlanSidebar {...makeDefaultProps({
+        days: movingDays, accommodations: stays, reservations: [flight(true)], selectedDayId: 11, routeShown: true,
+      })} />)
+      await waitFor(() => expect(vi.mocked(calculateRouteWithLegs)).toHaveBeenCalledTimes(2))
+      const pairs = vi.mocked(calculateRouteWithLegs).mock.calls.map(c => c[0])
+      expect(pairs).toContainEqual([{ lat: 48.137, lng: 11.575 }, { lat: 48.353, lng: 11.786 }])
+      expect(pairs).toContainEqual([{ lat: 53.63, lng: 9.988 }, { lat: 53.551, lng: 9.993 }])
+      expect(pairs).not.toContainEqual([{ lat: 48.137, lng: 11.575 }, { lat: 53.551, lng: 9.993 }])
+    })
+
+    it('FE-PLANNER-DAYPLAN-224: a day with a single located stop still hands it over as a pin', async () => {
+      // Two stops, one of them without coordinates, and no stay: the route tools show,
+      // and the hand-offs open the one stop the way they always did.
+      const user = userEvent.setup()
+      const { generateGoogleMapsUrl } = await import('../Map/RouteCalculator')
+      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+      const day = buildDay({ id: 10, date: '2026-11-03', title: 'Day 1' })
+      const assignments = {
+        '10': [
+          buildAssignment({ id: 1, day_id: 10, order_index: 0, place: buildPlace({ id: 1, name: 'Elbphilharmonie', lat: 53.541, lng: 9.984 }) }),
+          buildAssignment({ id: 2, day_id: 10, order_index: 1, place: buildPlace({ id: 2, name: 'Somewhere nice', lat: null, lng: null }) }),
+        ],
+      }
+      render(<DayPlanSidebar {...makeDefaultProps({ days: [day], assignments, selectedDayId: 10 })} />)
+
+      expect(screen.getByRole('button', { name: 'Open in CoMaps' })).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Open in Google Maps' }))
+      expect(vi.mocked(generateGoogleMapsUrl)).toHaveBeenCalledWith([{ lat: 53.541, lng: 9.984, name: 'Elbphilharmonie' }])
+      openSpy.mockRestore()
+    })
+  })
+
   it('FE-PLANNER-DAYPLAN-169: picking a whole-day travel mode persists it and redraws the map', async () => {
     const user = userEvent.setup()
     const { daysApi } = await import('../../api/client')
@@ -4144,6 +4379,7 @@ describe('DayPlanSidebar', () => {
     render(<DayPlanSidebar {...makeDefaultProps({ days: [day], assignments, selectedDayId: 10, pushUndo, onReorder })} />)
     await user.click(screen.getByRole('button', { name: 'Optimize' }))
     await waitFor(() => expect(onReorder).toHaveBeenCalled())
+    expect(pushUndo.mock.calls[0][2]).toEqual([10])
     const undo = pushUndo.mock.calls[0][1] as () => Promise<void>
     await undo()
     expect(reorderAssignments).toHaveBeenCalledWith(1, 10, [11, 12, 13])

@@ -39,7 +39,7 @@ const permissionsStub = { checkPermission } as unknown as PermissionsService;
 
 // Constructor-injected since the budget fold (was a path mock of the deleted
 // services/budgetService).
-const budget = { createBudgetItem: vi.fn(), updateBudgetItem: vi.fn(), deleteBudgetItem: vi.fn(), linkBudgetItemToReservation: vi.fn() };
+const budget = { createBudgetItem: vi.fn(), updateBudgetItem: vi.fn(), deleteBudgetItem: vi.fn(), linkBudgetItemToReservation: vi.fn(), freezeForeignRate: vi.fn() };
 
 const { notif } = vi.hoisted(() => ({ notif: { send: vi.fn().mockResolvedValue(undefined) } }));
 
@@ -531,6 +531,37 @@ describe('ReservationsService (DI-native, real SQL)', () => {
     it('falls back to type then "Other" for the category and swallows errors', () => {
       budget.linkBudgetItemToReservation.mockImplementation(() => { throw new Error('boom'); });
       expect(() => svc.syncBudgetOnCreate('5', 9, 'Hotel', undefined, { total_price: 50 }, 'sock')).not.toThrow();
+    });
+
+    // #2525: an imported booking quoted in dollars became a cost of that many euros.
+    it('links the cost in the currency and at the rate it arrives with', () => {
+      budget.linkBudgetItemToReservation.mockReturnValue({ id: 7 });
+      svc.syncBudgetOnCreate('5', 9, 'Hotel', 'hotel', { total_price: 801.76, currency: 'USD', exchange_rate: 1.17 }, 'sock');
+      expect(budget.linkBudgetItemToReservation).toHaveBeenCalledWith('5', 9, {
+        name: 'Hotel', category: 'hotel', total_price: 801.76, currency: 'USD', exchange_rate: 1.17,
+      });
+    });
+  });
+
+  describe('withFrozenRate (#2525)', () => {
+    it('keeps a quoted currency and freezes a rate for it', async () => {
+      budget.freezeForeignRate.mockImplementation(async (_tripId: unknown, data: { exchange_rate?: number }) => { data.exchange_rate = 1.17; });
+      expect(await svc.withFrozenRate('5', { total_price: 801.76, category: 'hotel', currency: ' usd ' })).toEqual({
+        total_price: 801.76, category: 'hotel', currency: 'USD', exchange_rate: 1.17,
+      });
+      expect(budget.freezeForeignRate).toHaveBeenCalledWith('5', { currency: 'USD', exchange_rate: 1.17 });
+    });
+
+    it('leaves the rate off when none could be frozen, so the cost converts live', async () => {
+      budget.freezeForeignRate.mockResolvedValue(undefined);
+      expect(await svc.withFrozenRate('5', { total_price: 10, currency: 'EUR' })).toEqual({ total_price: 10, currency: 'EUR' });
+    });
+
+    it('drops a currency that is not a code, and never takes a rate from the caller', async () => {
+      expect(await svc.withFrozenRate('5', { total_price: 10, currency: 'dollars', exchange_rate: 99 })).toEqual({ total_price: 10 });
+      expect(await svc.withFrozenRate('5', { total_price: 10, exchange_rate: 99 })).toEqual({ total_price: 10 });
+      expect(budget.freezeForeignRate).not.toHaveBeenCalled();
+      expect(await svc.withFrozenRate('5', undefined)).toBeUndefined();
     });
   });
 
@@ -1307,6 +1338,40 @@ describe('the day stop a hotel booking implies', () => {
     expect(stopsOn(days[0].id)).toEqual([{ id: Number(own.lastInsertRowid), place_id: place.id, accommodation_id: null }]);
     svc.remove(String(reservation.id), String(trip.id));
     expect(stopsOn(days[0].id)).toHaveLength(1);
+  });
+
+  it('RESV-STAY-008: a save from the booking form re-seats the night only when its check-in changed', () => {
+    // The form sends the whole stay on every save, check-in included, so this is the
+    // door a title edit on a hotel booking comes through. Its own reading of "the
+    // check-in changed" (the prior row, read before the write) decides whether a night
+    // the traveller dragged is left alone or seated afresh, the way ACC-022g pins it
+    // for the stay route.
+    const { trip, days } = tripWithDays();
+    const [harbour, market, hotel] = ['Hafen', 'Markt', 'Rostock'].map(name => createPlace(testDb, trip.id, { name }));
+    createDayAssignment(testDb, days[0].id, harbour.id);
+    createDayAssignment(testDb, days[0].id, market.id);
+    const stay = (check_in: string) => ({ place_id: hotel.id, start_day_id: days[0].id, end_day_id: days[0].id, check_in });
+    const { reservation } = svc.create(String(trip.id), { title: 'Hotel', type: 'hotel', create_accommodation: stay('15:00') });
+    const order = () => stopsOn(days[0].id).map(s => s.place_id);
+    expect(order()).toEqual([hotel.id, harbour.id, market.id]);
+
+    // Dragged to the end of the day by hand.
+    const own = stopsOn(days[0].id).find(s => s.place_id === hotel.id)!;
+    testDb.prepare('UPDATE day_assignments SET order_index = order_index - 1 WHERE day_id = ? AND order_index > 0').run(days[0].id);
+    testDb.prepare('UPDATE day_assignments SET order_index = 2 WHERE id = ?').run(own.id);
+    expect(order()).toEqual([harbour.id, market.id, hotel.id]);
+
+    vi.clearAllMocks();
+    let current = svc.getReservation(String(reservation.id), String(trip.id))!;
+    svc.update(String(reservation.id), String(trip.id), { title: 'Hotel, late arrival', type: 'hotel', create_accommodation: stay('15:00') } as never, current);
+    expect(order()).toEqual([harbour.id, market.id, hotel.id]);
+    expect(broadcast).not.toHaveBeenCalledWith(String(trip.id), 'assignment:moved', expect.anything());
+
+    current = svc.getReservation(String(reservation.id), String(trip.id))!;
+    svc.update(String(reservation.id), String(trip.id), { type: 'hotel', create_accommodation: stay('10:00') } as never, current);
+    expect(order()).toEqual([hotel.id, harbour.id, market.id]);
+    expect(stopsOn(days[0].id).map(s => s.id)).toContain(own.id);
+    expect(broadcast).toHaveBeenCalledWith(String(trip.id), 'assignment:moved', expect.objectContaining({ assignment: expect.objectContaining({ id: own.id }) }));
   });
 
   it('RESV-STAY-007: a foreign accommodation_id reaches no stop on the other trip', () => {

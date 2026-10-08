@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AlertTriangle, ChevronDown, RefreshCw } from 'lucide-react'
 import { adminApi, authApi } from '../../../api/client'
 import { getApiErrorMessage } from '../../../types'
+import { placesGoogleOnlyHint } from '../../../utils/placeSource'
 import type { TranslationFn } from '../../../types'
 import type { useAdmin } from '../../../pages/admin/useAdmin'
 import MToggle from '../../components/MToggle'
@@ -34,6 +35,7 @@ export default function MAdminSettingsSection({ admin, t }: MAdminSettingsSectio
     placesAutocompleteEnabled, setPlacesAutocompleteEnabledState,
     placesDetailsEnabled, setPlacesDetailsEnabledState,
     placesEnrichEnabled, setPlacesEnrichEnabledState,
+    placesGoogleOnly, handleTogglePlacesGoogleOnly,
     placeShadowEnabled, setPlaceShadowEnabledState,
     oidcConfig, setOidcConfig, savingOidc, setSavingOidc,
     passwordLogin, setPasswordLogin, passwordRegistration, setPasswordRegistration,
@@ -347,6 +349,17 @@ export default function MAdminSettingsSection({ admin, t }: MAdminSettingsSectio
                       setPlacesEnrichEnabled(!next)
                     }
                   }}
+                />
+              }
+            />
+            <MAdminRow
+              title={t('admin.placesGoogleOnly.title')}
+              hint={t(placesGoogleOnlyHint(hasMapsKey, placesProvider))}
+              trailing={
+                <MToggle
+                  checked={placesGoogleOnly}
+                  ariaLabel={t('admin.placesGoogleOnly.title')}
+                  onChange={() => handleTogglePlacesGoogleOnly()}
                 />
               }
             />

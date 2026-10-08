@@ -79,9 +79,13 @@ function validateUrlFields(body: Record<string, unknown>): void {
   const website = body.website;
   // '' is how the UI clears the field; treat it like an absent value.
   if (website !== undefined && website !== null && website !== '') {
-    if (typeof website !== 'string' || !placeWebsiteSchema.safeParse(website).success) {
+    const parsed = placeWebsiteSchema.safeParse(website);
+    if (!parsed.success) {
       throw new HttpException({ error: 'website must be an http or https URL' }, 400);
     }
+    // The parsed form is the one stored: a bare host from a search result
+    // arrives here without its https (#2483).
+    body.website = parsed.data;
   }
 }
 

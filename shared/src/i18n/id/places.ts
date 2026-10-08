@@ -88,6 +88,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Catatan reservasi, nomor konfirmasi...',
   'places.mapsSearchPlaceholder': 'Cari tempat...',
   'places.mapsSearchError': 'Pencarian tempat gagal.',
+  'places.searchGoogleInstead': 'Bukan tempat yang tepat? Cari di Google saja',
   'places.loadingDetails': 'Memuat detail tempat…',
   'places.osmHint':
     'Menggunakan pencarian OpenStreetMap (tanpa foto, jam buka, atau penilaian). Tambahkan Google API key di pengaturan untuk detail lengkap.',

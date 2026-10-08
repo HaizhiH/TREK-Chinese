@@ -128,7 +128,7 @@ describe('v4.3.0 migration bridge', () => {
       expect(
         db.prepare("SELECT provider, fetched_at FROM place_details_cache WHERE place_id = 'saved-google'").get(),
       ).toEqual({ provider: 'google', fetched_at: 100 });
-      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 242 });
+      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 245 });
       checkCache(db);
     } finally {
       db.close();

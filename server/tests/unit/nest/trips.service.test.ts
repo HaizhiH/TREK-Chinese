@@ -54,7 +54,7 @@ import { createTables } from '../../../src/db/schema';
 import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
 import { createUser, createTrip, createReservation, createPlace, createDay, createDayAssignment, createDayNote, addTripMember } from '../../helpers/factories';
-import { MAX_TRIP_DAYS } from '@trek/shared';
+import { MAX_TRIP_DAYS, resolveDayGridRange, tripSpanDays } from '@trek/shared';
 import { DatabaseService } from '../../../src/nest/database/database.service';
 import { DaysService } from '../../../src/nest/days/days.service';
 import { PermissionsService } from '../../../src/nest/permissions/permissions.service';
@@ -88,6 +88,7 @@ import fs from 'fs';
 import path from 'path';
 import { notificationsStub } from '../../helpers/notifications';
 import { EphemeralTokenService } from '../../../src/nest/auth/ephemeral-token.service';
+import { SettingsService } from '../../../src/nest/settings/settings.service';
 
 // Real sibling services over the same in-memory DB — updateTrip's date-shift
 // resyncs and the summary/bundle aggregation run their actual SQL.
@@ -128,6 +129,7 @@ const svc = new TripsService(
   new RealtimeService(),
   undefined as never, // unsplash — not exercised here
   coversFx.storage,
+  new SettingsService(dbs()),
 );
 const membersSvc = new TripMembersService(dbs(), budgetSvc, new UserCleanupService(dbs(), budgetSvc), new PermissionsService(dbs()), new RealtimeService(), notificationsStub());
 const readModelSvc = new TripReadModelService(
@@ -395,6 +397,240 @@ describe('generateDays', () => {
     expect(daysAfter).toHaveLength(3);
     expect(stillDateless).toHaveLength(1);
     expect(getAssignments(stillDateless[0].id)[0].id).toBe(assignment.id);
+  });
+
+  // ── generateDays carries out the shared planDayGrid plan ──────────────────
+  // The trip dialog warns about lost days by the same plan, so the plan has to
+  // be exactly what the rebuild did before it was written down in shared.
+
+  function addUndatedDay(tripId: number) {
+    const next = (testDb.prepare('SELECT COALESCE(MAX(day_number), 0) + 1 AS n FROM days WHERE trip_id = ?').get(tripId) as { n: number }).n;
+    const id = Number(testDb.prepare('INSERT INTO days (trip_id, day_number, date) VALUES (?, ?, NULL)').run(tripId, next).lastInsertRowid);
+    return id;
+  }
+
+  function addStay(tripId: number, placeId: number, startDayId: number, endDayId: number) {
+    return Number(testDb.prepare(
+      'INSERT INTO day_accommodations (trip_id, place_id, start_day_id, end_day_id) VALUES (?, ?, ?, ?)',
+    ).run(tripId, placeId, startDayId, endDayId).lastInsertRowid);
+  }
+
+  const stayExists = (id: number) => !!testDb.prepare('SELECT 1 FROM day_accommodations WHERE id = ?').get(id);
+
+  it('TRIP-SVC-070: a stay from a removed day to a spare day goes, and the spare day it left empty goes too', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-07-01', end_date: '2025-07-05' });
+    const days = getDays(trip.id);
+    const spare = addUndatedDay(trip.id);
+    const place = createPlace(testDb, trip.id);
+    const stay = addStay(trip.id, place.id, days[4].id, spare);
+
+    const plan = svc.generateDays(trip.id, '2025-07-01', '2025-07-04');
+
+    expect(plan.removed.map(r => [r.id, r.reason])).toEqual([[days[4].id, 'overflow'], [spare, 'spare']]);
+    expect(stayExists(stay)).toBe(false);
+    expect(getDays(trip.id).map(d => d.id)).toEqual(days.slice(0, 4).map(d => d.id));
+  });
+
+  it('TRIP-SVC-071: only moving the dates drops an empty spare day and keeps one with a note', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-07-01', end_date: '2025-07-03' });
+    const empty = addUndatedDay(trip.id);
+    const noted = addUndatedDay(trip.id);
+    createDayNote(testDb, noted, trip.id, { text: 'Buffer' });
+
+    const plan = svc.generateDays(trip.id, '2025-07-11', '2025-07-13');
+
+    expect(plan.removed).toEqual([{ id: empty, day_number: 4, date: null, reason: 'spare' }]);
+    const after = getDays(trip.id);
+    expect(after.map(d => d.date)).toEqual(['2025-07-11', '2025-07-12', '2025-07-13', null]);
+    expect(after[3]).toMatchObject({ id: noted, day_number: 4 });
+    expect(getNotes(noted)).toHaveLength(1);
+  });
+
+  it('TRIP-SVC-072: without dates only empty days are trimmed, the highest numbers first', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const ids = Array.from({ length: 6 }, () => addUndatedDay(trip.id));
+    const place = createPlace(testDb, trip.id);
+    createDayAssignment(testDb, ids[1], place.id);
+    createDayAssignment(testDb, ids[5], place.id);
+
+    const plan = svc.generateDays(trip.id, null, null, 3);
+
+    expect(plan.removed.map(r => r.id)).toEqual([ids[4], ids[3], ids[2]]);
+    expect(getDays(trip.id).map(d => [d.id, d.day_number])).toEqual([[ids[0], 1], [ids[1], 2], [ids[5], 3]]);
+  });
+
+  it('TRIP-SVC-073: generateDays returns the plan it carried out', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-07-01', end_date: '2025-07-03' });
+    const before = getDays(trip.id);
+    const spare = addUndatedDay(trip.id);
+
+    const plan = svc.generateDays(trip.id, '2025-07-01', '2025-07-06');
+
+    const after = getDays(trip.id);
+    expect(plan.removed).toEqual([]);
+    expect(plan.rows.map(r => r.date)).toEqual(after.map(d => d.date));
+    expect(plan.rows.slice(0, 4).map(r => r.id)).toEqual([...before.map(d => d.id), spare]);
+    // New rows come back without an id and are the rows the insert created.
+    expect(plan.rows.slice(4).map(r => r.id)).toEqual([null, null]);
+    expect(after.slice(4).every(d => !before.some(b => b.id === d.id) && d.id !== spare)).toBe(true);
+
+    const shrink = svc.generateDays(trip.id, '2025-07-01', '2025-07-02');
+    expect(shrink.removed.map(r => r.id)).toEqual(after.slice(2).map(d => d.id));
+    expect(getDays(trip.id).map(d => d.id)).toEqual(shrink.rows.map(r => r.id));
+  });
+
+  it('TRIP-SVC-074: fuzz, 300 random day grids end exactly where the rebuild before the shared plan left them', () => {
+    // The rebuild as it stood before planDayGrid, kept here as the oracle.
+    function legacyGenerateDays(tripId: number, startDate: string | null, endDate: string | null, dayCount?: number) {
+      const existing = testDb.prepare('SELECT id, day_number, date FROM days WHERE trip_id = ?').all(tripId) as { id: number; day_number: number; date: string | null }[];
+      const setDayNumber = testDb.prepare('UPDATE days SET day_number = ? WHERE id = ?');
+      const renumber = (list: { id: number }[]) => {
+        list.forEach((d, i) => setDayNumber.run(-(i + 1), d.id));
+        list.forEach((d, i) => setDayNumber.run(i + 1, d.id));
+      };
+      if (!startDate || !endDate) {
+        for (const d of existing.filter(d => d.date)) testDb.prepare('UPDATE days SET date = NULL WHERE id = ?').run(d.id);
+        const all = testDb.prepare('SELECT id FROM days WHERE trip_id = ? ORDER BY day_number').all(tripId) as { id: number }[];
+        const target = Math.min(Math.max(dayCount ?? (all.length || 7), 1), MAX_TRIP_DAYS);
+        const needed = target - all.length;
+        if (needed > 0) {
+          for (let i = 0; i < needed; i++) testDb.prepare('INSERT INTO days (trip_id, day_number, date) VALUES (?, ?, NULL)').run(tripId, all.length + i + 1);
+        } else if (needed < 0) {
+          const candidates = testDb.prepare(
+            `SELECT d.id FROM days d WHERE d.trip_id = ?
+               AND NOT EXISTS (SELECT 1 FROM day_assignments da WHERE da.day_id = d.id)
+               AND NOT EXISTS (SELECT 1 FROM day_notes dn WHERE dn.day_id = d.id)
+               AND NOT EXISTS (SELECT 1 FROM day_accommodations dac WHERE dac.start_day_id = d.id OR dac.end_day_id = d.id)
+             ORDER BY d.day_number DESC LIMIT ?`,
+          ).all(tripId, -needed) as { id: number }[];
+          for (const d of candidates) testDb.prepare('DELETE FROM days WHERE id = ?').run(d.id);
+        }
+        renumber(testDb.prepare('SELECT id FROM days WHERE trip_id = ? ORDER BY day_number').all(tripId) as { id: number }[]);
+        return;
+      }
+      const numDays = tripSpanDays(startDate, endDate);
+      const targetDates = Array.from({ length: Math.max(numDays, 0) }, (_, i) => addDaysIso(startDate, i));
+      const dated = existing.filter(d => d.date).sort((a, b) => a.day_number - b.day_number);
+      const dateless = existing.filter(d => !d.date).sort((a, b) => a.day_number - b.day_number);
+      [...dated, ...dateless].forEach((d, i) => setDayNumber.run(-(i + 1), d.id));
+      const assignDay = testDb.prepare('UPDATE days SET date = ?, day_number = ? WHERE id = ?');
+      let datelessIdx = 0;
+      targetDates.forEach((date, i) => {
+        if (i < dated.length) assignDay.run(date, i + 1, dated[i].id);
+        else if (datelessIdx < dateless.length) assignDay.run(date, i + 1, dateless[datelessIdx++].id);
+        else testDb.prepare('INSERT INTO days (trip_id, day_number, date) VALUES (?, ?, ?)').run(tripId, i + 1, date);
+      });
+      for (let i = targetDates.length; i < dated.length; i++) testDb.prepare('DELETE FROM days WHERE id = ?').run(dated[i].id);
+      const isEmpty = testDb.prepare(
+        `SELECT NOT EXISTS (SELECT 1 FROM day_assignments da WHERE da.day_id = @id)
+              AND NOT EXISTS (SELECT 1 FROM day_notes dn WHERE dn.day_id = @id)
+              AND NOT EXISTS (SELECT 1 FROM day_accommodations dac WHERE dac.start_day_id = @id OR dac.end_day_id = @id) AS empty`,
+      );
+      const maxAssigned = Math.max(targetDates.length, dated.length);
+      let kept = 0;
+      for (let i = datelessIdx; i < dateless.length; i++) {
+        if ((isEmpty.get({ id: dateless[i].id }) as { empty: number }).empty) testDb.prepare('DELETE FROM days WHERE id = ?').run(dateless[i].id);
+        else setDayNumber.run(maxAssigned + ++kept, dateless[i].id);
+      }
+      renumber(testDb.prepare('SELECT id FROM days WHERE trip_id = ? ORDER BY day_number').all(tripId) as { id: number }[]);
+    }
+
+    // A seeded generator, so a failure names a grid that can be replayed.
+    let seed = 20260923;
+    const rand = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
+
+    const snapshot = (tripId: number) => ({
+      days: testDb.prepare('SELECT id, day_number, date FROM days WHERE trip_id = ? ORDER BY day_number').all(tripId),
+      stays: testDb.prepare('SELECT id FROM day_accommodations WHERE trip_id = ? ORDER BY id').all(tripId),
+      assignments: testDb.prepare(
+        'SELECT da.id, da.day_id FROM day_assignments da JOIN days d ON d.id = da.day_id WHERE d.trip_id = ? ORDER BY da.id',
+      ).all(tripId),
+      notes: testDb.prepare('SELECT id, day_id FROM day_notes WHERE trip_id = ? ORDER BY id').all(tripId),
+    });
+    const ROLLBACK = new Error('rollback');
+
+    const { user } = createUser(testDb);
+    let removing = 0;
+    for (let round = 0; round < 300; round++) {
+      const trip = createTrip(testDb, user.id);
+      const place = createPlace(testDb, trip.id);
+      const dayIds: number[] = [];
+      const count = int(0, 9);
+      for (let n = 1; n <= count; n++) {
+        const date = rand() < 0.7 ? addDaysIso('2026-03-20', int(0, 20)) : null;
+        const id = Number(testDb.prepare('INSERT INTO days (trip_id, day_number, date) VALUES (?, ?, ?)').run(trip.id, n, date).lastInsertRowid);
+        dayIds.push(id);
+        if (rand() < 0.3) createDayAssignment(testDb, id, place.id);
+        if (rand() < 0.2) createDayNote(testDb, id, trip.id);
+      }
+      if (dayIds.length > 0) {
+        for (let k = int(0, 3); k > 0; k--) addStay(trip.id, place.id, dayIds[int(0, dayIds.length - 1)], dayIds[int(0, dayIds.length - 1)]);
+      }
+      let range: [string | null, string | null, number | undefined];
+      if (rand() < 0.25) {
+        range = [null, null, rand() < 0.4 ? undefined : int(1, 12)];
+      } else {
+        const start = addDaysIso('2026-03-15', int(0, 20));
+        range = [start, addDaysIso(start, int(0, 11)), rand() < 0.8 ? undefined : int(1, 12)];
+      }
+
+      const before = snapshot(trip.id);
+      let expected: ReturnType<typeof snapshot> | undefined;
+      try {
+        testDb.transaction(() => {
+          legacyGenerateDays(trip.id, ...range);
+          expected = snapshot(trip.id);
+          throw ROLLBACK;
+        })();
+      } catch (err) {
+        if (err !== ROLLBACK) throw err;
+      }
+      expect(snapshot(trip.id), `round ${round}: the oracle must leave no trace`).toEqual(before);
+
+      const plan = svc.generateDays(trip.id, ...range);
+      const actual = snapshot(trip.id);
+      expect(actual, `round ${round}: ${JSON.stringify({ range, before: before.days })}`).toEqual(expected);
+      const survivors = new Set((actual.days as { id: number }[]).map(d => d.id));
+      expect(plan.removed.map(r => r.id).sort((a, b) => a - b), `round ${round}: removed`)
+        .toEqual((before.days as { id: number }[]).map(d => d.id).filter(id => !survivors.has(id)).sort((a, b) => a - b));
+      if (plan.removed.length > 0) removing++;
+    }
+    // The grids are random, not easy: plenty of them lose days.
+    expect(removing).toBeGreaterThan(60);
+  });
+
+  it('TRIP-SVC-075: resolveRange reads a range the way the shared resolveDayGridRange does, a day_count of 0 included', () => {
+    const { user } = createUser(testDb);
+    const dated = svc.getRaw(createTrip(testDb, user.id, { start_date: '2025-07-01', end_date: '2025-07-05' }).id)!;
+    const undated = svc.getRaw(createTrip(testDb, user.id).id)!;
+    const resolve = (trip: typeof dated, data: Parameters<typeof svc.updateTrip>[2]) => svc['resolveRange'](trip, data);
+    const cases: [typeof dated, Parameters<typeof svc.updateTrip>[2]][] = [
+      [dated, {}],
+      [dated, { title: 'Renamed' }],
+      [dated, { end_date: '2025-07-03' }],
+      [dated, { start_date: '2025-07-03', end_date: '2025-07-05' }],
+      [dated, { start_date: null, end_date: null }],
+      [dated, { start_date: null, end_date: null, day_count: 3 }],
+      [undated, { day_count: 0 }],
+      [undated, { day_count: 4 }],
+      [undated, { day_count: MAX_TRIP_DAYS + 1 }],
+      [undated, { start_date: '2025-07-01', end_date: '2025-07-02' }],
+    ];
+    for (const [trip, data] of cases) expect(resolve(trip, data), JSON.stringify(data)).toEqual(resolveDayGridRange(trip, data));
+    expect(resolve(undated, { day_count: 0 }).regenerate).toBe(false);
+    // The refusals stay on the server side of the rule.
+    expect(() => resolve(dated, { start_date: '2025-07-05', end_date: '2025-07-01' })).toThrow('End date must be after start date');
+    expect(() => resolve(dated, { end_date: '2025-06-30' })).toThrow('End date must be after start date');
   });
 });
 
@@ -692,7 +928,7 @@ describe('guest members (#1362)', () => {
 // ── Folded CRUD SQL (summary / list / create / delete / copy) ─────────────────
 
 describe('folded trip CRUD', () => {
-  it('TRIP-SVC-042: getTripSummary aggregates members, days, budget, packing and reservations', () => {
+  it('TRIP-SVC-042: getTripSummary aggregates members, days, budget, packing and reservations', async () => {
     const { user: owner } = createUser(testDb);
     const { user: member } = createUser(testDb);
     const trip = createTrip(testDb, owner.id, { start_date: '2025-06-01', end_date: '2025-06-02' });
@@ -700,7 +936,7 @@ describe('folded trip CRUD', () => {
     testDb.prepare("INSERT INTO budget_items (trip_id, category, name, total_price) VALUES (?, 'food', 'Dinner', 40)").run(trip.id);
     testDb.prepare("INSERT INTO packing_items (trip_id, name, checked) VALUES (?, 'Socks', 1)").run(trip.id);
 
-    const summary = readModelSvc.getTripSummary(trip.id, owner.id)!;
+    const summary = (await readModelSvc.getTripSummary(trip.id, owner.id))!;
     expect(summary).toBeTruthy();
     expect((summary.trip as any).id).toBe(trip.id);
     expect(summary.members.owner.id).toBe(owner.id);
@@ -714,7 +950,7 @@ describe('folded trip CRUD', () => {
     expect(summary.collab_notes).toEqual([]);
 
     // Missing trips return null instead of throwing.
-    expect(readModelSvc.getTripSummary(99999)).toBeNull();
+    expect(await readModelSvc.getTripSummary(99999)).toBeNull();
   });
 
   it('TRIP-SVC-043: list returns owned + shared trips with is_owner, honoring the archived filter', () => {
@@ -743,6 +979,34 @@ describe('folded trip CRUD', () => {
     expect(reminderDays).toBe(3); // out-of-range → default 3
     expect((trip as any).currency).toBe('EUR'); // no currency → 'EUR'
     expect(getDays(tripId)).toHaveLength(3);
+  });
+
+  it('TRIP-SVC-069: create without a currency takes the display currency, admin default included, else EUR', () => {
+    const { user } = createUser(testDb);
+    const setUser = (value: string) =>
+      testDb.prepare("INSERT INTO settings (user_id, key, value) VALUES (?, 'default_currency', ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value")
+        .run(user.id, JSON.stringify(value));
+    const setAdmin = (value: string) =>
+      testDb.prepare("INSERT INTO app_settings (key, value) VALUES ('default_user_setting_default_currency', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(JSON.stringify(value));
+    const currencyOf = (data: Parameters<typeof svc.create>[1]) => (svc.create(user.id, data).trip as any).currency;
+
+    expect(currencyOf({ title: 'Nothing set' })).toBe('EUR');
+    // "Trip currency" in the settings stores an empty string, which counts as unset.
+    setUser('');
+    expect(currencyOf({ title: 'Cleared, no admin default' })).toBe('EUR');
+    setUser('   ');
+    expect(currencyOf({ title: 'Blank, no admin default' })).toBe('EUR');
+    setUser('');
+    setAdmin('CHF');
+    expect(currencyOf({ title: 'Admin default' })).toBe('CHF');
+    setUser('USD');
+    expect(currencyOf({ title: 'Own display currency' })).toBe('USD');
+    setUser('');
+    expect(currencyOf({ title: 'Back on the admin default' })).toBe('CHF');
+    // An explicit currency always wins.
+    setUser('USD');
+    expect(currencyOf({ title: 'Explicit', currency: 'JPY' })).toBe('JPY');
   });
 
   it('TRIP-SVC-064: create refuses a range past MAX_TRIP_DAYS and writes nothing', () => {
@@ -1193,6 +1457,7 @@ describe('quirk fixes', () => {
       new RealtimeService(),
       undefined as never,
       coversFx.storage,
+      new SettingsService(dbs()),
     );
   }
 

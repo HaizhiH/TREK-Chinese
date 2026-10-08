@@ -76,6 +76,8 @@ export function buildAdminHook(overrides: Record<string, unknown> = {}): AdminHo
     placesDetailsEnabled: false,
     setPlacesDetailsEnabledState: vi.fn(),
     placesEnrichEnabled: true,
+    placesGoogleOnly: false,
+    handleTogglePlacesGoogleOnly: vi.fn(),
     setPlacesEnrichEnabledState: vi.fn(),
     // Fail-open on the server, so the harness starts where an unset row lands.
     trekPlacesEnabled: true,

@@ -37,10 +37,10 @@ import { isDayInAccommodationRange, getAccommodationAnchors, getDayBookendHotels
 import {
   TRANSPORT_TYPES, parseTimeToMinutes, getSpanPhase, hidesOnMiddleDay, getDisplayTimeForDay, getTransportRouteEndpoints,
   getTransportForDay as _getTransportForDay, getMergedItems as _getMergedItems, isCarrierTransport, hasCarrierEndpointOnDay,
-  getAssignmentReservations,
+  getAssignmentReservations, timedSlot, storedRideSlot,
   type MergedItem,
 } from '../../utils/dayMerge'
-import { withinDriveRange } from '../../utils/geo'
+import { withinDriveRange } from '@trek/shared/roadtrip'
 import { formatDate, formatTime, dayTotalCost, formatMoneySum, splitReservationDateTime } from '../../utils/formatters'
 import { useDayNotes } from '../../hooks/useDayNotes'
 import { useExchangeRates } from '../../hooks/useExchangeRates'
@@ -58,6 +58,8 @@ import { DayPlanSidebarTimeConfirmModal } from './DayPlanSidebarTimeConfirmModal
 import { DayPlanSidebarTransportDetailModal } from './DayPlanSidebarTransportDetailModal'
 import { TransitTitle, TransitLegChips, TransitItineraryInline } from './transitDisplay'
 import { DayPlanSidebarFooter } from './DayPlanSidebarFooter'
+import type { DayAddControls } from '../../utils/dayAdd'
+import type { DayDeleteQuestion } from '../../utils/dayImpactLines'
 import type { Trip, Day, Place, Category, Assignment, Accommodation, Reservation, AssignmentsMap, RouteResult, RouteSegment, DayNote } from '../../types'
 import { getNavigationTargets, openNavigationTarget } from './placeNavigation'
 
@@ -78,11 +80,23 @@ interface DayPlanSidebarProps {
   onReorder: (dayId: number, orderedIds: number[]) => void
   onReorderDays?: (orderedIds: number[]) => void
   onAddDay?: (position?: number) => void
+  /** The planner's add controls, for the second "Add with date" button on a trip with dates. */
+  dayAdd?: DayAddControls
+  /** Asks to delete a day from the reorder dialog; the planner owns the question. */
+  onDeleteDay?: (dayId: number) => void
+  /** The open delete question, which the reorder dialog asks in place of its list. */
+  deleteDayQuestion?: DayDeleteQuestion | null
   /** Renaming lives in the day-detail panel (#1065); the sidebar only forwards the prop. */
   onUpdateDayTitle: (dayId: number, title: string) => void
   /** The day route is computed by the planner page itself; kept for the existing call sites. */
   onRouteCalculated: (route: RouteResult | null) => void
   onAssignToDay: (placeId: number, dayId: number, position?: number) => void
+  /**
+   * Moves a stop over from another day, at a row index of that day or at its end, and
+   * keeps the vias drawn on that day on their legs. Without it the list moves the stop
+   * in the store and leaves the vias as they are.
+   */
+  onMoveToDay?: (assignmentId: number, fromDayId: number, toDayId: number, position?: number) => Promise<void>
   onRemoveAssignment: (dayId: number, assignmentId: number) => void
   onEditPlace: (place: Place, assignmentId?: number) => void
   onDeletePlace: (placeId: number) => void
@@ -104,7 +118,8 @@ interface DayPlanSidebarProps {
   /** Open the place form already pointed at this day, to create a new place there. */
   onCreatePlaceForDay?: (dayId: number) => void
   onExpandedDaysChange?: (expandedDayIds: Set<number>) => void
-  pushUndo?: (label: string, undoFn: () => Promise<void> | void) => void
+  /** `dayIds`: the days the step acts on, so deleting one of them drops it. */
+  pushUndo?: (label: string, undoFn: () => Promise<void> | void, dayIds?: number[]) => void
   canUndo?: boolean
   lastActionLabel?: string | null
   onUndo?: () => void
@@ -142,8 +157,8 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
   trip, days, places, categories, assignments,
   selectedDayId, selectedPlaceId, selectedAssignmentId,
   onSelectDay, onPlaceClick, onDayDetail, accommodations = [],
-  onReorder, onReorderDays, onAddDay,
-  onAssignToDay, onRemoveAssignment, onEditPlace, onDeletePlace,
+  onReorder, onReorderDays, onAddDay, dayAdd, onDeleteDay, deleteDayQuestion,
+  onAssignToDay, onMoveToDay, onRemoveAssignment, onEditPlace, onDeletePlace,
   reservations = [],
   visibleConnectionIds = [],
   onToggleConnection,
@@ -190,6 +205,9 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
   const tripActions = useRef(useTripStore.getState()).current
   const can = useCanDo()
   const canEditDays = can('day_edit', trip)
+  // Editing or deleting the place itself is a place right; taking it off the
+  // day stays a day right (#2446).
+  const canEditPlaces = can('place_edit', trip)
   // The calendar subscription hands out a link that reads the trip without an
   // account, so it sits behind the same permission as the public share link.
   const canManageShare = can('share_manage', trip)
@@ -431,7 +449,15 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
       .slice().sort((a, b) => a.order_index - b.order_index)
 
   // Compute initial day_plan_position for a transport based on time
-  const computeTransportPosition = (r, da) => {
+  const computeTransportPosition = (r, da, dayId) => {
+    // A ride that lands today goes where it adds the least road between the same clocks,
+    // by the rule the road trip seats it with. This slot is stored, so seated by the
+    // clock alone a ferry between two untimed stops stayed at the end of the day, and the
+    // drive went overland before the crossing (#2461). Worked out over every stored row of
+    // the day rather than `da`: the drive stops at the hotel and the service stops the
+    // list hides, and the slot is read against their order indexes too.
+    const ride = storedRideSlot(r, assignments[String(dayId)] || [], accommodations, dayId)
+    if (ride !== null) return ride
     const minutes = parseTimeToMinutes(r.reservation_time) ?? 0
     // Find the last place with time <= transport time
     let afterIdx = -1
@@ -455,7 +481,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     )
     const positions = sorted.map((r, idx) => ({
       id: r.id,
-      day_plan_position: computeTransportPosition(r, da) + idx * 0.01,
+      day_plan_position: computeTransportPosition(r, da, dayId) + idx * 0.01,
     }))
     // Mark as initialized immediately to prevent re-entry
     for (const p of positions) initedTransportIds.current.add(p.id)
@@ -507,6 +533,19 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     const stored = (assignments[String(dayId)] || []).slice().sort((a, b) => a.order_index - b.order_index)
     const idx = target ? stored.findIndex(a => a.id === target.id) : -1
     return idx >= 0 ? idx : stored.length
+  }
+
+  // Moving a stop over from another day. One with a start is drawn by it wherever it
+  // is stored, and the road trip drives the stored order, so it is stored where the
+  // list will draw it rather than at the drop. One without a start makes the same call
+  // it always has, dropped where it was dropped or at the end of the day.
+  const moveToDay = (assignmentId: number, fromDayId: number, toDayId: number, dropAt?: number) => {
+    const moving = (assignments[String(fromDayId)] || []).find(a => a.id === assignmentId)
+    const slot = timedSlot(assignments[String(toDayId)] || [], accommodations, moving?.place?.place_time, dropAt) ?? dropAt
+    if (onMoveToDay) return onMoveToDay(assignmentId, fromDayId, toDayId, slot)
+    return slot === undefined
+      ? tripActions.moveAssignment(tripId, assignmentId, fromDayId, toDayId)
+      : tripActions.moveAssignment(tripId, assignmentId, fromDayId, toDayId, slot)
   }
 
   // The stop a drop on a note lands ahead of: the next place below the note.
@@ -865,7 +904,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
         const capturedPrevIds = prevAssignmentIds
         pushUndo?.(t('undo.reorder'), async () => {
           await tripActions.reorderAssignments(tripId, capturedDayId, capturedPrevIds)
-        })
+        }, [capturedDayId])
       }
     } catch (err: unknown) {
       rollBackReservations()
@@ -1040,7 +1079,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     const capturedDayId = dayId
     pushUndo?.(t('undo.optimize'), async () => {
       await tripActions.reorderAssignments(tripId, capturedDayId, prevIds)
-    })
+    }, [capturedDayId])
   }
 
 
@@ -1060,11 +1099,11 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
       const srcAssignment = (useTripStore.getState().assignments[String(fromDayId)] || []).find(a => a.id === Number(assignmentId))
       const capturedFromDayId = fromDayId
       const capturedOrderIndex = srcAssignment?.order_index ?? 0
-      tripActions.moveAssignment(tripId, Number(assignmentId), fromDayId, dayId)
+      moveToDay(Number(assignmentId), fromDayId, dayId)
         .then(() => {
           pushUndo?.(t('undo.moveDay'), async () => {
             await tripActions.moveAssignment(tripId, Number(assignmentId), dayId, capturedFromDayId, capturedOrderIndex)
-          })
+          }, [Number(dayId), Number(capturedFromDayId)])
         })
         .catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
     } else if (noteId && fromDayId !== dayId) {
@@ -1101,6 +1140,9 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     onReorder,
     onReorderDays,
     onAddDay,
+    dayAdd,
+    onDeleteDay,
+    deleteDayQuestion,
     onAssignToDay,
     onRemoveAssignment,
     onEditPlace,
@@ -1150,6 +1192,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     tripActions,
     can,
     canEditDays,
+    canEditPlaces,
     canManageShare,
     noteUi,
     setNoteUi,
@@ -1214,6 +1257,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     getMergedItems,
     storedPositionBefore,
     placeBelowNote,
+    moveToDay,
     mergedItemsMap,
     applyMergedOrder,
     handleMergedDrop,
@@ -1301,6 +1345,9 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
     onReorder,
     onReorderDays,
     onAddDay,
+    dayAdd,
+    onDeleteDay,
+    deleteDayQuestion,
     onAssignToDay,
     onRemoveAssignment,
     onEditPlace,
@@ -1350,6 +1397,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
     tripActions,
     can,
     canEditDays,
+    canEditPlaces,
     canManageShare,
     noteUi,
     setNoteUi,
@@ -1414,6 +1462,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
     getMergedItems,
     storedPositionBefore,
     placeBelowNote,
+    moveToDay,
     mergedItemsMap,
     applyMergedOrder,
     handleMergedDrop,
@@ -1527,7 +1576,11 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
   }
 
   return (
-    <div ref={setPanel} data-touch-drag={dragDisabled ? undefined : ''} style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', fontFamily: "var(--font-system)" }}>
+    // Sized as a flex child as well as by height: the desktop panel puts the Days / Road
+    // trip switch above this, and at height 100% alone the list ran the switch's height
+    // past the panel's clipped edge, so the last day could never be scrolled into view.
+    // Where nothing sits above it (the mobile shell), the height still fills the panel.
+    <div ref={setPanel} data-touch-drag={dragDisabled ? undefined : ''} style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0, height: '100%', position: 'relative', fontFamily: "var(--font-system)" }}>
       {/* Toolbar */}
       <DayPlanSidebarToolbar
         tripId={tripId}
@@ -1554,6 +1607,9 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
         canManageShare={canManageShare}
         onReorderDays={onReorderDays}
         onAddDay={onAddDay}
+        dayAdd={dayAdd}
+        onDeleteDay={onDeleteDay}
+        deleteDayQuestion={deleteDayQuestion}
       />
 
       {/* Tagesliste */}
@@ -1591,14 +1647,20 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
           // useRouteCalculation) even with zero places. Mirror that exact gate here — two
           // distinct bookend hotels you actually slept in / sleep in tonight — so the route
           // tools appear when you click the day (#1297). A same-hotel rest day or a plain
-          // arrival/departure day has morning === evening and stays excluded.
+          // arrival/departure day has morning === evening and stays excluded. With a flight
+          // or train booked on it the map drops that leg (#2476): it keeps only the drives
+          // to and from the booking's located stations, and a booking without any leaves
+          // nothing to draw, so the tools stay away instead of sitting there dead.
           const transferMorning = routeBookends?.morning
           const transferEvening = routeBookends?.evening
+          const dayCarriers = (mergedItemsMap[day.id] || []).filter(i => i.type === 'transport' && isCarrierTransport(i.data))
+          const dayHasLocatedCarrier = dayCarriers.some(i => hasCarrierEndpointOnDay(i.data, day.id))
           const hasHotelTransfer = !!(
             routeBookends?.morningIsSleptHere && routeBookends?.eveningIsOvernight &&
             transferMorning?.place_lat != null && transferMorning?.place_lng != null &&
             transferEvening?.place_lat != null && transferEvening?.place_lng != null &&
-            (transferMorning.place_lat !== transferEvening.place_lat || transferMorning.place_lng !== transferEvening.place_lng)
+            (transferMorning.place_lat !== transferEvening.place_lat || transferMorning.place_lng !== transferEvening.place_lng) &&
+            (dayCarriers.length === 0 || dayHasLocatedCarrier)
           )
           const routeToolsRoutable = da.length >= 2 || (loc != null && hasRouteBookend) || hasHotelTransfer
           /**
@@ -1611,22 +1673,30 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
            */
           const dayExportStops = (): NamedWaypoint[] => {
             const dayStops = getDayAssignments(day.id).filter(a => a.place?.lat != null && a.place?.lng != null)
+            // A flight, train, ferry or coach on a day without stops is the move itself,
+            // located or not: the hotels at either end are joined by it, not by a road
+            // worth handing to a map app (#2476).
+            if (dayStops.length === 0 && dayCarriers.length > 0) return []
             const stops = dayStops.map(a => ({ lat: a.place!.lat!, lng: a.place!.lng!, name: a.place!.name }))
             const first = dayStops[0] ? { isPlace: true, time: dayStops[0].place?.place_time ?? null, lat: dayStops[0].place!.lat!, lng: dayStops[0].place!.lng! } : undefined
             const lastAssignment = dayStops[dayStops.length - 1]
             const last = lastAssignment ? { isPlace: true, time: lastAssignment.place?.place_time ?? null, lat: lastAssignment.place!.lat!, lng: lastAssignment.place!.lng! } : undefined
             // Same carrier gate as the drawn route (#2157): the exported link must not
             // start at a hotel you only reach tonight or lead back to one you left.
-            const dayHasCarrier = (mergedItemsMap[day.id] || []).some(i => i.type === 'transport' && hasCarrierEndpointOnDay(i.data, day.id))
-            const drawMorning = !!routeBookends && shouldDrawMorningLeg(routeBookends, day, first, dayHasCarrier)
-            const drawEvening = !!routeBookends && shouldDrawEveningLeg(routeBookends, day, last, dayHasCarrier)
+            const drawMorning = !!routeBookends && shouldDrawMorningLeg(routeBookends, day, first, dayHasLocatedCarrier)
+            const drawEvening = !!routeBookends && shouldDrawEveningLeg(routeBookends, day, last, dayHasLocatedCarrier)
             const morning = drawMorning && routeBookends?.morning?.place_lat != null && routeBookends?.morning?.place_lng != null
               ? { lat: routeBookends.morning.place_lat, lng: routeBookends.morning.place_lng, name: routeBookends.morning.place_name } : null
             const evening = drawEvening && routeBookends?.evening?.place_lat != null && routeBookends?.evening?.place_lng != null
               ? { lat: routeBookends.evening.place_lat, lng: routeBookends.evening.place_lng, name: routeBookends.evening.place_name } : null
             return [...(morning ? [morning] : []), ...stops, ...(evening ? [evening] : [])]
           }
-          const routeExportPoints = dayExportStops()
+          const showRouteTools = (isSelected || (showRouteToolsWhenExpanded && isExpanded)) && routeToolsRoutable
+          // Built once, for the day the tools show on. With no stop to hand over the
+          // hand-offs would open nothing, so they are left out; a single stop still
+          // opens as a pin (#2476).
+          const exportStops = showRouteTools ? dayExportStops() : []
+          const routeExportPoints = exportStops
           const canExportAmap = routeExportPoints.length > 0 && routeExportPoints.every(isInChinaMainland)
           // Is this day's inline route currently on? Mobile toggles it per day (its
           // own expandedRouteDayIds entry); desktop uses the global Route toggle on
@@ -1871,7 +1941,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                       } else if (fromReservationId) {
                         handleMergedDrop(day.id, 'transport', Number(fromReservationId), 'transport', transportId, isAfter, toLegIndex)
                       } else if (assignmentId && fromDayId !== day.id) {
-                        tripActions.moveAssignment(tripId, Number(assignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
+                        moveToDay(Number(assignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
                       } else if (assignmentId) {
                         handleMergedDrop(day.id, 'place', Number(assignmentId), 'transport', transportId, isAfter, toLegIndex)
                       } else if (noteId && fromDayId !== day.id) {
@@ -1894,7 +1964,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                       setDropTargetKey(null); window.__dragData = null; return
                     }
                     if (assignmentId && fromDayId !== day.id) {
-                      tripActions.moveAssignment(tripId, Number(assignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
+                      moveToDay(Number(assignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
                       setDraggingId(null); setDropTargetKey(null); dragDataRef.current = null; return
                     }
                     if (noteId && fromDayId !== day.id) {
@@ -2054,7 +2124,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                               } else if (fromReservationId) {
                                 handleMergedDrop(day.id, 'transport', Number(fromReservationId), 'place', assignment.id)
                               } else if (fromAssignmentId && fromDayId !== day.id) {
-                                tripActions.moveAssignment(tripId, Number(fromAssignmentId), fromDayId, day.id, storedPositionBefore(day.id, assignment)).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
+                                moveToDay(Number(fromAssignmentId), fromDayId, day.id, storedPositionBefore(day.id, assignment)).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
                                 setDraggingId(null); setDropTargetKey(null); dragDataRef.current = null
                               } else if (fromAssignmentId) {
                                 handleMergedDrop(day.id, 'place', Number(fromAssignmentId), 'place', assignment.id)
@@ -2097,13 +2167,13 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                               // does not exist here.
                               const navTargets = getNavigationTargets(place)
                               ctxMenu.open(e, [
-                                canEditDays && onEditPlace && { label: t('common.edit'), icon: Pencil, onClick: () => onEditPlace(place, assignment.id) },
+                                canEditPlaces && onEditPlace && { label: t('common.edit'), icon: Pencil, onClick: () => onEditPlace(place, assignment.id) },
                                 canEditDays && onRemoveAssignment && { label: t('planner.removeFromDay'), icon: Trash2, onClick: () => onRemoveAssignment(day.id, assignment.id) },
                                 safeHttpUrl(place.website) && { label: t('inspector.website'), icon: ExternalLink, onClick: () => window.open(safeHttpUrl(place.website)!, '_blank', 'noopener,noreferrer') },
                                 ...navTargets.map(target => ({ label: target.label, icon: Navigation, onClick: () => openNavigationTarget(target) })),
                                 collectionsEnabled && { label: t('inspector.saveToCollection'), icon: Bookmark, onClick: () => useSaveToCollectionStore.getState().open(placeToSaveTarget(place)) },
                                 { divider: true },
-                                canEditDays && onDeletePlace && { label: t('common.delete'), icon: Trash2, danger: true, onClick: () => onDeletePlace(place.id) },
+                                canEditPlaces && onDeletePlace && { label: t('common.delete'), icon: Trash2, danger: true, onClick: () => onDeletePlace(place.id) },
                               ])
                             }}
                             onMouseEnter={e => {
@@ -2478,7 +2548,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                               } else if (fromReservationId) {
                                 handleMergedDrop(day.id, 'transport', Number(fromReservationId), 'transport', res.id, insertAfter, res.__leg?.index ?? null)
                               } else if (fromAssignmentId && fromDayId !== day.id) {
-                                tripActions.moveAssignment(tripId, Number(fromAssignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
+                                moveToDay(Number(fromAssignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
                               } else if (fromAssignmentId) {
                                 handleMergedDrop(day.id, 'place', Number(fromAssignmentId), 'transport', res.id, insertAfter, res.__leg?.index ?? null)
                               } else if (noteId && fromDayId !== day.id) {
@@ -2662,7 +2732,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                             } else if (fromNoteId && fromNoteId !== String(note.id)) {
                               handleMergedDrop(day.id, 'note', Number(fromNoteId), 'note', note.id)
                             } else if (fromAssignmentId && fromDayId !== day.id) {
-                              tripActions.moveAssignment(tripId, Number(fromAssignmentId), fromDayId, day.id, storedPositionBefore(day.id, placeBelowNote(day.id, note.id))).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
+                              moveToDay(Number(fromAssignmentId), fromDayId, day.id, storedPositionBefore(day.id, placeBelowNote(day.id, note.id))).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
                               setDraggingId(null); setDropTargetKey(null)
                             } else if (fromAssignmentId) {
                               handleMergedDrop(day.id, 'place', Number(fromAssignmentId), 'note', note.id)
@@ -2773,7 +2843,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                       }
                       if (!assignmentId && !noteId && !fromReservationId) { dragDataRef.current = null; window.__dragData = null; return }
                       if (assignmentId && fromDayId !== day.id) {
-                        tripActions.moveAssignment(tripId, Number(assignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
+                        moveToDay(Number(assignmentId), fromDayId, day.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : t('common.unknownError')))
                         setDraggingId(null); setDropTargetKey(null); dragDataRef.current = null; return
                       }
                       if (noteId && fromDayId !== day.id) {
@@ -2798,7 +2868,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                   </div>
 
                   {/* Routen-Werkzeuge (ausgewählter Tag, 2+ Orte — oder 1 Ort mit Hotel-Bookend #1330 — oder Hotel-zu-Hotel-Transfertag ohne Orte #1297) */}
-                  {(isSelected || (showRouteToolsWhenExpanded && isExpanded)) && routeToolsRoutable && (
+                  {showRouteTools && (
                     <div style={{ padding: '10px 16px 12px', borderTop: '1px solid var(--border-faint)', display: 'flex', flexDirection: 'column', gap: 7 }}>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
                         <button type="button"
@@ -2831,10 +2901,10 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                           {!narrowPanel && t('dayplan.route')}
                         </button>
                         {/* Open the day's stops as a route in Google Maps (planned order). #1255 */}
-                        <Tooltip label={t('planner.openGoogleMaps')} placement="top">
+                        {exportStops.length > 0 && <Tooltip label={t('planner.openGoogleMaps')} placement="top">
                           <button type="button"
                             onClick={() => {
-                              const url = generateGoogleMapsUrl(dayExportStops())
+                              const url = generateGoogleMapsUrl(exportStops)
                               if (url) window.open(url, '_blank', 'noopener,noreferrer')
                             }}
                             aria-label={t('planner.openGoogleMaps')}
@@ -2847,14 +2917,14 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                           >
                             <GoogleMapsIcon size={14} />
                           </button>
-                        </Tooltip>
+                        </Tooltip>}
                         {/* The same day, handed to CoMaps for offline navigation (#1904). The
                             day's own travel mode rides along, so the route it builds walks
                             when the plan walks. */}
-                        <Tooltip label={t('planner.openCoMaps')} placement="top">
+                        {exportStops.length > 0 && <Tooltip label={t('planner.openCoMaps')} placement="top">
                           <button type="button"
                             onClick={() => {
-                              const url = generateCoMapsUrl(dayExportStops(), day.default_transport_mode ?? routeProfile)
+                              const url = generateCoMapsUrl(exportStops, day.default_transport_mode ?? routeProfile)
                               if (url) window.open(url, '_blank', 'noopener,noreferrer')
                             }}
                             aria-label={t('planner.openCoMaps')}
@@ -2867,7 +2937,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                           >
                             <Compass size={14} strokeWidth={2} />
                           </button>
-                        </Tooltip>
+                        </Tooltip>}
                         {/* Icon-only, like the two map hand-offs beside it (#1981). It
                             was the one button here carrying a label with no room for
                             it: `flex: 1` alongside `padding: '6px 0'` meant the text

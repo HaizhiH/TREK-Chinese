@@ -1,6 +1,7 @@
 import { Search, Plus, X, Upload, FileDown, ChevronDown, Check, MapPin, Star, CalendarPlus, CalendarDays } from 'lucide-react'
 import { getCategoryIcon } from '../shared/categoryIcons'
 import Tooltip from '../shared/Tooltip'
+import CustomSelect from '../shared/CustomSelect'
 import { useElementSize } from '../../hooks/useElementSize'
 import type { SidebarState } from './usePlacesSidebar'
 
@@ -177,40 +178,17 @@ export function PlacesHeader(S: SidebarState) {
           hasTracks ? { id: 'tracks', label: t('places.filterTracks') } : null,
         ] as const).filter(Boolean) as Array<{ id: 'all' | 'unplanned' | 'planned' | 'tracks'; label: string }>
         return (
-          // The group always spans the rail and never wraps onto a second line.
-          // Each tab keeps its own text width and only the leftover space is
-          // shared out, so "Unplanned" stays wider than "All" instead of the four
-          // being forced to one size.
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'nowrap' }}>
-            {tabs.map(f => {
-              const active = filter === f.id
-              return (
-                <button type="button"
-                  key={f.id}
-                  onClick={() => { setFilter(f.id); setSelectedIds(new Set()) }}
-                  className={active ? 'bg-accent text-accent-text' : 'bg-surface-card text-content'}
-                  style={{
-                    appearance: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    flex: '1 1 auto', minWidth: 0, overflow: 'hidden',
-                    padding: compact ? '4px 5px' : '4px 9px', borderRadius: 99,
-                    fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500, whiteSpace: 'nowrap',
-                    boxShadow: active ? 'none' : '0 1px 2px rgba(0,0,0,0.06)',
-                    transition: 'background 0.15s, color 0.15s, box-shadow 0.15s',
-                  }}
-                >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.label}</span>
-                  <span className={active ? 'text-accent-text' : 'text-content-faint'} style={{
-                    fontSize: 'calc(9px * var(--fs-scale-caption, 1))', fontWeight: 600, lineHeight: 1,
-                    background: active ? 'color-mix(in srgb, var(--accent-text) 22%, transparent)' : 'var(--bg-tertiary)',
-                    padding: '1px 5px', borderRadius: 99, minWidth: 14, textAlign: 'center',
-                    flexShrink: 0,
-                  }}>
-                    {counts[f.id]}
-                  </span>
-                </button>
-              )
-            })}
+          // One select where four pills used to fight for the rail's width: with the
+          // tracks tab the row had grown past what a narrow panel can hold without
+          // clipping a word. The count rides on the trigger the way it rode on the
+          // active pill, and every option carries its own in the menu.
+          <div data-testid="places-filter" style={{ marginBottom: 8 }}>
+            <CustomSelect
+              size="sm"
+              value={filter}
+              onChange={v => { setFilter(v as 'all' | 'unplanned' | 'planned' | 'tracks'); setSelectedIds(new Set()) }}
+              options={tabs.map(f => ({ value: f.id, label: f.label, badge: String(counts[f.id]) }))}
+            />
           </div>
         )
       })()}
@@ -218,9 +196,9 @@ export function PlacesHeader(S: SidebarState) {
       {/* Says out loud what the count above already narrowed to.
           The map has followed the open day on this filter since #2024, and until now
           nothing anywhere said so: the pool read 55, the map drew five, and the honest
-          conclusion was that the map was broken. It sits under the tabs rather than on
-          the map because a chip over the canvas is unreachable on a phone, which is
-          where this was reported from. */}
+          conclusion was that the map was broken. It sits under the filter select
+          rather than on the map because a chip over the canvas is unreachable on a
+          phone, which is where this was reported from. */}
       {dayScoped && (
         <div
           className="border border-edge-faint bg-surface-tertiary text-content-secondary"

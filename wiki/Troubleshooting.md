@@ -269,6 +269,8 @@ Set `OIDC_ISSUER` to that exact string.
 
 **Cause:** Not the SSRF guard, despite what it looks like. All four OIDC calls (discovery, token, userinfo, JWKS) go through the admin-configured fetch path, which deliberately **allows** loopback and private/LAN targets: a Keycloak or Authentik on `192.168.x` or `10.x` is a supported setup and needs no extra variable. `ALLOW_INTERNAL_NETWORK` belongs to the guard on *user*-supplied URLs and changes nothing about OIDC. The only addresses that path refuses are link-local and cloud-metadata ones (`169.254.0.0/16`, `fe80::/10`), which fail with `Requests to link-local / cloud-metadata addresses are not allowed`. A provider behind the host gateway of a rootless Podman container resolves to `169.254.1.2` and fails exactly like that; list that address in `ALLOW_LINK_LOCAL_IPS`, see [Internal-Network-Access](Internal-Network-Access#a-link-local-address-you-need).
 
+Versions 4.3.0 to 4.3.2 also failed like that when the provider's hostname had an IPv6 link-local (`fe80::`) record next to its LAN address, which many LAN DNS servers hand out. From 4.3.3 on, TREK leaves such an address out and connects over the LAN address, so only a hostname that resolves to nothing but link-local or metadata addresses still fails.
+
 **Fix:** Look for the reasons an internal provider actually fails. A failed discovery fetch answers `500 { "error": "OIDC login failed" }` and logs the real message as `[OIDC] Login error: …`, so start there:
 
 ```bash

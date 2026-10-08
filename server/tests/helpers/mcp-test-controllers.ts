@@ -23,6 +23,7 @@ import { DayNotesMcp } from '../../src/nest/day-notes/day-notes.mcp';
 import { DayNotesService } from '../../src/nest/day-notes/day-notes.service';
 import { DaysMcp } from '../../src/nest/days/days.mcp';
 import { DaysService } from '../../src/nest/days/days.service';
+import { DayRemovalService } from '../../src/nest/days/day-removal.service';
 import { MapsMcp } from '../../src/nest/maps/maps.mcp';
 import { WeatherMcp } from '../../src/nest/weather/weather.mcp';
 import { WeatherService } from '../../src/nest/weather/weather.service';
@@ -83,6 +84,8 @@ import { RuntimeEnvService } from '../../src/nest/app-config/runtime-env.service
 import { makeNotificationsService, makeNotificationPreferencesService } from './notifications';
 import { AddonsService } from '../../src/nest/addons/addons.service';
 import { RoadtripMcp } from '../../src/nest/roadtrip/roadtrip.mcp';
+import { RoadtripPreferencesMcp } from '../../src/nest/roadtrip/roadtrip-preferences.mcp';
+import { RoadtripPreferencesService } from '../../src/nest/roadtrip/roadtrip-preferences.service';
 import { RoadtripService } from '../../src/nest/roadtrip/roadtrip.service';
 import { notificationsStub } from './notifications';
 import { EphemeralTokenService } from '../../src/nest/auth/ephemeral-token.service';
@@ -175,6 +178,8 @@ export function createMcpTestRegistry(): McpRegistry {
   );
   // Built after it: a hotel booking writes the stay's day stop through this one.
   const reservationsService = new ReservationsService(dbService, permissionsService, budgetService, realtimeService, notificationsStub(), new ReservationsReadRepository(dbService), accommodationsService);
+  // Deleting a day cancels the stays on it through the same accommodations service.
+  const dayRemovalService = new DayRemovalService(dbService, daysService, accommodationsService, assignmentsService);
   const membersService = new TripMembersService(dbService, budgetService, new UserCleanupService(dbService, budgetService), permissionsService, realtimeService, notificationsStub());
   const tripsService = new TripsService(
     dbService,
@@ -186,6 +191,7 @@ export function createMcpTestRegistry(): McpRegistry {
     realtimeService,
     new UnsplashService(dbService, new RuntimeEnvService(), generalStorage),
     generalStorage,
+    new SettingsService(dbService),
   );
   const readModelService = new TripReadModelService(
     dbService, membersService, daysService, accommodationsService, budgetService,
@@ -220,8 +226,9 @@ export function createMcpTestRegistry(): McpRegistry {
       new BudgetMcp(budgetService, exchangeRatesService, dbService, new RuntimeEnvService(), new TripMembershipService(dbService), addonsService, guards),
       new ReservationsMcp(reservationsService, daysService, budgetService, authService, assignmentsService, guards),
       new DayNotesMcp(new DayNotesService(dbService, permissionsService, realtimeService), authService, guards),
-      new DaysMcp(daysService, authService, guards),
+      new DaysMcp(daysService, authService, guards, dayRemovalService),
       new RoadtripMcp(new RoadtripService(dbService, realtimeService), dbService, guards, authService, addonsService),
+      new RoadtripPreferencesMcp(new RoadtripPreferencesService(dbService, realtimeService), authService, addonsService, dbService, guards),
       new FilesMcp(new FilesService(dbService, permissionsService, realtimeService, new EphemeralTokenService(), generalStorage), authService, guards),
       new AccommodationsMcp(accommodationsService, dbService, placesService, authService, guards),
       new AssignmentsMcp(assignmentsService, daysService, authService, guards),

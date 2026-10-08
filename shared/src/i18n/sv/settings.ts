@@ -25,7 +25,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': 'Välj mall...',
   'settings.mapDefaultHint': 'Lämna fältet tomt för OpenStreetMap (standard)',
   'settings.routingBase': 'Egen ruttmotor',
-  'settings.routingBaseHint': 'En egen OSRM-instans. Tomt använder de publika servrarna, som tillåter ungefär en förfrågan per sekund – nog för en dag, knappt för en bilresa. Träder i kraft efter omstart av servern.',
+  'settings.routingBaseHint':
+    'En egen OSRM-instans. Tomt använder de publika servrarna, som tillåter ungefär en förfrågan per sekund – nog för en dag, knappt för en bilresa. Träder i kraft efter omstart av servern.',
   'settings.valhallaBase': 'Egen Valhalla-instans',
   'settings.valhallaBaseHint':
     'TREK använder som standard FOSSGIS publika Valhalla för att undvika vägtullar, motorvägar och färjor. Ange URL:en till din egen Valhalla här för att använda den i stället. Om bara en egen ruttserver är konfigurerad används inte den publika Valhalla. Starta om servern och ladda om sidan efter att du angett en egen URL.',
@@ -566,7 +567,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': 'Önskelista',
   'settings.apiScopes.stats': 'Totalsummor',
   'settings.apiKeys.title': 'API-nycklar',
-  'settings.apiKeys.description': 'Nycklar för det publika API:et, så att annan programvara kan läsa dina resor. Endast läsning: en nyckel kan inte ändra eller ta bort något.',
+  'settings.apiKeys.description':
+    'Nycklar för det publika API:et, så att annan programvara kan läsa dina resor. Endast läsning: en nyckel kan inte ändra eller ta bort något.',
   'settings.apiKeys.create': 'Skapa nyckel',
   'settings.apiKeys.empty': 'Inga nycklar än. Skapa en för att koppla annan programvara.',
   'settings.apiKeys.createdAt': 'skapad',
@@ -581,7 +583,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.endpoint': 'Ändpunkt',
   'settings.apiKeys.neverUsed': 'aldrig använd',
   'settings.apiKeys.loadFailed': 'Det gick inte att läsa in dina nycklar. Ladda om sidan för att försöka igen.',
-  'settings.apiKeys.limitReached': 'Du har {max} nycklar, det högsta antalet per konto. Ta bort en som du inte längre använder för att skapa en ny.',
+  'settings.apiKeys.limitReached':
+    'Du har {max} nycklar, det högsta antalet per konto. Ta bort en som du inte längre använder för att skapa en ny.',
   'settings.apiKeys.copyFailed': 'Det gick inte att kopiera. Markera texten och kopiera den manuellt.',
   'settings.apiKeys.modal.createTitle': 'Skapa API-nyckel',
   'settings.apiKeys.modal.name': 'Namn',

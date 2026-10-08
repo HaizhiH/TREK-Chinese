@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTripStore } from '../store/tripStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { calculateRouteWithLegs, type RouteProfileKey } from '../components/Map/RouteCalculator'
-import { buildDayRouteRuns, TRANSPORT_TYPES } from '../components/Map/dayRoutePlan'
+import { buildDayRouteRuns, hotelBookendOf, TRANSPORT_TYPES } from '../components/Map/dayRoutePlan'
 import { resolveLegMode } from '../components/Planner/legMode'
 import type { TripStoreState } from '../store/tripStore'
 import type { RouteSegment, RouteResult, RouteVia, Accommodation } from '../types'
@@ -100,7 +100,12 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
           try {
             const r = await calculateRouteWithLegs(chunk.map(p => ({ lat: p.lat, lng: p.lng })), { signal: controller.signal, profile: mode, tripId, dayId })
             pushCoords(r.coordinates.length >= 2 ? r.coordinates : straight())
-            for (const leg of r.legs) allLegs.push({ ...leg, mode })
+            // Leg k runs from chunk[k] to chunk[k + 1]; a hotel bookend says so on the
+            // segment, which is how the phone timeline finds it (#2501).
+            r.legs.forEach((leg, k) => {
+              const hotelBookend = chunk[k + 1] ? hotelBookendOf(chunk[k], chunk[k + 1]) : undefined
+              allLegs.push(hotelBookend ? { ...leg, mode, hotelBookend } : { ...leg, mode })
+            })
             if (r.vias) allVias.push(...r.vias)
           } catch (err) {
             if (err instanceof Error && err.name === 'AbortError') throw err

@@ -184,6 +184,10 @@ async function main() {
 
   const db = new Database(dbPath);
   db.pragma('busy_timeout = 5000');
+  // Temp files in memory, like every connection src/db/connection.ts opens: a
+  // container with a read-only root and no tmpfs on /tmp has nowhere to put
+  // them, and the rotation below runs as one long transaction (#2518).
+  db.pragma('temp_store = MEMORY');
 
   // The rollback copy has to be a consistent snapshot, not a plain file copy:
   // this script is documented as running against a live server, so in WAL mode

@@ -157,6 +157,7 @@ const budget: TranslationStrings = {
   'costs.noReceipts': 'Nessuna ricevuta allegata',
   'costs.deleteReceipt': 'Rimuovi ricevuta',
   'costs.viewReceipt': 'Visualizza ricevuta',
-  'costs.receiptLeftBehind': 'Salvataggio non riuscito e {count} ricevute caricate sono ancora lì. Rimuovile nella scheda File.',
+  'costs.receiptLeftBehind':
+    'Salvataggio non riuscito e {count} ricevute caricate sono ancora lì. Rimuovile nella scheda File.',
 };
 export default budget;

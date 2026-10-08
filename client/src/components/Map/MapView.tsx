@@ -339,10 +339,11 @@ interface SelectionControllerProps {
   places: Place[]
   selectedPlaceId: number | null
   dayPlaces: Place[]
+  selectedPlace: Place | null
   paddingOpts: L.FitBoundsOptions
 }
 
-function SelectionController({ places, selectedPlaceId, dayPlaces, paddingOpts }: SelectionControllerProps) {
+function SelectionController({ places, selectedPlaceId, dayPlaces, selectedPlace, paddingOpts }: SelectionControllerProps) {
   const map = useMap()
   const prev = useRef(null)
 
@@ -352,7 +353,7 @@ function SelectionController({ places, selectedPlaceId, dayPlaces, paddingOpts }
       // side-panel + bottom-inspector padding so the pin lands in the middle of the
       // *visible* map area rather than the geometric centre (where the bottom panel
       // would cover it). Reuses the same paddingOpts the fit-bounds path uses.
-      const selected = places.find(p => p.id === selectedPlaceId)
+      const selected = selectedPlaceTarget(selectedPlaceId, places, dayPlaces, selectedPlace)
       if (selected?.lat != null && selected?.lng != null) {
         const latlng: [number, number] = [selected.lat, selected.lng]
         const tl = paddingOpts.paddingTopLeft as [number, number] | undefined
@@ -366,7 +367,7 @@ function SelectionController({ places, selectedPlaceId, dayPlaces, paddingOpts }
       }
     }
     prev.current = selectedPlaceId
-  }, [selectedPlaceId, places, map])
+  }, [selectedPlaceId, places, dayPlaces, selectedPlace, map])
 
   return null
 }
@@ -556,11 +557,13 @@ import { isCustomPlaceImage, markerPhotoHtml, photoCacheKey, photoSourcesKey } f
 import { useAuthStore } from '../../store/authStore'
 import { useGeolocation } from '../../hooks/useGeolocation'
 import LocationButton from './LocationButton'
+import { useIsPhone } from '../../mobile/useIsPhone'
 
 // Live-location rendering inside the Leaflet map. Subscribes via the
 // shared useGeolocation hook so the Leaflet and Mapbox variants behave
 // identically. Heading is shown as a rotated conic SVG when available.
 import type { GeoPosition, TrackingMode } from '../../hooks/useGeolocation'
+import { selectedPlaceTarget } from './selectedPlaceTarget'
 
 function LeafletLocationLayer({ position, mode }: { position: GeoPosition | null; mode: TrackingMode }) {
   const map = useMap()
@@ -628,6 +631,32 @@ function LeafletLocationLayer({ position, mode }: { position: GeoPosition | null
   )
 }
 
+/**
+ * Make a place pin a drag source without losing its clicks to an old pan.
+ *
+ * The drag wiring swallows mousedown so the map holds still while a drag starts. Leaflet
+ * tells a click from the end of a pan by a flag it only clears on the next mousedown it
+ * sees, so once the map had been dragged, every click on a pin was taken for the tail of
+ * that pan and dropped, until something else on the map was pressed (#2504). A press on
+ * the pin now clears that flag itself, as the map would have. Switching the pan handler
+ * off and on again is the public way to do that, and nothing is being panned at that
+ * moment. The click then takes Leaflet's normal route, so it still closes open popups
+ * and still reaches listeners further up the page, like an open context menu.
+ */
+function wireDraggablePin(el: HTMLElement, placeId: number, map: L.Map): () => void {
+  const undoDrag = makeMarkerDraggable(el, placeId)
+  const forgetPan = (e: MouseEvent) => {
+    if (e.button !== 0 || !map.dragging.enabled()) return
+    map.dragging.disable()
+    map.dragging.enable()
+  }
+  el.addEventListener('mousedown', forgetPan)
+  return () => {
+    undoDrag()
+    el.removeEventListener('mousedown', forgetPan)
+  }
+}
+
 interface MemoMarkerProps {
   place: any
   isSelected: boolean
@@ -646,6 +675,7 @@ const MemoMarker = memo(function MemoMarker({
   place, isSelected, orderNumbers, photoUrl, onClickPlace, onHover, onHoverOut, draggable, onRegister,
 }: MemoMarkerProps) {
   const icon = createPlaceIcon({ ...place, image_url: photoUrl }, orderNumbers, isSelected)
+  const map = useMap()
   const cleanupRef = useRef<(() => void) | null>(null)
   // react-leaflet compares `position` by reference and calls setLatLng whenever it
   // differs, and the cluster group answers a moved child by taking it out and putting
@@ -664,7 +694,7 @@ const MemoMarker = memo(function MemoMarker({
         // so the wiring is redone on every add rather than once on mount.
         add: (e: any) => {
           cleanupRef.current?.()
-          cleanupRef.current = draggable ? makeMarkerDraggable(e.target.getElement() as HTMLElement, place.id) : null
+          cleanupRef.current = draggable ? wireDraggablePin(e.target.getElement() as HTMLElement, place.id, map) : null
         },
         remove: () => { cleanupRef.current?.(); cleanupRef.current = null },
         click: () => onClickPlace(place.id),
@@ -686,6 +716,8 @@ export const MapView = memo(function MapView({
   routeColors = null,
   routeSegments = [],
   selectedPlaceId = null,
+  // The selected place itself, for when no pin on this map stands for it.
+  selectedPlace = null,
   hoverDisabled = false,
   onMarkerClick,
   onMapClick,
@@ -707,6 +739,9 @@ export const MapView = memo(function MapView({
   showTransitRoutes = true,
   days = [] as Day[],
   selectedDayId = null,
+  // Whether a booking switched on by hand also has to run on the selected day to be
+  // drawn. Only the phone's plan map asks for it; see RouteVisibilityOptions.
+  scopeConnectionsToDay = false,
   onReservationClick,
   pois = [] as Poi[],
   onPoiClick,
@@ -771,8 +806,8 @@ export const MapView = memo(function MapView({
     </Marker>
   )), [pois, onPoiClick, onPoiDropOnRoute])
   const visibleReservations = useMemo(() => (
-    visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes, selectedDayId, days })
-  ), [reservations, visibleConnectionIds, showTransitRoutes, selectedDayId, days])
+    visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes, selectedDayId, days, scopeConnectionsToDay })
+  ), [reservations, visibleConnectionIds, showTransitRoutes, selectedDayId, days, scopeConnectionsToDay])
   // Real road geometry for car/bus/taxi/bicycle bookings (straight line until it loads/if it fails).
   const transportRoutes = useTransportRoutes(visibleReservations)
   // Dynamic padding: account for sidebars + bottom inspector + day detail panel
@@ -1043,7 +1078,10 @@ export const MapView = memo(function MapView({
   const { position: userPosition, mode: trackingMode, error: trackingError, errorCode: trackingErrorCode, cycleMode: cycleTrackingMode } = useGeolocation()
   // Desktop browsers only get IP-based geolocation (city-level accuracy),
   // so the button would be misleading. Mobile, where real GPS lives, keeps it.
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  // The width is followed rather than read once: a phone turned sideways and
+  // back crosses the breakpoint twice, and the button used to stay with
+  // whatever the map saw when it mounted.
+  const isMobile = useIsPhone()
   // When the day-detail panel is open it slides up over the map (bottom: navh+20,
   // height var(--day-panel-h)) and covers the button's band, so lift the button
   // above it; otherwise keep the plain bottom-nav offset. #1348
@@ -1133,7 +1171,7 @@ export const MapView = memo(function MapView({
 
       <MapController center={center} zoom={zoom} />
       <BoundsController places={dayPlaces.length > 0 ? dayPlaces : places} routeCoords={dayPlaces.length > 0 ? routeCoords : []} fitKey={fitKey} paddingOpts={paddingOpts} framedOnMount={initialView.framed} focusPoints={focusPoints} fitPadding={fitPadding} />
-      <SelectionController places={places} selectedPlaceId={selectedPlaceId} dayPlaces={dayPlaces} paddingOpts={paddingOpts} />
+      <SelectionController places={places} selectedPlaceId={selectedPlaceId} dayPlaces={dayPlaces} selectedPlace={selectedPlace} paddingOpts={paddingOpts} />
       <MapClickHandler onClick={onMapClick} />
       <MapContextMenuHandler onContextMenu={onMapContextMenu} />
       <CameraHoverGuard movingRef={mapMovingRef} onMoveStart={clearHover} onZoom={setMapZoom} />

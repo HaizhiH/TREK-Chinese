@@ -43,6 +43,8 @@ function build(opts: { canEdit?: boolean; cascade?: boolean; stop?: boolean; see
     ),
     syncBudgetOnCreate: vi.fn(),
     syncBudgetOnUpdate: vi.fn(),
+    // The price's currency and rate are the service's to resolve; here it passes through.
+    withFrozenRate: vi.fn(async (_tripId: number, entry: unknown) => entry),
     notifyBookingChange: vi.fn(),
     // Both guards run before a write now, so the fixture answers for them.
     referencesOutsideTrip: vi.fn(() => opts.foreign ?? []),

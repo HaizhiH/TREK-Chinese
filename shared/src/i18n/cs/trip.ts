@@ -88,7 +88,10 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': 'Přestupy',
   'transit.walkLabel': 'Chůze',
   'transit.searchHint': 'Vyhledejte reálná spojení a přidejte je rovnou do dne — data přes Transitous.',
-  'trip.confirm.deletePlaceNight': 'Noc rezervovaná v „{name}“ zmizí spolu s místem.',
-  'trip.confirm.deletePlaceBooked': 'Noc rezervovaná v „{name}“ zmizí spolu s místem, včetně rezervace „{booking}“ a všech navázaných výdajů.',
+  'trip.confirm.deletePlaceNight': 'Tím se smaže i ubytování rezervované v „{name}“.',
+  'trip.confirm.deletePlaceBooked':
+    'Tím se smažou i ubytování rezervované v „{name}“, rezervace „{booking}“ a všechny navázané výdaje.',
+  'trip.confirm.deletePlaceBookedSame':
+    'Tím se smažou i ubytování rezervované v „{name}“, jeho rezervace a všechny navázané výdaje.',
 };
 export default trip;

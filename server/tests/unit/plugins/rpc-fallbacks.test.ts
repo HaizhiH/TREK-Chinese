@@ -249,7 +249,7 @@ describe('every schema-validated method rejects a payload its schema refuses', (
     const anything = new Proxy({}, { get: () => vi.fn(() => ({ id: 1, trip: { id: 1 }, updatedTrip: { id: 1 }, reservation: { id: 1 } })) }) as never;
     const registry = createTestPluginRegistry([
       new PlacesRpc(anything, anything, realtime(), guards),
-      new DaysRpc(anything, realtime(), guards),
+      new DaysRpc(anything, realtime(), guards, anything),
       new PackingRpc(anything, realtime(), guards),
       new TripsRpc(anything, anything, anything, anything, db, realtime(), guards, anything, anything),
       new AccommodationsRpc(anything, realtime(), guards),

@@ -3,6 +3,60 @@ import exifr from 'exifr';
 import { PhotoResolverService } from './photo-resolver.service';
 import { StorageService } from '../storage/storage.service';
 import { TrekPhotosRepository } from '../photos/trek-photos.repository';
+import { exifCaptureInstant } from './memories.helpers';
+
+/**
+ * What readCapture asks exifr for.
+ *
+ * `latitude` and `longitude` are not tags. exifr works them out from the four
+ * GPS tags below, and only when it has read those. A pick of just the two
+ * derived names reads no GPS at all, which is how every upload used to lose
+ * its location (#2512).
+ */
+const CAPTURE_TAGS = [
+  'DateTimeOriginal',
+  'CreateDate',
+  'OffsetTimeOriginal',
+  'OffsetTimeDigitized',
+  'OffsetTime',
+  'GPSLatitude',
+  'GPSLatitudeRef',
+  'GPSLongitude',
+  'GPSLongitudeRef',
+] as const;
+
+/** When and where an uploaded file says it was taken. */
+type LocalCapture = { takenAt: string | null; lat: number | null; lng: number | null };
+
+type Exif = Partial<Record<(typeof CAPTURE_TAGS)[number] | 'latitude' | 'longitude', unknown>>;
+
+function coordinate(value: unknown, limit: number): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit ? value : null;
+}
+
+/**
+ * The capture time and place in a file's EXIF, or null when it names neither.
+ * Throws for a file exifr cannot read at all.
+ */
+async function readCapture(abs: string): Promise<LocalCapture | null> {
+  // Raw values on purpose: see exifCaptureInstant for why the stamps are not
+  // left to exifr's reviver.
+  const parsed = (await exifr.parse(abs, { pick: [...CAPTURE_TAGS], reviveValues: false })) as Exif | undefined;
+  if (!parsed) return null;
+
+  // Each stamp has an offset tag of its own. The others stand in for a missing
+  // one: a camera writes all three from the same clock.
+  const { OffsetTimeOriginal: original, OffsetTimeDigitized: digitized, OffsetTime: modified } = parsed;
+  const takenAt = exifCaptureInstant(parsed.DateTimeOriginal, [original, digitized, modified])
+    ?? exifCaptureInstant(parsed.CreateDate, [digitized, original, modified]);
+  const lat = coordinate(parsed.latitude, 90);
+  const lng = coordinate(parsed.longitude, 180);
+  // A receiver without a fix can write zeros into the GPS tags instead of
+  // leaving them out. Taken at its word, 0,0 pins the photo to open sea in the
+  // Gulf of Guinea on the journey map, so it counts as no location.
+  const hasPair = lat != null && lng != null && !(lat === 0 && lng === 0);
+  return takenAt || hasPair ? { takenAt, lat: hasPair ? lat : null, lng: hasPair ? lng : null } : null;
+}
 
 /**
  * Ask the provider when and where a photo was taken, and record it (#1614).
@@ -70,9 +124,7 @@ export class PhotoCaptureBackfillService {
    * here already stripped. Nothing to read is the expected outcome far more often
    * than not — hence no logging on the empty case.
    */
-  private async readLocalExif(
-    filePath?: string | null,
-  ): Promise<{ takenAt: string | null; lat: number | null; lng: number | null } | null> {
+  private async readLocalExif(filePath?: string | null): Promise<LocalCapture | null> {
     if (!filePath) return null;
     // photos.file_path is uploads-relative 'journey/<name>' by every writer;
     // anything else reads as a miss (same rule as photo-resolver). Central key
@@ -81,25 +133,12 @@ export class PhotoCaptureBackfillService {
     if (!filePath.startsWith('journey/')) return null;
     const name = filePath.slice('journey/'.length);
 
-    type Exif = { DateTimeOriginal?: Date; CreateDate?: Date; latitude?: number; longitude?: number };
-    let parsed: Exif | null;
     try {
-      parsed = await this.storage.withLocalFile('journey', name, async abs =>
-        (await exifr.parse(abs, {
-          pick: ['DateTimeOriginal', 'CreateDate', 'latitude', 'longitude'],
-        })) as Exif | null,
-      );
+      return await this.storage.withLocalFile('journey', name, readCapture);
     } catch {
       // A vanished object, an invalid key, not an image, a truncated upload,
       // a video — none of it is an error here.
       return null;
     }
-    if (!parsed) return null;
-
-    const taken = parsed.DateTimeOriginal ?? parsed.CreateDate ?? null;
-    const takenAt = taken instanceof Date && !Number.isNaN(taken.getTime()) ? taken.toISOString() : null;
-    const lat = typeof parsed.latitude === 'number' ? parsed.latitude : null;
-    const lng = typeof parsed.longitude === 'number' ? parsed.longitude : null;
-    return takenAt || lat != null ? { takenAt, lat, lng } : null;
   }
 }

@@ -856,6 +856,7 @@ describe('BACKUP-061 restoreFromZip extraction', () => {
         .mockReturnValueOnce({
           all: vi.fn().mockReturnValue([{ name: 'users' }, { name: 'trips' }, { name: 'trip_members' }, { name: 'places' }, { name: 'days' }]),
         }),
+      pragma: vi.fn(),
       close: vi.fn(),
     };
     DatabaseMock.mockImplementation(function () {
@@ -1059,6 +1060,7 @@ describe('BACKUP-042 restoreFromZip — integrity check fails', () => {
         get: vi.fn().mockReturnValue({ integrity_check: 'corruption' }),
         all: vi.fn(),
       }),
+      pragma: vi.fn(),
       close: vi.fn(),
     };
     DatabaseMock.mockImplementation(function () {
@@ -1095,6 +1097,7 @@ describe('BACKUP-043 restoreFromZip — missing required table', () => {
         .mockReturnValueOnce({
           all: vi.fn().mockReturnValue([{ name: 'users' }, { name: 'trips' }]),
         }),
+      pragma: vi.fn(),
       close: vi.fn(),
     };
     DatabaseMock.mockImplementation(function () {
@@ -1156,6 +1159,7 @@ describe('BACKUP-045 restoreFromZip — full success path (no uploads)', () => {
             { name: 'days' },
           ]),
         }),
+      pragma: vi.fn(),
       close: vi.fn(),
     };
     DatabaseMock.mockImplementation(function () {
@@ -1166,7 +1170,7 @@ describe('BACKUP-045 restoreFromZip — full success path (no uploads)', () => {
 
   it('BACKUP-045a — returns { success: true } on full success', async () => {
     setupSuccessfulExtraction();
-    setupAllTablesPresent();
+    const uploaded = setupAllTablesPresent();
 
     fsMock.existsSync.mockImplementation((p: string) => {
       if (String(p).endsWith('travel.db')) return true;
@@ -1180,6 +1184,10 @@ describe('BACKUP-045 restoreFromZip — full success path (no uploads)', () => {
     const result = await restoreFromZip(stubStorage(), '/data/tmp/upload.zip');
 
     expect(result).toEqual({ success: true });
+    // The uploaded database is checked through the shared opener, read-only and
+    // with its temp files in memory like every other handle (#2518).
+    expect(DatabaseMock).toHaveBeenCalledWith(expect.stringContaining('travel.db'), { readonly: true });
+    expect(uploaded.pragma).toHaveBeenCalledWith('temp_store = MEMORY');
   });
 
   it('BACKUP-045b — closeDb is called before file copy operations', async () => {
@@ -1325,6 +1333,7 @@ describe('BACKUP-046 restoreFromZip — uploads rehydration through storage', ()
             { name: 'days' },
           ]),
         }),
+      pragma: vi.fn(),
       close: vi.fn(),
     };
     DatabaseMock.mockImplementation(function () {

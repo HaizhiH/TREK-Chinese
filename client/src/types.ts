@@ -255,6 +255,12 @@ export interface RouteSegment {
   noteText?: string
   /** The travel mode this leg was routed with (#1281) — drives the connector icon. */
   mode?: string
+  /**
+   * Set on the drive from the day's accommodation to its first stop ('morning') or
+   * from its last stop back to it ('evening'), so a list can show that leg at the
+   * day's edge without guessing it from coordinates a stop may share (#2501).
+   */
+  hotelBookend?: 'morning' | 'evening'
 }
 
 /** An intermediate stop a plugin route places on the drawn line (charging stop, rest area). */
@@ -301,8 +307,14 @@ export interface RouteWithLegs {
    * banning it, so a drive with no untolled connection comes back on a toll road and
    * says so. Present only on a route that was asked to avoid something, so `undefined`
    * means the question was never put rather than "avoided nothing".
+   *
+   * `fellBack` is set when the engine that weighs classes away could not answer and OSRM
+   * drove the request unweighted instead. Nothing was avoided then, so `achieved` is
+   * empty, the same reading the server's planner gives such a leg.
    */
-  avoidance?: { asked: RouteAvoidClass[]; achieved: RouteAvoidClass[] }
+  avoidance?: { asked: RouteAvoidClass[]; achieved: RouteAvoidClass[]; fellBack?: boolean }
+  /** Whether the road crosses by ferry, where the engine that drew it says so. */
+  hasFerry?: boolean
 }
 
 /** A road class a route can be asked to leave out. */

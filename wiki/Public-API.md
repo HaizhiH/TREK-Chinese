@@ -108,7 +108,7 @@ Two sections come back at trip level rather than on a day, because that is where
 | Field | Comes with | What it is |
 |---|---|---|
 | `unplanned_places` | `places` | places collected but not scheduled yet. On a real instance these are routinely **half** of a trip's places, and they carry coordinates. A hotel is not listed here; it is under `accommodations`. |
-| `unscheduled_reservations` | `reservations` | bookings with no day. Deleting a day detaches its bookings rather than deleting them, so these exist in the wild. |
+| `unscheduled_reservations` | `reservations` | bookings with no day. Deleting a day or shortening a trip detaches the bookings on the days that go rather than deleting them, so these exist in the wild. |
 
 Asking for `places`, `notes` or `reservations` brings `days` along automatically, since that is where they are reported. `?include=notes` returns the day skeleton with its notes and empty place lists, not an empty trip.
 

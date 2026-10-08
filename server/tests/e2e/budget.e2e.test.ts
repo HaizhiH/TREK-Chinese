@@ -228,6 +228,27 @@ describe('Budget e2e (real auth guard + temp SQLite, real budget SQL)', () => {
     }
   });
 
+  it('GET /summary/per-person reads a dollar bill on a euro trip at its booked rate (#2525)', async () => {
+    const hotel = await request(server)
+      .post(`/api/trips/${tripId}/budget`)
+      .set('Cookie', sessionCookie(1))
+      .send({ name: 'Aparthotel Silver', currency: 'USD', exchange_rate: 1.17, payers: [{ user_id: 1, amount: 801.76 }], member_ids: [1, 2] });
+    expect(hotel.status).toBe(201);
+
+    const res = await request(server)
+      .get(`/api/trips/${tripId}/budget/summary/per-person`)
+      .set('Cookie', sessionCookie(1));
+    expect(res.status).toBe(200);
+    // 801.76 USD at 1.17 is 685.26 EUR, half of it each. The summary used to put
+    // 400.88 on both and leave the reader to guess the currency.
+    const row = (uid: number) => res.body.summary.find((r: { user_id: number }) => r.user_id === uid);
+    expect(row(1)).toMatchObject({ total_assigned: 342.63, total_paid: 0, items_count: 1, currency: 'EUR' });
+    expect(row(2)).toMatchObject({ total_assigned: 342.63, total_paid: 0, items_count: 1, currency: 'EUR' });
+
+    const del = await request(server).delete(`/api/trips/${tripId}/budget/${hotel.body.item.id}`).set('Cookie', sessionCookie(1));
+    expect(del.status).toBe(200);
+  });
+
   it('200 on settlement update with permission, persisting the new amount and day', async () => {
     const created = await request(server)
       .post(`/api/trips/${tripId}/budget/settlements`)
@@ -272,5 +293,161 @@ describe('Budget e2e (real auth guard + temp SQLite, real budget SQL)', () => {
       .send({ from_user_id: 2, to_user_id: 1, amount: 15 });
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: 'Settlement not found' });
+  });
+
+  // The VND/AUD report. The rates override above answers null for every base, which is
+  // exactly that server: it never reached the rates provider, so the only rates there
+  // are the ones the browser lends.
+  describe('rows no rate can convert', () => {
+    /** A fresh AUD trip the owner shares with user 2, so these cases never meet the ledger above. */
+    function audTrip(): number {
+      const id = Number(db.prepare("INSERT INTO trips (user_id, title, currency) VALUES (1, 'AUD Trip', 'AUD')").run().lastInsertRowid);
+      db.prepare('INSERT INTO trip_members (trip_id, user_id) VALUES (?, 2)').run(id);
+      canAccessTrip.mockReturnValue({ id, user_id: 1, currency: 'AUD' });
+      return id;
+    }
+    const balanceOf = (body: { balances: { user_id: number; balance: number }[] }, uid: number) =>
+      body.balances.find(b => b.user_id === uid)!.balance;
+
+    it('VND/AUD regression: unfrozen VND bill is listed as unconverted, freeze-rates heals it from the browser quote, settlement nets 489.00, second freeze heals nothing', async () => {
+      const trip = audTrip();
+      const bill = await request(server)
+        .post(`/api/trips/${trip}/budget`)
+        .set('Cookie', sessionCookie(1))
+        .send({ name: 'Pho', currency: 'VND', payers: [{ user_id: 1, amount: 8920000 }], member_ids: [1, 2] });
+      expect(bill.status).toBe(201);
+      expect(bill.body.item.exchange_rate).toBe(1);
+
+      // Left out whole before anything is written: no balance in VND's order of magnitude.
+      const before = await request(server).get(`/api/trips/${trip}/budget/settlement`).set('Cookie', sessionCookie(1));
+      expect(before.status).toBe(200);
+      expect(before.body.currency).toBe('AUD');
+      expect(before.body.unconverted).toEqual({ item_ids: [bill.body.item.id], settlement_ids: [], currencies: ['VND'] });
+      expect(before.body.balances).toEqual([]);
+
+      const fallback_fx = { base: 'AUD', rates: { VND: 18241.3, EUR: 0.61 } };
+      const healed = await request(server)
+        .post(`/api/trips/${trip}/budget/freeze-rates`)
+        .set('Cookie', sessionCookie(1))
+        .send({ fallback_fx });
+      expect(healed.status).toBe(200);
+      expect(healed.body.items.map((i: { id: number; exchange_rate: number }) => [i.id, i.exchange_rate])).toEqual([[bill.body.item.id, 18241.3]]);
+      expect(healed.body).toMatchObject({ settlements: [], unresolved: [] });
+
+      const after = await request(server).get(`/api/trips/${trip}/budget/settlement`).set('Cookie', sessionCookie(1));
+      expect(after.body.unconverted).toEqual({ item_ids: [], settlement_ids: [], currencies: [] });
+      // 8,920,000 VND at 18,241.3 per dollar is 489.00 AUD, half of it user 2's.
+      expect(after.body.finalBudgets.find((f: { user_id: number }) => f.user_id === 1).expenses).toBe(489);
+      expect(balanceOf(after.body, 1)).toBe(244.5);
+      expect(balanceOf(after.body, 2)).toBe(-244.5);
+
+      const again = await request(server)
+        .post(`/api/trips/${trip}/budget/freeze-rates`)
+        .set('Cookie', sessionCookie(1))
+        .send({ fallback_fx: { base: 'AUD', rates: { VND: 25000 } } });
+      expect(again.status).toBe(200);
+      expect(again.body).toEqual({ items: [], settlements: [], unresolved: [] });
+      expect((db.prepare('SELECT exchange_rate FROM budget_items WHERE id = ?').get(bill.body.item.id) as { exchange_rate: number }).exchange_rate).toBe(18241.3);
+    });
+
+    it('POST with fallback_fx freezes at entry', async () => {
+      const trip = audTrip();
+      const res = await request(server)
+        .post(`/api/trips/${trip}/budget`)
+        .set('Cookie', sessionCookie(1))
+        .send({ name: 'Pho', currency: 'VND', total_price: 100000, fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } });
+      expect(res.status).toBe(201);
+      expect(res.body.item.exchange_rate).toBe(18241.3);
+      expect(res.body.item).not.toHaveProperty('fallback_fx');
+    });
+
+    it('POST /settlements in EUR with fallback_fx freezes the transfer', async () => {
+      const trip = audTrip();
+      const res = await request(server)
+        .post(`/api/trips/${trip}/budget/settlements`)
+        .set('Cookie', sessionCookie(1))
+        .send({ from_user_id: 2, to_user_id: 1, amount: 30.5, currency: 'EUR', fallback_fx: { base: 'AUD', rates: { EUR: 0.61 } } });
+      expect(res.status).toBe(201);
+      expect(res.body.settlement).toMatchObject({ currency: 'EUR', exchange_rate: 0.61 });
+
+      // Read back in euros at the same browser quote, the transfer is what was typed.
+      const s = await request(server).get(`/api/trips/${trip}/budget/settlement?base=EUR&base_rate=0.61`).set('Cookie', sessionCookie(1));
+      expect(s.body.currency).toBe('EUR');
+      expect(s.body.unconverted.settlement_ids).toEqual([]);
+      expect(balanceOf(s.body, 2)).toBe(30.5);
+      expect(balanceOf(s.body, 1)).toBe(-30.5);
+    });
+
+    it('GET /settlement?base=EUR answers in AUD without base_rate and in EUR with it', async () => {
+      const trip = audTrip();
+      const dinner = await request(server)
+        .post(`/api/trips/${trip}/budget`)
+        .set('Cookie', sessionCookie(1))
+        .send({ name: 'Dinner', payers: [{ user_id: 1, amount: 100 }], member_ids: [1, 2] });
+      expect(dinner.status).toBe(201);
+
+      const plain = await request(server).get(`/api/trips/${trip}/budget/settlement?base=EUR`).set('Cookie', sessionCookie(1));
+      expect(plain.status).toBe(200);
+      // Trip dollars, labelled as such rather than printed as euros.
+      expect(plain.body.currency).toBe('AUD');
+      expect(balanceOf(plain.body, 2)).toBe(-50);
+
+      const quoted = await request(server).get(`/api/trips/${trip}/budget/settlement?base=EUR&base_rate=0.61`).set('Cookie', sessionCookie(1));
+      expect(quoted.status).toBe(200);
+      expect(quoted.body.currency).toBe('EUR');
+      expect(balanceOf(quoted.body, 2)).toBe(-30.5);
+    });
+
+    it('PUT currency change to VND without a rate stores 1 instead of the USD rate', async () => {
+      const trip = audTrip();
+      const created = await request(server)
+        .post(`/api/trips/${trip}/budget`)
+        .set('Cookie', sessionCookie(1))
+        .send({ name: 'Taxi', currency: 'USD', exchange_rate: 0.65, total_price: 20 });
+      expect(created.body.item.exchange_rate).toBe(0.65);
+
+      const res = await request(server)
+        .put(`/api/trips/${trip}/budget/${created.body.item.id}`)
+        .set('Cookie', sessionCookie(1))
+        .send({ currency: 'VND' });
+      expect(res.status).toBe(200);
+      expect(res.body.item).toMatchObject({ currency: 'VND', exchange_rate: 1 });
+      expect(db.prepare('SELECT currency, exchange_rate FROM budget_items WHERE id = ?').get(created.body.item.id))
+        .toEqual({ currency: 'VND', exchange_rate: 1 });
+    });
+
+    it('freeze-rates 403 without budget_edit, 400 on malformed fallback_fx, other base heals nothing (unresolved VND)', async () => {
+      const trip = audTrip();
+      const bill = await request(server)
+        .post(`/api/trips/${trip}/budget`)
+        .set('Cookie', sessionCookie(1))
+        .send({ name: 'Pho', currency: 'VND', total_price: 100000 });
+      expect(bill.status).toBe(201);
+      const freeze = (body: object) => request(server).post(`/api/trips/${trip}/budget/freeze-rates`).set('Cookie', sessionCookie(1)).send(body);
+
+      checkPermission.mockReturnValue(false);
+      const denied = await freeze({ fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } });
+      expect(denied.status).toBe(403);
+      expect(denied.body).toEqual({ error: 'No permission' });
+      checkPermission.mockReturnValue(true);
+
+      for (const fallback_fx of [{ base: 'aud', rates: { VND: 18241.3 } }, { base: 'AUD', rates: { VND: 0 } }, { base: 'AUD', rates: {} }]) {
+        const malformed = await freeze({ fallback_fx });
+        expect(malformed.status).toBe(400);
+        expect(malformed.body.error).toContain('fallback_fx');
+      }
+
+      // A table against euros would freeze the bill against the wrong currency.
+      const otherBase = await freeze({ fallback_fx: { base: 'EUR', rates: { VND: 27000 } } });
+      expect(otherBase.status).toBe(200);
+      expect(otherBase.body).toEqual({ items: [], settlements: [], unresolved: ['VND'] });
+      expect((db.prepare('SELECT exchange_rate FROM budget_items WHERE id = ?').get(bill.body.item.id) as { exchange_rate: number }).exchange_rate).toBe(1);
+    });
+
+    it('400 on base_rate=abc', async () => {
+      const res = await request(server).get(`/api/trips/${tripId}/budget/settlement?base=EUR&base_rate=abc`).set('Cookie', sessionCookie(1));
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('base_rate');
+    });
   });
 });

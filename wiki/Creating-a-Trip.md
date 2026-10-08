@@ -26,6 +26,8 @@ On desktop, if you leave **both** dates empty, a separate **Day count** field ap
 
 Only the **start** date is linked to the other one. Picking a start date fills the end date to match it, and moving the start date of an already-dated trip shifts the end date so the previous duration is kept. Nothing links them the other way round: you can pick an end date on its own, and the picker's **✕** button clears either field afterwards. A trip can therefore be saved with both dates, with only a start date, with only an end date, or with neither. A trip left with exactly one date gets an undated day grid (7 days by default), just like a date-less one.
 
+The same dialog changes the dates of an existing trip later. The day plans follow their position, so new dates that hold fewer days take the last days of the plan away. When anything is planned on those days, the dialog lists it and asks before it saves; see [Shortening a trip](Day-Plans-and-Notes#shortening-a-trip). To make a trip one day longer without opening the dialog, add a day with the next date in the planner; see [Adding a day](Day-Plans-and-Notes#adding-a-day).
+
 ### Currency
 
 The trip's currency — its **accounting base**. Every expense in the Costs tab is converted into it, and every balance and settle-up suggestion is calculated in it. The dialog pre-fills your own display currency (Settings → General → *Display currency*); if you left that on **Trip currency**, it falls back to **EUR**. An administrator can preset the instance-wide value under Admin → **User Defaults**, which new users inherit until they pick their own. 165 currencies are available.

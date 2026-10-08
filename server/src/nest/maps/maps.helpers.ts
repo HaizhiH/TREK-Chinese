@@ -1,3 +1,4 @@
+import { normalizePlaceWebsite } from '@trek/shared';
 import { readEnv, getAppUrl } from '../../app-config';
 import { stripHtmlTags } from '../common/stripHtmlTags';
 import { haversineMetres } from '../common/geo';
@@ -661,7 +662,7 @@ export function buildOsmDetails(tags: Record<string, string>, osmType: string, o
     }
   }
   return {
-    website: tags['contact:website'] || tags.website || null,
+    website: normalizePlaceWebsite(tags['contact:website']) ?? normalizePlaceWebsite(tags.website),
     phone: tags['contact:phone'] || tags.phone || null,
     opening_hours,
     open_now,

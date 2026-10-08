@@ -19,11 +19,12 @@ Under the strict guard, these ranges are blocked whatever `ALLOW_INTERNAL_NETWOR
 | Range | Description |
 |---|---|
 | `127.0.0.0/8`, `::1` | Loopback |
-| `0.0.0.0/8` | Unspecified |
+| `0.0.0.0/8`, `::` | Unspecified |
 | `169.254.0.0/16`, `fe80::/10` | Link-local / cloud metadata endpoints |
-| `::ffff:127.x.x.x`, `::ffff:169.254.x.x` | IPv4-mapped loopback and link-local |
+| `fd00:ec2::/32`, `100.100.100.200`, `100.100.100.100` | AWS (IMDSv6) and Alibaba Cloud metadata. They sit inside the ULA and CGNAT ranges below and stay blocked when those open up |
+| IPv4-mapped, IPv4-compatible and NAT64/6to4/Teredo forms of the above | e.g. `::ffff:127.0.0.1`, `::169.254.169.254`, `64:ff9b::a9fe:a9fe` |
 
-The IPv6 link-local rule covers the whole `fe80::/10` prefix (`fe80:` to `febf:`), under the relaxed guard as well.
+The IPv6 link-local rule covers the whole `fe80::/10` prefix (`fe80:` to `febf:`). The link-local and metadata rows hold under the relaxed guard as well.
 
 The one way past this table is `ALLOW_LINK_LOCAL_IPS`, for a single IPv4 link-local address, see [below](#a-link-local-address-you-need).
 
@@ -41,7 +42,7 @@ The one way past this table is `ALLOW_LINK_LOCAL_IPS`, for a single IPv4 link-lo
 
 The hostname `localhost` is matched at the hostname stage too, but it normally resolves to a loopback address (`127.0.0.1` or `::1`), which the always-blocked loopback rule catches first, so under the strict guard it is blocked no matter how `ALLOW_INTERNAL_NETWORK` is set. On a host that maps `localhost` somewhere else, the hostname rule still applies and it stays blocked unless `ALLOW_INTERNAL_NETWORK=true`. The relaxed guard allows `localhost` outright, which is what makes a local Ollama the supported default for AI Parsing.
 
-`*.local` and `*.internal` hostnames are permitted when `ALLOW_INTERNAL_NETWORK=true`: the guard still resolves them to an IP and enforces all IP-level rules, so any such hostname that resolves to a loopback or link-local address remains blocked regardless.
+`*.local` and `*.internal` hostnames are permitted when `ALLOW_INTERNAL_NETWORK=true`: the guard still resolves them to an IP and enforces all IP-level rules, so TREK never connects to a loopback or link-local address such a hostname resolves to, and a hostname with no other address remains blocked regardless.
 
 ## When to enable
 
@@ -71,7 +72,9 @@ Several addresses are separated by commas. The list is read at startup, so resta
 
 ## DNS rebinding protection
 
-Even with `ALLOW_INTERNAL_NETWORK=true`, TREK pins the DNS resolution to prevent rebinding attacks. When the guard checks a URL, it resolves the hostname once and records the IP. The outbound connection is then made directly to that IP using a pinned dispatcher (via undici), so the hostname cannot re-resolve to a different address between the check and the actual request.
+Even with `ALLOW_INTERNAL_NETWORK=true`, TREK pins the DNS resolution to prevent rebinding attacks. When the guard checks a URL, it resolves the hostname once and records the addresses it may use. The outbound connection is then made directly to those addresses using a pinned dispatcher (via undici), so the hostname cannot re-resolve to a different address between the check and the actual request.
+
+A hostname can resolve to several addresses, and a LAN DNS server often hands out a host's IPv6 link-local address (`fe80::`) next to its IPv4 one. TREK never connects to an address the guard blocks: it leaves that address out and connects over the ones that remain. Only a hostname whose addresses are all blocked is refused. Under the strict guard, a private address among the rest still needs `ALLOW_INTERNAL_NETWORK=true`.
 
 ## Audit log
 

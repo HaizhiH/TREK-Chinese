@@ -3,6 +3,10 @@ import type { TranslationStrings } from '../types';
 const shared: TranslationStrings = {
   'shared.expired': 'Link verlopen of ongeldig',
   'shared.expiredHint': 'Deze gedeelde reislink is niet meer actief.',
+  'shared.loadFailed': 'Deze reis kon niet worden geladen',
+  'shared.loadFailedHint':
+    'Dat betekent niet dat de link is verlopen. Controleer je verbinding en probeer het zo nog eens.',
+  'shared.retry': 'Opnieuw proberen',
   'shared.readOnly': 'Alleen-lezen weergave',
   'shared.tabPlan': 'Plan',
   'shared.tabBookings': 'Boekingen',

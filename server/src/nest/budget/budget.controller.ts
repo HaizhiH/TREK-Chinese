@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  HttpCode,
   HttpException,
   Param,
   Post,
@@ -28,6 +29,8 @@ import {
   BudgetReorderCategoriesDto,
   BudgetCreateSettlementDto,
   BudgetUpdateSettlementDto,
+  BudgetFreezeRatesDto,
+  BudgetSettlementQueryDto,
 } from './budget.dto';
 
 /**
@@ -37,8 +40,9 @@ import {
  * every handler verifies trip access (404); mutations check 'budget_edit' (403);
  * create is 201, the rest 200; bespoke 404 bodies reproduced; mutations
  * broadcast over WebSocket with the forwarded X-Socket-Id. Static sub-routes
- * (summary, settlement, reorder/*) are declared before /:id so they win over the
- * param. Updating total_price on a reservation-linked item syncs the price back.
+ * (summary, settlement, freeze-rates, reorder/*) are declared before /:id so they
+ * win over the param. Updating total_price on a reservation-linked item syncs the
+ * price back.
  *
  * Bodies are validated against the @trek/shared budget schemas via budget.dto.ts
  * (global ZodValidationPipe). This replaced the legacy bespoke 400s ('Name is
@@ -62,18 +66,20 @@ export class BudgetController {
   }
 
   @Get('summary/per-person')
-  perPerson(@CurrentUser() user: User, @Param('tripId') tripId: string) {
-    return { summary: this.budget.perPersonSummary(tripId) };
+  async perPerson(@CurrentUser() user: User, @Param('tripId') tripId: string) {
+    return { summary: await this.budget.perPersonSummary(tripId) };
   }
 
+  // `base_rate` is the caller's own quote for the display currency (units per 1 trip
+  // currency), used only when the server has none; a malformed one is a 400.
   @Get('settlement')
   settlement(
     @CurrentUser() user: User,
     @Trip() trip: TripAccess,
     @Param('tripId') tripId: string,
-    @Query('base') base?: string,
+    @Query() query: BudgetSettlementQueryDto,
   ) {
-    return this.budget.settlement(tripId, base, trip.currency || 'EUR');
+    return this.budget.settlement(tripId, query.base, trip.currency || 'EUR', query.base_rate);
   }
 
   @Get('settlements')
@@ -91,7 +97,10 @@ export class BudgetController {
   ) {
     const settlement = await this.budget.createSettlement(
       tripId,
-      { from_user_id: body.from_user_id, to_user_id: body.to_user_id, amount: body.amount, currency: body.currency, settled_at: body.settled_at },
+      {
+        from_user_id: body.from_user_id, to_user_id: body.to_user_id, amount: body.amount,
+        currency: body.currency, settled_at: body.settled_at, fallback_fx: body.fallback_fx,
+      },
       user.id,
     );
     // A party who is not on this trip gets the same answer as a settlement that
@@ -118,6 +127,7 @@ export class BudgetController {
       amount: body.amount,
       currency: body.currency,
       settled_at: body.settled_at,
+      fallback_fx: body.fallback_fx,
     });
     if (!settlement) {
       throw new HttpException({ error: 'Settlement not found' }, 404);
@@ -139,6 +149,33 @@ export class BudgetController {
     }
     this.budget.broadcast(tripId, 'budget:settlement-deleted', { settlementId: Number(settlementId) }, socketId);
     return { success: true };
+  }
+
+  /**
+   * Freeze a rate onto every foreign row that has none frozen yet, the ones the
+   * settlement lists as `unconverted` and the ones it still converts at today's rate:
+   * the server's own rate first, `fallback_fx` (the browser's) for a currency it cannot
+   * quote. A frozen row, a row in the trip currency and a row without a currency are
+   * never touched. The same service call as the freeze_budget_rates MCP tool, which
+   * lends no rates. 409 when the trip currency changed while the rates were fetched;
+   * nothing is written then.
+   */
+  @RequirePermission('budget_edit')
+  @Post('freeze-rates')
+  @HttpCode(200)
+  async freezeRates(
+    @CurrentUser() user: User,
+    @Param('tripId') tripId: string,
+    @Body() body: BudgetFreezeRatesDto,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    const healed = await this.budget.freezeMissingRates(tripId, body.fallback_fx);
+    if (!healed) {
+      throw new HttpException({ error: 'The trip currency changed. Reload and try again.' }, 409);
+    }
+    for (const item of healed.items) this.budget.broadcast(tripId, 'budget:updated', { item }, socketId);
+    for (const settlement of healed.settlements) this.budget.broadcast(tripId, 'budget:settlement-updated', { settlement }, socketId);
+    return healed;
   }
 
   @RequirePermission('budget_edit')

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HttpException } from '@nestjs/common';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { BudgetController } from '../../../src/nest/budget/budget.controller';
+import { TRIP_PERMISSION_KEY } from '../../../src/nest/permissions/trip-access.guard';
 import type { BudgetService } from '../../../src/nest/budget/budget.service';
 import type { User } from '../../../src/types';
 
@@ -49,16 +51,16 @@ describe('BudgetController (parity with the legacy /api/trips/:tripId/budget rou
     expect(new BudgetController(svc).list(user, '5')).toEqual({ items: [{ id: 1 }] });
   });
 
-  it('GET /summary/per-person + /settlement delegate', () => {
+  it('GET /summary/per-person + /settlement delegate', async () => {
     const settlement = vi.fn().mockReturnValue({ transfers: [] });
     const svc = makeService({
       perPersonSummary: vi.fn().mockReturnValue([{ userId: 1, owes: 10 }]),
       settlement,
     } as Partial<BudgetService>);
-    expect(new BudgetController(svc).perPerson(user, '5')).toEqual({ summary: [{ userId: 1, owes: 10 }] });
+    expect(await new BudgetController(svc).perPerson(user, '5')).toEqual({ summary: [{ userId: 1, owes: 10 }] });
     // A trip with no currency set falls back to EUR rather than passing undefined on.
-    expect(new BudgetController(svc).settlement(user, { id: 5, user_id: 42 } as never, '5')).toEqual({ transfers: [] });
-    expect(settlement).toHaveBeenLastCalledWith('5', undefined, 'EUR');
+    expect(new BudgetController(svc).settlement(user, { id: 5, user_id: 42 } as never, '5', {})).toEqual({ transfers: [] });
+    expect(settlement).toHaveBeenLastCalledWith('5', undefined, 'EUR', undefined);
   });
 
   it('GET /settlement forwards the base query and the trip currency', () => {
@@ -67,8 +69,16 @@ describe('BudgetController (parity with the legacy /api/trips/:tripId/budget rou
       verifyTripAccess: vi.fn().mockReturnValue({ id: 5, user_id: 1, currency: 'USD' }),
       settlement,
     } as Partial<BudgetService>);
-    new BudgetController(svc).settlement(user, tripRow, '5', 'GBP');
-    expect(settlement).toHaveBeenCalledWith('5', 'GBP', 'USD');
+    new BudgetController(svc).settlement(user, tripRow, '5', { base: 'GBP' });
+    expect(settlement).toHaveBeenCalledWith('5', 'GBP', 'USD', undefined);
+  });
+
+  it('GET /settlement forwards base and base_rate', () => {
+    const settlement = vi.fn().mockReturnValue({ transfers: [] });
+    const svc = makeService({ settlement } as Partial<BudgetService>);
+    // The Zod pipe has coerced base_rate to a number by the time the handler runs.
+    new BudgetController(svc).settlement(user, tripRow, '5', { base: 'EUR', base_rate: 0.61 });
+    expect(settlement).toHaveBeenCalledWith('5', 'EUR', 'USD', 0.61);
   });
 
   describe('settlements ledger', () => {
@@ -90,6 +100,18 @@ describe('BudgetController (parity with the legacy /api/trips/:tripId/budget rou
       expect(res).toEqual({ settlement: { id: 3, amount: 0 } });
       expect(createSettlement).toHaveBeenCalledWith('5', { from_user_id: 1, to_user_id: 2, amount: 0, currency: 'USD', settled_at: '2026-01-05' }, user.id);
       expect(broadcast).toHaveBeenCalledWith('5', 'budget:settlement-created', { settlement: { id: 3, amount: 0 } }, 'sock');
+    });
+
+    it('POST and PUT /settlements forward fallback_fx', async () => {
+      const fallback_fx = { base: 'AUD', rates: { EUR: 0.61 } };
+      const createSettlement = vi.fn().mockResolvedValue({ id: 3 });
+      const updateSettlement = vi.fn().mockResolvedValue({ id: 3 });
+      const svc = makeService({ createSettlement, updateSettlement } as Partial<BudgetService>);
+      const body = { from_user_id: 1, to_user_id: 2, amount: 10, currency: 'EUR', fallback_fx };
+      await new BudgetController(svc).createSettlement(user, '5', body);
+      expect(createSettlement).toHaveBeenCalledWith('5', expect.objectContaining({ currency: 'EUR', fallback_fx }), user.id);
+      await new BudgetController(svc).updateSettlement(user, '5', '3', body);
+      expect(updateSettlement).toHaveBeenCalledWith('3', '5', expect.objectContaining({ currency: 'EUR', fallback_fx }));
     });
 
     it('DELETE /settlements/:id 404 when missing', () => {
@@ -122,6 +144,43 @@ describe('BudgetController (parity with the legacy /api/trips/:tripId/budget rou
       expect(res).toEqual({ settlement: { id: 7, from_user_id: 2, to_user_id: 1, amount: 15 } });
       expect(updateSettlement).toHaveBeenCalledWith('7', '5', { from_user_id: 2, to_user_id: 1, amount: 15, currency: 'USD', settled_at: '2026-01-06' });
       expect(broadcast).toHaveBeenCalledWith('5', 'budget:settlement-updated', { settlement: { id: 7, from_user_id: 2, to_user_id: 1, amount: 15 } }, 'sock');
+    });
+  });
+
+  describe('POST /freeze-rates', () => {
+    const fallback_fx = { base: 'AUD', rates: { VND: 18241.3 } };
+
+    it('forwards fallback_fx and broadcasts per row', async () => {
+      const healed = {
+        items: [{ id: 7, exchange_rate: 18241.3 }, { id: 8, exchange_rate: 18241.3 }],
+        settlements: [{ id: 3, exchange_rate: 18241.3 }],
+        unresolved: ['XAF'],
+      };
+      const freezeMissingRates = vi.fn().mockResolvedValue(healed);
+      const broadcast = vi.fn();
+      const svc = makeService({ freezeMissingRates, broadcast } as Partial<BudgetService>);
+      expect(await new BudgetController(svc).freezeRates(user, '5', { fallback_fx }, 'sock')).toEqual(healed);
+      expect(freezeMissingRates).toHaveBeenCalledWith('5', fallback_fx);
+      expect(broadcast.mock.calls).toEqual([
+        ['5', 'budget:updated', { item: healed.items[0] }, 'sock'],
+        ['5', 'budget:updated', { item: healed.items[1] }, 'sock'],
+        ['5', 'budget:settlement-updated', { settlement: healed.settlements[0] }, 'sock'],
+      ]);
+    });
+
+    it('answers 409 and broadcasts nothing when the trip currency changed meanwhile', async () => {
+      const broadcast = vi.fn();
+      const svc = makeService({ freezeMissingRates: vi.fn().mockResolvedValue(null), broadcast } as Partial<BudgetService>);
+      expect(await thrownAsync(() => new BudgetController(svc).freezeRates(user, '5', {}))).toEqual({
+        status: 409, body: { error: 'The trip currency changed. Reload and try again.' },
+      });
+      expect(broadcast).not.toHaveBeenCalled();
+    });
+
+    it('requires budget_edit like freeze_budget_rates, and answers 200', () => {
+      const handler = BudgetController.prototype.freezeRates;
+      expect(Reflect.getMetadata(TRIP_PERMISSION_KEY, handler)).toBe('budget_edit');
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(200);
     });
   });
 

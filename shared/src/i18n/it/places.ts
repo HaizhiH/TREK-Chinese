@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Note della prenotazione, numero di conferma...',
   'places.mapsSearchPlaceholder': 'Cerca luoghi...',
   'places.mapsSearchError': 'Impossibile cercare i luoghi.',
+  'places.searchGoogleInstead': 'Non è il posto giusto? Cerca su Google',
   'places.loadingDetails': 'Caricamento dettagli del luogo…',
   'places.osmHint':
     'Uso della ricerca OpenStreetMap (senza foto, orari di apertura o valutazioni). Aggiungi una chiave API Google nelle impostazioni per i dettagli completi.',

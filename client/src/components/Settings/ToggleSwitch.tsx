@@ -1,8 +1,12 @@
 import React from 'react'
 
-export default function ToggleSwitch({ on, onToggle, label }: { on: boolean; onToggle: () => void; label?: string }) {
+/**
+ * `describedBy` names the element that explains the switch, for a switch whose label alone
+ * does not say what flipping it changes.
+ */
+export default function ToggleSwitch({ on, onToggle, label, describedBy }: { on: boolean; onToggle: () => void; label?: string; describedBy?: string }) {
   return (
-    <button type="button" onClick={onToggle} aria-pressed={on} aria-label={label}
+    <button type="button" onClick={onToggle} aria-pressed={on} aria-label={label} aria-describedby={describedBy}
       style={{
         position: 'relative', width: 44, height: 24, minWidth: 44, flexShrink: 0,
         borderRadius: 12, border: 'none', padding: 0, cursor: 'pointer',

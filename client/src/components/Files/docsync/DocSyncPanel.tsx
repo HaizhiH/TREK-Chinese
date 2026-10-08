@@ -54,11 +54,12 @@ export default function DocSyncPanel({
   const activeProvider = active ? sync.providers.find(p => p.id === active.providerId) : undefined
 
   // Follow the list: a freshly bound store should be the one on screen, and a
-  // removed one must not leave the detail column pointing at nothing.
+  // removed one must not leave the detail column pointing at nothing. The pick
+  // is read when the update runs, not from this render: a store clicked before
+  // the effect got its turn was otherwise switched straight back.
   useEffect(() => {
-    if (sync.links.length === 0) setSelected(null)
-    else if (!sync.links.some(l => l.id === selected)) setSelected(sync.links[0].id)
-  }, [sync.links, selected])
+    setSelected(prev => (sync.links.some(l => l.id === prev) ? prev : (sync.links[0]?.id ?? null)))
+  }, [sync.links])
 
   const attention = ATTENTION_STATES.reduce((n, k) => n + (sync.itemCounts[k] ?? 0), 0)
 

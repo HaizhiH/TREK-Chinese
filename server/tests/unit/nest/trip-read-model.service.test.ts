@@ -158,31 +158,31 @@ function ownerlessDbs(): DatabaseService {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('getTripSummary guards', () => {
-  it('TRIP-READ-001: returns null for a missing trip instead of throwing', () => {
+  it('TRIP-READ-001: returns null for a missing trip instead of throwing', async () => {
     // The MCP get_trip_summary tool hands over whatever id the model produced, so
     // an unknown id has to come back as an empty answer; a throw there surfaces as
     // a tool error rather than "no such trip".
-    expect(svc.getTripSummary(99999)).toBeNull();
-    expect(svc.getTripSummary(99999, 1)).toBeNull();
+    expect(await svc.getTripSummary(99999)).toBeNull();
+    expect(await svc.getTripSummary(99999, 1)).toBeNull();
   });
 
-  it('TRIP-READ-002: returns null when the owner row cannot be read', () => {
+  it('TRIP-READ-002: returns null when the owner row cannot be read', async () => {
     const { user: owner } = createUser(testDb);
     const trip = createTrip(testDb, owner.id);
 
     // Trip row and owner id are two separate SELECTs; if the second one comes back
     // empty (trip deleted in between) the guard has to stop. Without it listMembers
     // runs with an undefined owner id and the summary reports an ownerless trip.
-    expect(buildReadModel(ownerlessDbs()).getTripSummary(trip.id, owner.id)).toBeNull();
+    expect(await buildReadModel(ownerlessDbs()).getTripSummary(trip.id, owner.id)).toBeNull();
 
     // Same trip through the real connection still aggregates — the null above is
     // the missing owner row, not a broken fixture.
-    expect(svc.getTripSummary(trip.id, owner.id)).not.toBeNull();
+    expect(await svc.getTripSummary(trip.id, owner.id)).not.toBeNull();
   });
 });
 
 describe('getTripSummary shaping', () => {
-  it('TRIP-READ-003: folds a falsy total_price into the budget total instead of poisoning it', () => {
+  it('TRIP-READ-003: folds a falsy total_price into the budget total instead of poisoning it', async () => {
     const { user: owner } = createUser(testDb);
     const trip = createTrip(testDb, owner.id);
     addBudgetItem(trip.id, 'Dinner', 40);
@@ -193,13 +193,45 @@ describe('getTripSummary shaping', () => {
     // the offline clients both render as an empty budget.
     addBudgetItem(trip.id, 'Free walking tour', 0);
 
-    const summary = svc.getTripSummary(trip.id, owner.id)!;
+    const summary = (await svc.getTripSummary(trip.id, owner.id))!;
     expect(summary.budget.item_count).toBe(2);
     expect(summary.budget.total).toBe(40);
     expect(summary.budget.currency).toBe('EUR');
   });
 
-  it('TRIP-READ-004: counts only checked packing items, not the whole list', () => {
+  it('TRIP-READ-008: totals a foreign-currency bill in the trip currency, at its booked rate (#2525)', async () => {
+    const { user: owner } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    addBudgetItem(trip.id, 'Dinner', 100);
+    // 801.76 USD booked when a euro bought 1.17 dollars: 685.26 EUR of trip money. The
+    // summary used to add the 801.76 to the euros and report 901.76 EUR.
+    testDb.prepare("INSERT INTO budget_items (trip_id, category, name, total_price, currency, exchange_rate) VALUES (?, 'accommodation', 'Aparthotel Silver', 801.76, 'USD', 1.17)")
+      .run(trip.id);
+
+    const summary = (await svc.getTripSummary(trip.id, owner.id))!;
+    expect(summary.budget.total).toBe(785.26);
+    expect(summary.budget.by_category).toEqual({ food: 100, accommodation: 685.26 });
+    expect(summary.budget.currency).toBe('EUR');
+    // Both rows convert, so none is reported as left out of the total.
+    expect(summary.budget.unconverted_item_ids).toEqual([]);
+  });
+
+  it('TRIP-READ-009: totals a trip saved without a currency in euros, the default the rest of the app reads it in (#2525)', async () => {
+    const { user: owner } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    testDb.prepare('UPDATE trips SET currency = NULL WHERE id = ?').run(trip.id);
+    addBudgetItem(trip.id, 'Dinner', 100);
+    // 117.33 USD booked at 1.1733 dollars to the euro is 100 EUR of trip money.
+    testDb.prepare("INSERT INTO budget_items (trip_id, category, name, total_price, currency, exchange_rate) VALUES (?, 'transport', 'Taxi', 117.33, 'USD', 1.1733)")
+      .run(trip.id);
+
+    const summary = (await svc.getTripSummary(trip.id, owner.id))!;
+    expect(summary.budget.total).toBe(200);
+    expect(summary.budget.by_category).toEqual({ food: 100, transport: 100 });
+    expect(summary.budget.currency).toBeNull();
+  });
+
+  it('TRIP-READ-004: counts only checked packing items, not the whole list', async () => {
     const { user: owner } = createUser(testDb);
     const trip = createTrip(testDb, owner.id);
     addPackingItem(trip.id, 'Socks', 1);
@@ -208,7 +240,7 @@ describe('getTripSummary shaping', () => {
 
     // total and checked come from the same array; if the filter is ever widened the
     // packing progress the summary reports jumps to 100% while items are still open.
-    const summary = svc.getTripSummary(trip.id, owner.id)!;
+    const summary = (await svc.getTripSummary(trip.id, owner.id))!;
     expect(summary.packing.total).toBe(3);
     expect(summary.packing.checked).toBe(2);
   });
@@ -254,7 +286,7 @@ describe('bundle shaping', () => {
 });
 
 describe('private packing items stay viewer-scoped (#858)', () => {
-  it("TRIP-READ-007: neither summary nor bundle leaks another member's private item", () => {
+  it("TRIP-READ-007: neither summary nor bundle leaks another member's private item", async () => {
     const { user: owner } = createUser(testDb);
     const { user: viewer } = createUser(testDb);
     const trip = createTrip(testDb, owner.id, { start_date: '2025-06-01', end_date: '2025-06-02' });
@@ -267,7 +299,7 @@ describe('private packing items stay viewer-scoped (#858)', () => {
     // ONLY thing filtering the list. If either call site loses it, listItems falls
     // back to the unfiltered query and the surprise the owner is carrying shows up
     // in the other member's MCP summary and in their offline cache.
-    const asViewer = svc.getTripSummary(trip.id, viewer.id)!;
+    const asViewer = (await svc.getTripSummary(trip.id, viewer.id))!;
     expect(asViewer.packing.items.map((i: any) => i.name)).toEqual(['Tent']);
     expect(asViewer.packing.total).toBe(1);
 
@@ -276,7 +308,7 @@ describe('private packing items stay viewer-scoped (#858)', () => {
 
     // The owner still sees their own private item through both paths, so the
     // assertions above are the filter working, not an empty fixture.
-    expect(svc.getTripSummary(trip.id, owner.id)!.packing.items.map((i: any) => i.name)).toEqual(['Ring', 'Tent']);
+    expect((await svc.getTripSummary(trip.id, owner.id))!.packing.items.map((i: any) => i.name)).toEqual(['Ring', 'Tent']);
     expect((svc.bundle(String(trip.id), { user_id: owner.id }, owner.id) as any)
       .packingItems.map((i: any) => i.name)).toEqual(['Ring', 'Tent']);
   });

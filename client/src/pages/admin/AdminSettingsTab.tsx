@@ -8,6 +8,7 @@ import CustomSelect from '../../components/shared/CustomSelect'
 import GoogleOptions from './GoogleOptions'
 import ProviderBlock from './ProviderBlock'
 import TrekApiCard from './TrekApiCard'
+import { placesGoogleOnlyHint } from '../../utils/placeSource'
 import type { TranslationFn } from '../../types'
 import type { useAdmin } from './useAdmin'
 
@@ -26,6 +27,7 @@ export default function AdminSettingsTab({ admin, t }: AdminSettingsTabProps): R
     placesAutocompleteEnabled, setPlacesAutocompleteEnabledState,
     placesDetailsEnabled, setPlacesDetailsEnabledState,
     placesEnrichEnabled, setPlacesEnrichEnabledState,
+    placesGoogleOnly, handleTogglePlacesGoogleOnly,
     transitProvider, setTransitProviderState,
     transitGoogleKeySource, setTransitGoogleKeySource,
     placeShadowEnabled, setPlaceShadowEnabledState,
@@ -627,8 +629,8 @@ export default function AdminSettingsTab({ admin, t }: AdminSettingsTabProps): R
             <GoogleOptions
               title={t('admin.googleOptions')}
               summary={t('admin.googleOptionsSummary', {
-                on: [placesPhotosEnabled, placesAutocompleteEnabled, placesDetailsEnabled, placesEnrichEnabled].filter(Boolean).length,
-                total: 4,
+                on: [placesPhotosEnabled, placesAutocompleteEnabled, placesDetailsEnabled, placesEnrichEnabled, placesGoogleOnly].filter(Boolean).length,
+                total: 5,
               })}
             >
               <div className="divide-y divide-edge-faint">
@@ -697,6 +699,22 @@ export default function AdminSettingsTab({ admin, t }: AdminSettingsTabProps): R
                       setPlacesEnrichEnabled(next)
                       try { await adminApi.updatePlacesEnrich(next) } catch { setPlacesEnrichEnabledState(!next); setPlacesEnrichEnabled(!next) }
                     }}
+                  />
+                </div>
+
+                {/* The one row here that is about where a search goes rather than
+                    what the key may be spent on. Without a key, or with Amap or
+                    OpenStreetMap holding the slot, it is a promise the search
+                    cannot keep, and the subtitle says so. */}
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-content-secondary">{t('admin.placesGoogleOnly.title')}</p>
+                    <p className="text-xs text-content-faint mt-0.5">{t(placesGoogleOnlyHint(hasMapsKey, placesProvider))}</p>
+                  </div>
+                  <ToggleSwitch
+                    on={placesGoogleOnly}
+                    label={t('admin.placesGoogleOnly.title')}
+                    onToggle={handleTogglePlacesGoogleOnly}
                   />
                 </div>
               </div>

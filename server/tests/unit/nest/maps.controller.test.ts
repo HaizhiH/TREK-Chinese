@@ -49,14 +49,20 @@ describe('MapsController (parity with the legacy /api/maps route)', () => {
       const search = vi.fn().mockResolvedValue({ places: [], source: 'osm' });
       const res = await makeController({ search }).search(user, { query: 'berlin' }, 'de');
       expect(res).toEqual({ places: [], source: 'osm' });
-      expect(search).toHaveBeenCalledWith(3, 'berlin', 'de', undefined);
+      expect(search).toHaveBeenCalledWith(3, 'berlin', 'de', undefined, undefined);
+    });
+
+    it('forwards the provider a search is sent to alone', async () => {
+      const search = vi.fn().mockResolvedValue({ places: [], source: 'google' });
+      await makeController({ search }).search(user, { query: 'x', provider: 'google' }, 'de');
+      expect(search).toHaveBeenCalledWith(3, 'x', 'de', undefined, 'google');
     });
 
     it('forwards a valid locationBias to the service', async () => {
       const search = vi.fn().mockResolvedValue({ places: [], source: 'osm' });
       const bias = { lat: 1, lng: 2, radius: 5000 };
       await makeController({ search }).search(user, { query: 'x', locationBias: bias }, 'de');
-      expect(search).toHaveBeenCalledWith(3, 'x', 'de', bias);
+      expect(search).toHaveBeenCalledWith(3, 'x', 'de', bias, undefined);
     });
 
     it('maps a service error to its status + message', async () => {

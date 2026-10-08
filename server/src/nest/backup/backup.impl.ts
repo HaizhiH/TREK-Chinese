@@ -4,7 +4,8 @@ import path from 'path';
 import { pipeline } from 'node:stream/promises';
 import { readEnv } from '../../app-config';
 import fs from 'fs';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
+import { openDatabase } from '../../db/connection';
 import { db, closeDb, reinitialize } from '../../db/database';
 import { VALID_INTERVALS } from './auto-backup.settings';
 import { invalidatePermissionsCache } from '../permissions/permissions-cache';
@@ -436,7 +437,7 @@ export async function restoreFromZip(storage: StorageService, zipPath: string): 
 
     let uploadedDb: InstanceType<typeof Database> | null = null;
     try {
-      uploadedDb = new Database(extractedDb, { readonly: true });
+      uploadedDb = openDatabase(extractedDb, { readonly: true });
 
       const integrityResult = uploadedDb.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
       if (integrityResult.integrity_check !== 'ok') {

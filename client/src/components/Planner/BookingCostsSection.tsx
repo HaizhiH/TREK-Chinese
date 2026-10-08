@@ -33,6 +33,10 @@ export function BookingCostsSection({ reservationId, placeId = null, hintKey = '
   const trip = useTripStore(s => s.trip)
   const displayCurrency = useSettingsStore(s => s.settings.default_currency)
   const base = (displayCurrency || trip?.currency || 'EUR').toUpperCase()
+  // An amount is printed in its own currency, unconverted. One saved without a
+  // currency is in the trip's own (#2525), which is how Costs reads it; labelling
+  // it with the display currency turned a 120 EUR deposit into $120.00.
+  const ownCurrency = (currency: string | null | undefined) => currency || trip?.currency || base
   const linked = reservationId
     ? budgetItems.find(i => i.reservation_id === reservationId)
     : placeId
@@ -54,7 +58,7 @@ export function BookingCostsSection({ reservationId, placeId = null, hintKey = '
             <div className="text-content" style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 600 }}>{t(meta.labelKey)}</div>
             <div className="text-content-faint" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))' }}>{t(hintKey)}</div>
           </div>
-          <span className="text-content" style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 700, flexShrink: 0 }}>{formatMoney(pendingExpense.total_price, pendingExpense.currency || base, locale)}</span>
+          <span className="text-content" style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 700, flexShrink: 0 }}>{formatMoney(pendingExpense.total_price, ownCurrency(pendingExpense.currency), locale)}</span>
         </div>
       </div>
     )
@@ -72,7 +76,7 @@ export function BookingCostsSection({ reservationId, placeId = null, hintKey = '
             <div className="text-content" style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{linked.name}</div>
             <div className="text-content-faint" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))' }}>{t(meta.labelKey)}</div>
           </div>
-          <span className="text-content" style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 700, flexShrink: 0 }}>{formatMoney(linked.total_price, linked.currency || base, locale)}</span>
+          <span className="text-content" style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 700, flexShrink: 0 }}>{formatMoney(linked.total_price, ownCurrency(linked.currency), locale)}</span>
           <button type="button" onClick={() => onEdit(linked)} title={t('common.edit')} className="text-content-muted border border-edge bg-surface-card" style={{ display: 'inline-flex', padding: 7, borderRadius: 8, cursor: 'pointer' }}><Pencil size={13} /></button>
           <button type="button" onClick={() => onRemove(linked)} title={t('reservations.removeExpense')} className="text-content-muted border border-edge bg-surface-card" style={{ display: 'inline-flex', padding: 7, borderRadius: 8, cursor: 'pointer' }}><Trash2 size={13} /></button>
         </div>

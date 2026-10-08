@@ -48,6 +48,9 @@ const addonsStub = () => ({
   // Fail-open, unlike its three neighbours — see AddonsService.getPlacesEnrich.
   getPlacesEnrich: vi.fn(() => ({ enabled: true })),
   updatePlacesEnrich: vi.fn((enabled: boolean) => ({ enabled })),
+  // Fail-closed with nothing to backfill, like the shadow log.
+  getPlacesGoogleOnly: vi.fn(() => ({ enabled: false })),
+  updatePlacesGoogleOnly: vi.fn((enabled: boolean) => ({ enabled })),
   // Fail-open too, and the only switch here about egress rather than spending.
   getCollabFeatures: vi.fn(() => ({ chat: false })),
   updateCollabFeatures: vi.fn(() => ({ features: { chat: true }, changed: true })),
@@ -319,7 +322,14 @@ describe('AdminController feature toggles', () => {
     expect(c.getPlacesDetails()).toEqual({ enabled: false });
     expect(c.getPlaceShadow()).toEqual({ enabled: false });
     expect(c.getPlacesEnrich()).toEqual({ enabled: true });
+    expect(c.getPlacesGoogleOnly()).toEqual({ enabled: false });
     expect(c.getCollabFeatures()).toEqual({ chat: false });
+  });
+
+  it('ADMIN-TOGGLE-002d places-google-only updates through the addons domain and is audited', () => {
+    const c = adminCtl(svc());
+    expect(c.updatePlacesGoogleOnly(user, { enabled: true }, req)).toEqual({ enabled: true });
+    expect(writeAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'admin.places_google_only', details: { enabled: true } }));
   });
 
   it('ADMIN-TOGGLE-002b places-enrich updates through the addons domain and is audited', () => {

@@ -3,6 +3,10 @@ import type { TranslationStrings } from '../types';
 const shared: TranslationStrings = {
   'shared.expired': 'Enlace expirado o inválido',
   'shared.expiredHint': 'Este enlace de viaje compartido ya no está activo.',
+  'shared.loadFailed': 'No se pudo cargar este viaje',
+  'shared.loadFailedHint':
+    'Eso no significa que el enlace haya caducado. Comprueba tu conexión y vuelve a intentarlo en un momento.',
+  'shared.retry': 'Reintentar',
   'shared.readOnly': 'Vista de solo lectura',
   'shared.tabPlan': 'Plan',
   'shared.tabBookings': 'Reservas',

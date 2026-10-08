@@ -43,6 +43,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
   const { t, trip, can } = planner
   const canEdit = can('day_edit', trip)
   const editing = shell.mode === 'edit' && canEdit
+  const canEditPlaces = can('place_edit', trip)
   // Per-segment travel mode (#1281): tap a connector → pick the leg's mode.
   const legMenu = useContextMenu()
   const modeIcon = (key: string) => (key === 'walking' ? Footprints : key.startsWith('plugin:') ? Zap : Car)
@@ -202,7 +203,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                     reorder={reorderFor(row.item)}
                     drag={dragFor(row)}
                     onOpen={() => openPlace(row.assignment)}
-                    onEdit={() => tl.editAssignment(row.assignment)}
+                    onEdit={canEditPlaces ? () => tl.editAssignment(row.assignment) : undefined}
                     onRemove={() => tl.removeAssignment(row.assignment)}
                   />
                   {dayScheduleFor('assignment', row.assignment.id)}
@@ -281,8 +282,12 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
             <PlanAction icon={Ticket} label={t('mobileTrip.addBookingShort')} onClick={tl.addBooking} />
             <PlanAction icon={TrainFront} label={t('mobileTrip.addTransportShort')} onClick={tl.addTransport} />
             <PlanAction icon={Route} label={t('dayplan.optimize')} onClick={() => void tl.optimize()} />
-            <PlanAction icon={GoogleMapsIcon} label={t('mobileTrip.googleMaps')} onClick={tl.exportGoogleMaps} />
-            <PlanAction icon={Compass} label={t('mobileTrip.coMaps')} onClick={tl.exportCoMaps} />
+            {tl.canExportRoute && (
+              <>
+                <PlanAction icon={GoogleMapsIcon} label={t('mobileTrip.googleMaps')} onClick={tl.exportGoogleMaps} />
+                <PlanAction icon={Compass} label={t('mobileTrip.coMaps')} onClick={tl.exportCoMaps} />
+              </>
+            )}
           </div>
         )}
       </div>

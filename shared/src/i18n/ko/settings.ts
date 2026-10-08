@@ -25,7 +25,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': '템플릿 선택...',
   'settings.mapDefaultHint': '비워두면 OpenStreetMap (기본값) 사용',
   'settings.routingBase': '자체 경로 서버',
-  'settings.routingBaseHint': '자체 OSRM 인스턴스입니다. 비워 두면 초당 약 한 번의 요청만 허용하는 공개 서버를 사용합니다. 하루치는 충분하지만 로드트립에는 빠듯합니다. 서버를 다시 시작해야 적용됩니다.',
+  'settings.routingBaseHint':
+    '자체 OSRM 인스턴스입니다. 비워 두면 초당 약 한 번의 요청만 허용하는 공개 서버를 사용합니다. 하루치는 충분하지만 로드트립에는 빠듯합니다. 서버를 다시 시작해야 적용됩니다.',
   'settings.valhallaBase': '자체 Valhalla 인스턴스',
   'settings.valhallaBaseHint':
     'TREK은 기본적으로 유료 도로, 고속도로, 페리를 피하기 위해 FOSSGIS의 공개 Valhalla를 사용합니다. 대신 자체 Valhalla를 사용하려면 여기에 URL을 입력하세요. 자체 라우팅 서버만 설정된 경우 공개 Valhalla는 사용되지 않습니다. 자체 URL을 입력한 후 서버를 재시작하고 페이지를 새로고침하세요.',
@@ -557,7 +558,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': '위시리스트',
   'settings.apiScopes.stats': '합계',
   'settings.apiKeys.title': 'API 키',
-  'settings.apiKeys.description': '공개 API용 키입니다. 다른 소프트웨어가 여행을 읽을 수 있습니다. 읽기 전용이라 무엇도 바꾸거나 지울 수 없습니다.',
+  'settings.apiKeys.description':
+    '공개 API용 키입니다. 다른 소프트웨어가 여행을 읽을 수 있습니다. 읽기 전용이라 무엇도 바꾸거나 지울 수 없습니다.',
   'settings.apiKeys.create': '키 만들기',
   'settings.apiKeys.empty': '아직 키가 없습니다. 다른 소프트웨어를 연결하려면 하나 만드세요.',
   'settings.apiKeys.createdAt': '생성일',
@@ -572,7 +574,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.endpoint': '엔드포인트',
   'settings.apiKeys.neverUsed': '사용한 적 없음',
   'settings.apiKeys.loadFailed': '키를 불러오지 못했습니다. 페이지를 새로 고친 뒤 다시 시도하세요.',
-  'settings.apiKeys.limitReached': '키가 {max}개로 계정당 최대 개수입니다. 새 키를 만들려면 더 이상 쓰지 않는 키를 삭제하세요.',
+  'settings.apiKeys.limitReached':
+    '키가 {max}개로 계정당 최대 개수입니다. 새 키를 만들려면 더 이상 쓰지 않는 키를 삭제하세요.',
   'settings.apiKeys.copyFailed': '복사하지 못했습니다. 텍스트를 선택해 직접 복사하세요.',
   'settings.apiKeys.modal.createTitle': 'API 키 만들기',
   'settings.apiKeys.modal.name': '이름',
