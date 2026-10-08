@@ -20,8 +20,8 @@ export interface ChinaRailTrain {
   stops: ChinaRailStop[];
 }
 
-function upstreamError(message: string, status = 502): Error {
-  return Object.assign(new Error(message), { status });
+function upstreamError(message: string, status = 502, code?: string): Error {
+  return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 }
 
 async function getJson<T>(url: URL): Promise<T> {
@@ -45,7 +45,7 @@ function normalizeTime(value: unknown): string | null {
 @Injectable()
 export class ChinaRailService {
   async queryChinaRailTrain(trainNumber: string, date: string): Promise<ChinaRailTrain> {
-    const normalizedNumber = trainNumber.trim().toUpperCase();
+    const normalizedNumber = trainNumber.replace(/\s+/g, '').toUpperCase();
     if (!/^[A-Z]?[0-9]{1,5}$/.test(normalizedNumber)) throw upstreamError('Invalid train number', 400);
     const parsedDate = new Date(`${date}T00:00:00Z`);
     if (
@@ -63,8 +63,18 @@ export class ChinaRailService {
       status?: boolean;
       data?: Array<{ station_train_code?: string; train_no?: string; from_station?: string; to_station?: string }>;
     }>(searchUrl);
-    const match = search.data?.find((item) => item.station_train_code?.toUpperCase() === normalizedNumber);
-    if (!match?.train_no) throw upstreamError('Train not found for the selected date', 404);
+    const match = search.data?.find((item) =>
+      item.station_train_code
+        ?.split('/')
+        .some((code) => code.replace(/\s+/g, '').toUpperCase() === normalizedNumber),
+    );
+    if (!match?.train_no) {
+      throw upstreamError(
+        'Train timetable not found. 12306 only provides timetable data for dates within about 15 days.',
+        404,
+        'CHINA_RAIL_TRAIN_NOT_FOUND',
+      );
+    }
 
     const stopsUrl = new URL(TRAIN_STOPS_URL);
     stopsUrl.searchParams.set('train_no', match.train_no);
@@ -76,7 +86,13 @@ export class ChinaRailService {
       data?: { data?: Array<Record<string, unknown>> };
     }>(stopsUrl);
     const rows = timetable.data?.data || [];
-    if (rows.length < 2) throw upstreamError('12306 did not return a timetable for this train', 404);
+    if (rows.length < 2) {
+      throw upstreamError(
+        'Train timetable not found. 12306 only provides timetable data for dates within about 15 days.',
+        404,
+        'CHINA_RAIL_TRAIN_NOT_FOUND',
+      );
+    }
 
     return {
       trainNumber: normalizedNumber,

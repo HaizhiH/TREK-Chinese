@@ -6,6 +6,7 @@ import { server } from '../../../tests/helpers/msw/server';
 import { useAuthStore } from '../../store/authStore';
 import { useTripStore } from '../../store/tripStore';
 import { useAddonStore } from '../../store/addonStore';
+import { reservationsApi } from '../../api/client';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
 import {
   buildUser,
@@ -181,6 +182,52 @@ describe('TransportModal', () => {
     expect(await screen.findByText('北京南')).toBeInTheDocument();
     expect(screen.getByText('上海虹桥')).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+  });
+
+  it('shows the 12306 availability-window hint when the train is not found', async () => {
+    const addToast = vi.fn();
+    window.__addToast = addToast;
+    server.use(
+      http.get('/api/trips/1/reservations/train/12306', () =>
+        HttpResponse.json(
+          { error: 'Train not found', code: 'CHINA_RAIL_TRAIN_NOT_FOUND' },
+          { status: 404 },
+        ),
+      ),
+    );
+    render(<TransportModal {...defaultProps} days={[buildDay({ id: 10, date: '2026-10-26' })]} selectedDayId={10} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Sync from 12306/i }));
+    await userEvent.type(screen.getAllByPlaceholderText('G1')[0], 'G1');
+    await userEvent.click(screen.getByRole('button', { name: /Find train/i }));
+
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(
+        'No timetable was found for this train and date. 12306 only provides timetables for dates within about 15 days.',
+        'error',
+        undefined,
+      ),
+    );
+    delete window.__addToast;
+  });
+
+  it('suggests retrying when the 12306 lookup times out', async () => {
+    const addToast = vi.fn();
+    window.__addToast = addToast;
+    const lookupSpy = vi
+      .spyOn(reservationsApi, 'chinaRailTimetable')
+      .mockRejectedValueOnce({ code: 'ECONNABORTED' });
+    render(<TransportModal {...defaultProps} days={[buildDay({ id: 10, date: '2026-08-26' })]} selectedDayId={10} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Sync from 12306/i }));
+    await userEvent.type(screen.getAllByPlaceholderText('G1')[0], 'G1');
+    await userEvent.click(screen.getByRole('button', { name: /Find train/i }));
+
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('The 12306 request timed out. Please try again.', 'error', undefined),
+    );
+    lookupSpy.mockRestore();
+    delete window.__addToast;
   });
 
   // ── Budget addon ─────────────────────────────────────────────────────────────

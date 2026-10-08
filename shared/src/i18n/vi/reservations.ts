@@ -43,6 +43,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Dùng các ga đã chọn',
   'reservations.12306.missingInput': 'Trước tiên, hãy chọn ngày khởi hành và nhập số tàu.',
   'reservations.12306.lookupError': 'Không thể tải thông tin tàu này từ 12306.',
+  'reservations.12306.lookupTimeout': 'Yêu cầu đến 12306 đã hết thời gian chờ. Vui lòng thử lại.',
+  'reservations.12306.notFound':
+    'Không tìm thấy lịch trình cho tàu và ngày này. 12306 chỉ cung cấp lịch trình cho các ngày trong khoảng 15 ngày.',
   'reservations.12306.selectTwo': 'Chọn ít nhất hai ga.',
   'reservations.12306.geocodeError':
     'Không thể xác định vị trí {station}. Hãy kiểm tra cấu hình Amap hoặc chọn ga theo cách thủ công.',

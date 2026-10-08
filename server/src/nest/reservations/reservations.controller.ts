@@ -76,7 +76,14 @@ export class ReservationsController {
       return await this.chinaRail.queryChinaRailTrain(trainNumber, date);
     } catch (err: unknown) {
       const status = (err as { status?: number }).status || 502;
-      throw new HttpException({ error: err instanceof Error ? err.message : '12306 lookup failed' }, status);
+      const code = (err as { code?: unknown }).code;
+      throw new HttpException(
+        {
+          error: err instanceof Error ? err.message : '12306 lookup failed',
+          ...(code === 'CHINA_RAIL_TRAIN_NOT_FOUND' ? { code } : {}),
+        },
+        status,
+      );
     }
   }
 

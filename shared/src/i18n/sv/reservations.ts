@@ -43,6 +43,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Använd valda stationer',
   'reservations.12306.missingInput': 'Välj först ett avresedatum och ange ett tågnummer.',
   'reservations.12306.lookupError': 'Det gick inte att läsa in tåget från 12306.',
+  'reservations.12306.lookupTimeout': 'Begäran till 12306 tog för lång tid. Försök igen.',
+  'reservations.12306.notFound':
+    'Ingen tidtabell hittades för tåget och datumet. 12306 tillhandahåller bara tidtabeller för ungefär 15 dagar.',
   'reservations.12306.selectTwo': 'Välj minst två stationer.',
   'reservations.12306.geocodeError':
     'Det gick inte att hitta {station}. Kontrollera Amap-konfigurationen eller välj stationen manuellt.',

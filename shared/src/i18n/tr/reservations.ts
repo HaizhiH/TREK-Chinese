@@ -43,6 +43,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Seçilen istasyonları kullan',
   'reservations.12306.missingInput': 'Önce bir kalkış tarihi seçin ve tren numarası girin.',
   'reservations.12306.lookupError': "Bu tren 12306'dan yüklenemedi.",
+  'reservations.12306.lookupTimeout': '12306 isteği zaman aşımına uğradı. Lütfen tekrar deneyin.',
+  'reservations.12306.notFound':
+    'Bu tren ve tarih için tarife bulunamadı. 12306 yalnızca yaklaşık 15 gün içindeki tarihler için tarife sağlar.',
   'reservations.12306.selectTwo': 'En az iki istasyon seçin.',
   'reservations.12306.geocodeError':
     '{station} konumu bulunamadı. Amap yapılandırmanızı kontrol edin veya istasyonu manuel olarak seçin.',

@@ -42,6 +42,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Použít vybrané stanice',
   'reservations.12306.missingInput': 'Nejprve vyberte datum odjezdu a zadejte číslo vlaku.',
   'reservations.12306.lookupError': 'Tento vlak se nepodařilo načíst ze služby 12306.',
+  'reservations.12306.lookupTimeout': 'Vypršel časový limit požadavku na 12306. Zkuste to znovu.',
+  'reservations.12306.notFound':
+    'Pro tento vlak a datum nebyl nalezen jízdní řád. 12306 poskytuje jízdní řády pouze pro období přibližně 15 dnů.',
   'reservations.12306.selectTwo': 'Vyberte alespoň dvě stanice.',
   'reservations.12306.geocodeError':
     'Stanici {station} se nepodařilo najít. Zkontrolujte konfiguraci Amap nebo vyberte stanici ručně.',

@@ -1,6 +1,7 @@
 import { MapsService } from '../../../src/nest/maps/maps.service';
 import { TripAccessGuard } from '../../../src/nest/permissions/trip-access.guard';
 import { ReservationsController } from '../../../src/nest/reservations/reservations.controller';
+import { HttpException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -50,9 +51,17 @@ describe('Chinese domains after the upstream Nest merge', () => {
       stops: [],
     });
     expect(queryChinaRailTrain).toHaveBeenCalledWith('G1', '2026-09-22');
-    queryChinaRailTrain.mockRejectedValue(Object.assign(new Error('Train not found'), { status: 404 }));
-    await expect(controller.chinaRailTimetable({ id: 1 } as never, '5', 'G1', '2026-09-22')).rejects.toMatchObject({
-      status: 404,
-    });
+    queryChinaRailTrain.mockRejectedValue(
+      Object.assign(new Error('Train not found'), { status: 404, code: 'CHINA_RAIL_TRAIN_NOT_FOUND' }),
+    );
+    let error: HttpException | undefined;
+    try {
+      await controller.chinaRailTimetable({ id: 1 } as never, '5', 'G1', '2026-09-22');
+    } catch (caught: unknown) {
+      error = caught as HttpException;
+    }
+    expect(error).toBeInstanceOf(HttpException);
+    expect(error?.getStatus()).toBe(404);
+    expect(error?.getResponse()).toEqual({ error: 'Train not found', code: 'CHINA_RAIL_TRAIN_NOT_FOUND' });
   });
 });

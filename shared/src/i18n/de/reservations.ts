@@ -45,6 +45,9 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Ausgewählte Stationen verwenden',
   'reservations.12306.missingInput': 'Wähle zuerst ein Abfahrtsdatum und gib eine Zugnummer ein.',
   'reservations.12306.lookupError': 'Dieser Zug konnte nicht von 12306 geladen werden.',
+  'reservations.12306.lookupTimeout': 'Die Anfrage an 12306 hat das Zeitlimit überschritten. Bitte versuche es erneut.',
+  'reservations.12306.notFound':
+    'Für diesen Zug und dieses Datum wurde kein Fahrplan gefunden. 12306 stellt Fahrpläne nur für etwa 15 Tage bereit.',
   'reservations.12306.selectTwo': 'Wähle mindestens zwei Stationen aus.',
   'reservations.12306.geocodeError':
     '{station} konnte nicht gefunden werden. Prüfe deine Amap-Konfiguration oder wähle die Station manuell aus.',

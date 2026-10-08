@@ -44,8 +44,12 @@ const reservations: TranslationStrings = {
   'reservations.12306.apply': 'Use selected stations',
   'reservations.12306.missingInput': 'Choose a departure date and enter a train number first.',
   'reservations.12306.lookupError': 'Could not load this train from 12306.',
+  'reservations.12306.lookupTimeout': 'The 12306 request timed out. Please try again.',
+  'reservations.12306.notFound':
+    'No timetable was found for this train and date. 12306 only provides timetables for dates within about 15 days.',
   'reservations.12306.selectTwo': 'Select at least two stations.',
-  'reservations.12306.geocodeError': 'Could not locate {station}. Check your Amap configuration or select the station manually.',
+  'reservations.12306.geocodeError':
+    'Could not locate {station}. Check your Amap configuration or select the station manually.',
   'reservations.12306.applied': 'Added {count} stations from 12306.',
   'reservations.meta.platform': 'Platform',
   'reservations.meta.seat': 'Seat',
