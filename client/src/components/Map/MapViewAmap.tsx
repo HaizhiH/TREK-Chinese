@@ -297,11 +297,21 @@ export function MapViewAmap({
     const target = selectedPlaceTarget(selectedPlaceId, places, dayPlaces, selectedPlace);
     if (target?.lat != null && target?.lng != null) {
       let cancelled = false;
-      void wgs84ToAmap(AMap, [{ lat: target.lat, lng: target.lng }]).then(([point]) => {
-        if (!cancelled && point) {
-          map.panTo(point);
-        }
-      });
+      void wgs84ToAmap(AMap, [{ lat: target.lat, lng: target.lng }])
+        .then(([point]) => {
+          if (cancelled || !point) return;
+          const targetMap = mapRef.current ?? map;
+          try {
+            if (typeof targetMap?.panTo === 'function') {
+              targetMap.panTo(point);
+            }
+          } catch {
+            // Defensive catch for map lifecycle transitions or unmounted state
+          }
+        })
+        .catch(() => {
+          // Defensive catch for coordinate conversion failures
+        });
       return () => {
         cancelled = true;
       };
