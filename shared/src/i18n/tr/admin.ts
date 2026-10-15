@@ -144,43 +144,31 @@ const admin: TranslationStrings = {
   'admin.requireMfaHint':
     "2FA'sı olmayan kullanıcıların uygulamayı kullanmadan önce Ayarlar'da kurulumu tamamlaması gerekir.",
   'admin.apiKeys': 'API Anahtarları',
-  'admin.apiKeysHint': 'Yer verilerinin nereden geldiği. TREK dizini anahtar istemez; aşağıdaki iki sağlayıcı isteğe bağlıdır.',
+  'admin.apiKeysHint':
+    'Yer verilerinin nereden geldiği. TREK dizini anahtar istemez; aşağıdaki iki sağlayıcı isteğe bağlıdır.',
   'admin.trekApi.badgeDefault': 'Önerilen varsayılan',
   'admin.googleCaveat.badge': 'Önerilmez',
   'admin.googleCaveat.body':
     "TREK açık kaynaklıdır ve burada tarafsız değiliz. Bu ölçekte değerlendirmeler ve sıradan işletme fotoğrafları yalnızca Google'da vardır; tekel budur. Alan, başka seçenek olmadığı için burada; önerdiğimiz için değil. O zaman her sorgu Google'a gider.",
   'admin.trekApi.tagline':
-    'TREK\'in kendi yer dizini. Google anahtarı olmadan, kota olmadan ve kimse aramalarınızı saymadan arama.',
-  'admin.trekApi.factPlaces':
-    'Dünya genelinde 73,6 milyon yer',
-  'admin.trekApi.factNoKey':
-    'Anahtar yok, kota yok',
-  'admin.trekApi.factOffline':
-    'Ülke paketleri çevrimdışı da çalışır',
-  'admin.trekApi.factPrivacy':
-    'Aramalar hiçbir zaman kaydedilmez',
-  'admin.trekApi.more':
-    'İçinde ne var',
-  'admin.trekApi.fieldPhone':
-    'Telefon',
-  'admin.trekApi.fieldStableId':
-    'Kalıcı kimlik',
+    "TREK'in kendi yer dizini. Google anahtarı olmadan, kota olmadan ve kimse aramalarınızı saymadan arama.",
+  'admin.trekApi.factPlaces': 'Dünya genelinde 73,6 milyon yer',
+  'admin.trekApi.factNoKey': 'Anahtar yok, kota yok',
+  'admin.trekApi.factOffline': 'Ülke paketleri çevrimdışı da çalışır',
+  'admin.trekApi.factPrivacy': 'Aramalar hiçbir zaman kaydedilmez',
+  'admin.trekApi.more': 'İçinde ne var',
+  'admin.trekApi.fieldPhone': 'Telefon',
+  'admin.trekApi.fieldStableId': 'Kalıcı kimlik',
   'admin.trekApi.includedNote':
-    'Açıklamalar yerin kendi sitesinden, çalışma saatleri girilmiş olduğu yerlerde OpenStreetMap\'ten gelir.',
-  'admin.trekApi.notRatings':
-    'Değerlendirmeler',
-  'admin.trekApi.notPhotos':
-    'Sıradan işletmelerin fotoğrafları',
+    "Açıklamalar yerin kendi sitesinden, çalışma saatleri girilmiş olduğu yerlerde OpenStreetMap'ten gelir.",
+  'admin.trekApi.notRatings': 'Değerlendirmeler',
+  'admin.trekApi.notPhotos': 'Sıradan işletmelerin fotoğrafları',
   'admin.trekApi.notIncludedNote':
     'İkisini de hiçbir açık kaynak hiçbir fiyata sunmuyor. Bu ikisi için Google anahtarı tek yol olmayı sürdürüyor.',
-  'admin.trekApi.sourcesLabel':
-    'Kaynaklar',
-  'admin.trekApi.sourcesNote':
-    'Yanıttaki her alan, bunlardan hangisinden geldiğini söyler.',
-  'admin.trekApi.included':
-    'Dahil',
-  'admin.trekApi.notIncluded':
-    'Dahil değil',
+  'admin.trekApi.sourcesLabel': 'Kaynaklar',
+  'admin.trekApi.sourcesNote': 'Yanıttaki her alan, bunlardan hangisinden geldiğini söyler.',
+  'admin.trekApi.included': 'Dahil',
+  'admin.trekApi.notIncluded': 'Dahil değil',
   'admin.mapsKey': 'Google Haritalar API Anahtarı',
   'admin.mapsKeyHint': 'Yer arama için gereklidir. console.cloud.google.com adresinden erişin',
   'admin.mapsKeyHintLong':
@@ -200,7 +188,8 @@ const admin: TranslationStrings = {
   'admin.placesProvider.google': 'Google Places',
   'admin.placesProvider.amap': 'Amap (高德地图)',
   'admin.placesProvider.openstreetmap': 'OpenStreetMap',
-  'admin.placesProvider.missingKey': 'Seçilen sağlayıcı için API anahtarı tanımlı değil; yer aramasını yalnızca TREK dizini ve OpenStreetMap yanıtlar.',
+  'admin.placesProvider.missingKey':
+    'Seçilen sağlayıcı için API anahtarı tanımlı değil; yer aramasını yalnızca TREK dizini ve OpenStreetMap yanıtlar.',
   'admin.placesProvider.saved': 'Yer arama sağlayıcısı kaydedildi',
   'admin.validateKey': 'Test et',
   'admin.keyValid': 'Bağlı',
@@ -235,14 +224,24 @@ const admin: TranslationStrings = {
   'admin.placesEnrich.title': 'Yer zenginleştirme',
   'admin.placesEnrich.subtitle':
     'Bir yer eklerken görseller ve açıklama gösterir. Wikipedia ve OpenStreetMap her zaman kullanılır; Yer Fotoğrafları veya Yer Ayrıntıları açıkken Google da eklenir.',
+  'admin.placesGoogleOnly.title': 'Yalnızca Google ile ara',
+  'admin.placesGoogleOnly.subtitle':
+    "Her arama ve her öneri Google Places'e gider. Kapalıyken önce TREK dizini ve OpenStreetMap yanıtlar, Google yalnızca hiçbir şey bulamadıklarında sorulur.",
+  'admin.placesGoogleOnly.missingKey':
+    'Google Maps API anahtarı gerektirir. Anahtar yoksa arama, bu anahtar ne olursa olsun TREK dizini ve OpenStreetMap üzerinden çalışır.',
+  'admin.placesGoogleOnly.otherProvider':
+    "Yer sağlayıcısı olarak Google gerekir. Amap veya OpenStreetMap seçiliyken bu anahtar ne derse desin hiçbir arama Google'a gitmez.",
   'admin.transitProvider.title': 'Toplu taşıma sağlayıcısı',
   'admin.transitProvider.subtitle': 'Toplu taşıma aramasını hangi hizmetin yanıtlayacağı.',
   'admin.transitProvider.transitous': 'Transitous (ücretsiz)',
   'admin.transitProvider.google': 'Google',
-  'admin.transitProvider.transitousHint': 'Topluluk GTFS akışları. Ücretsiz ve anahtarsız, Avrupa\'da en iyi kapsama.',
-  'admin.transitProvider.googleHint': 'Transitous\'un verisi olmayan bölgeler için yukarıdaki Google anahtarını kullanır. Arama başına ücretlendirilir — anahtar ayarlanmadığı sürece Transitous kullanılır.',
-  'admin.transitProvider.noKeyWarning': 'Google seçili, ancak yapılandırılmış bir Google anahtarı yok — toplu taşıma araması hâlâ Transitous kullanıyor. Yukarıdaki API Anahtarları bölümünden bir anahtar ekleyin.',
-  'admin.transitProvider.personalKeyWarning': 'Yalnızca kendi Google anahtarınız ayarlı, bu yüzden diğer üyelerin araması hâlâ Transitous\'a düşüyor. Tüm kuruluma uygulamak için anahtarı yukarıda yönetici olarak kaydedin.',
+  'admin.transitProvider.transitousHint': "Topluluk GTFS akışları. Ücretsiz ve anahtarsız, Avrupa'da en iyi kapsama.",
+  'admin.transitProvider.googleHint':
+    "Transitous'un verisi olmayan bölgeler için yukarıdaki Google anahtarını kullanır. Arama başına ücretlendirilir — anahtar ayarlanmadığı sürece Transitous kullanılır.",
+  'admin.transitProvider.noKeyWarning':
+    'Google seçili, ancak yapılandırılmış bir Google anahtarı yok — toplu taşıma araması hâlâ Transitous kullanıyor. Yukarıdaki API Anahtarları bölümünden bir anahtar ekleyin.',
+  'admin.transitProvider.personalKeyWarning':
+    "Yalnızca kendi Google anahtarınız ayarlı, bu yüzden diğer üyelerin araması hâlâ Transitous'a düşüyor. Tüm kuruluma uygulamak için anahtarı yukarıda yönetici olarak kaydedin.",
   'admin.placeShadow.title': 'Yer arama günlüğü',
   'admin.placeShadow.subtitle':
     'Hangi arama sonucunun seçildiğini kaydeder, böylece başka bir yer dizini daha sonra gerçek aramalarla ölçülebilir. Hiçbir şey bu sunucudan çıkmaz ve bir yönetici günlüğü istediği zaman dışa aktarabilir veya silebilir.',
@@ -455,7 +454,8 @@ const admin: TranslationStrings = {
     'Gün planındaki günleri renklendirir (örneğin bir günün yolculuğun hangi etabına ait olduğu)',
   'admin.plugins.cap.mcpTools': 'Yapay zekâ araçları yayımlar',
   'admin.plugins.mcpToolsTitle': 'Yayımlanan yapay zekâ araçları',
-  'admin.plugins.mcpToolsHint': 'Bir asistan bunları kullanıcı adına çalıştırabilir. Her biri yukarıda verilen yetkilerle çalışır.',
+  'admin.plugins.mcpToolsHint':
+    'Bir asistan bunları kullanıcı adına çalıştırabilir. Her biri yukarıda verilen yetkilerle çalışır.',
   'admin.plugins.perm.mcp:tools':
     'Bir yapay zekâ asistanının sizin adınıza çalıştırabileceği araçlar yayımlamak (burada eklentiye verdiğiniz yetkilerle çalışır, asistanın kendi yetkileriyle değil)',
   'admin.plugins.perm.geolocation:read':
@@ -558,7 +558,8 @@ const admin: TranslationStrings = {
   'admin.plugins.changeVersion': 'Sürüm değiştir…',
   'admin.plugins.noVersions': 'Kayıt defterinde yayımlanmış sürüm bulunamadı.',
   'admin.plugins.downgradeTitle': 'Bu eklenti geri alınsın mı?',
-  'admin.plugins.downgradeBody': 'v{from} sürümünden v{to} sürümüne geçiş: daha yeni sürümün yazdığı veriler yerinde kalır ve eski sürüm bunları anlamayabilir.',
+  'admin.plugins.downgradeBody':
+    'v{from} sürümünden v{to} sürümüne geçiş: daha yeni sürümün yazdığı veriler yerinde kalır ve eski sürüm bunları anlamayabilir.',
   'admin.plugins.downgradeConfirm': 'Geri al',
   'admin.plugins.updatesHeld': 'Güncellemeler v{version} sürümünde duraklatıldı',
   'admin.plugins.resumeUpdates': 'Güncellemeleri sürdür',
@@ -657,7 +658,8 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.collab.name': 'İş birliği',
   'admin.addons.catalog.collab.description': 'Birlikte planlamak için notlar, anketler, sohbet ve öneriler',
   'admin.addons.catalog.roadtrip.name': 'Yol gezisi',
-  'admin.addons.catalog.roadtrip.description': 'Duraklı sürüşler planlayın; sürüş ve varış saatleri kendiliğinden yeniden hesaplanır',
+  'admin.addons.catalog.roadtrip.description':
+    'Duraklı sürüşler planlayın; sürüş ve varış saatleri kendiliğinden yeniden hesaplanır',
   'admin.addons.catalog.memories.name': 'Fotoğraflar (Immich)',
   'admin.addons.catalog.memories.description': 'Immich örneğiniz aracılığıyla gezi fotoğraflarını paylaşın',
   'admin.addons.catalog.mcp.name': 'MCP',
@@ -666,14 +668,16 @@ const admin: TranslationStrings = {
     'Kişiselleştirmenizi özelleştirmek için özellikleri etkinleştirin veya devre dışı bırakın.',
   'admin.addons.subtitleAfter': 'deneyim.',
   'admin.addons.catalog.naver_list_import.name': 'Naver List Import',
-  'admin.addons.catalog.naver_list_import.description': 'Paylaşılan bir Naver Haritalar listesinden yerleri içe aktarın',
+  'admin.addons.catalog.naver_list_import.description':
+    'Paylaşılan bir Naver Haritalar listesinden yerleri içe aktarın',
   'admin.addons.catalog.airtrail.name': 'AirTrail',
   'admin.addons.catalog.airtrail.description': 'AirTrail örneğinizden uçuşları eşitleyin',
   'admin.addons.catalog.dawarich.name': 'Dawarich',
   'admin.addons.catalog.dawarich.description':
     'Her kullanıcının kendi bağladığı bir Dawarich sunucusundan ziyaretleri ve kaydedilen rotaları okuyun',
   'admin.addons.catalog.llm_parsing.name': 'Yapay zekâ ile ayrıştırma',
-  'admin.addons.catalog.llm_parsing.description': 'Yerleşik ayrıştırıcının okuyamadığı rezervasyonları, seçtiğiniz yapay zekâ modeliyle okur',
+  'admin.addons.catalog.llm_parsing.description':
+    'Yerleşik ayrıştırıcının okuyamadığı rezervasyonları, seçtiğiniz yapay zekâ modeliyle okur',
   'admin.addons.enabled': 'Etkinleştirilmiş',
   'admin.addons.disabled': 'Engelli',
   'admin.addons.type.trip': 'Seyahat',
@@ -777,7 +781,8 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.journey.description':
     'Check-in, fotoğraf ve günlük hikâyelerle seyahat takibi ve seyahat günlüğü',
   'admin.addons.catalog.collections.name': 'Koleksiyonlar',
-  'admin.addons.catalog.collections.description': 'Her geziden yerleri adlandırılmış listelerde toplayın ve yeniden kullanın',
+  'admin.addons.catalog.collections.description':
+    'Her geziden yerleri adlandırılmış listelerde toplayın ve yeniden kullanın',
   'admin.passkey.title': 'Passkey ile oturum açma',
   'admin.passkey.cardHint':
     'Kullanıcıların passkey (WebAuthn) ile oturum açmasına izin verin. Varsayılan olarak kapalı.',

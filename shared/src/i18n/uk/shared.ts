@@ -3,6 +3,10 @@ import type { TranslationStrings } from '../types';
 const shared: TranslationStrings = {
   'shared.expired': 'Посилання прострочено або недійсне',
   'shared.expiredHint': 'Це посилання на поїздку більше не активне.',
+  'shared.loadFailed': 'Не вдалося завантажити поїздку',
+  'shared.loadFailedHint':
+    'Це не означає, що термін дії посилання минув. Перевірте з’єднання та спробуйте ще раз трохи згодом.',
+  'shared.retry': 'Спробувати ще раз',
   'shared.readOnly': 'Тільки для читання',
   'shared.tabPlan': 'План',
   'shared.tabBookings': 'Бронювання',

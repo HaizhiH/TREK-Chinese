@@ -25,7 +25,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': 'テンプレートを選択…',
   'settings.mapDefaultHint': '空欄の場合は OpenStreetMap（既定）を使用',
   'settings.routingBase': '自前のルーティングサーバー',
-  'settings.routingBaseHint': '自前の OSRM インスタンス。空欄なら公開サーバーを使いますが、毎秒 1 リクエスト程度の制限があり、1 日分には足りてもロードトリップには足りません。サーバー再起動後に反映されます。',
+  'settings.routingBaseHint':
+    '自前の OSRM インスタンス。空欄なら公開サーバーを使いますが、毎秒 1 リクエスト程度の制限があり、1 日分には足りてもロードトリップには足りません。サーバー再起動後に反映されます。',
   'settings.valhallaBase': '自前の Valhalla インスタンス',
   'settings.valhallaBaseHint':
     'TREKは、有料道路、高速道路、フェリーを避けるために、標準でFOSSGISの公開Valhallaを使用します。独自のValhallaを代わりに使う場合は、ここにURLを入力してください。独自のルーティングサーバーのみが設定されている場合、公開Valhallaは使用されません。独自のURLを入力した後は、サーバーを再起動し、ページを再読み込みしてください。',
@@ -482,7 +483,8 @@ const settings: TranslationStrings = {
   'settings.offline.notice.offline': '接続されていません。オフライン用に保存するには接続してください。',
   'settings.offline.notice.signedOut': 'セッションが終了しました。同期するには再度ログインしてください。',
   'settings.offline.notice.failed': 'ダウンロードを完了できませんでした。接続を確認してもう一度お試しください。',
-  'settings.offline.notice.loadFailed': 'この端末のオフラインストレージを読み取れませんでした。キャッシュを削除すると解決することが多いです。',
+  'settings.offline.notice.loadFailed':
+    'この端末のオフラインストレージを読み取れませんでした。キャッシュを削除すると解決することが多いです。',
   'settings.offline.clear': 'キャッシュを消去',
   'settings.offline.clearConfirm': 'すべてのオフライン旅行データを消去しますか？オンライン時にいつでも再同期できます。',
   'settings.offline.stats.trips': 'キャッシュ済みの旅行',
@@ -540,7 +542,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': 'ウィッシュリスト',
   'settings.apiScopes.stats': '合計',
   'settings.apiKeys.title': 'API キー',
-  'settings.apiKeys.description': '公開 API 用のキーです。ほかのソフトウェアが旅程を読み取れるようになります。読み取り専用で、変更や削除はできません。',
+  'settings.apiKeys.description':
+    '公開 API 用のキーです。ほかのソフトウェアが旅程を読み取れるようになります。読み取り専用で、変更や削除はできません。',
   'settings.apiKeys.create': 'キーを作成',
   'settings.apiKeys.empty': 'キーはまだありません。ほかのソフトウェアと連携するには作成してください。',
   'settings.apiKeys.createdAt': '作成日',
@@ -551,11 +554,13 @@ const settings: TranslationStrings = {
   'settings.apiKeys.deleteFailed': 'キーを削除できませんでした',
   'settings.apiKeys.createFailed': 'キーを作成できませんでした',
   'settings.apiKeys.copy': 'コピー',
-  'settings.apiKeys.docsHint': 'キーは "Authorization: Bearer ..." または "X-API-Key: ..." として /api/v1 に送信してください。',
+  'settings.apiKeys.docsHint':
+    'キーは "Authorization: Bearer ..." または "X-API-Key: ..." として /api/v1 に送信してください。',
   'settings.apiKeys.endpoint': 'エンドポイント',
   'settings.apiKeys.neverUsed': '未使用',
   'settings.apiKeys.loadFailed': 'キーを読み込めませんでした。ページを再読み込みしてもう一度お試しください。',
-  'settings.apiKeys.limitReached': 'キーは {max} 個あり、1 アカウントの上限に達しています。新しく作成するには、使わなくなったキーを削除してください。',
+  'settings.apiKeys.limitReached':
+    'キーは {max} 個あり、1 アカウントの上限に達しています。新しく作成するには、使わなくなったキーを削除してください。',
   'settings.apiKeys.copyFailed': 'コピーできませんでした。テキストを選択して手動でコピーしてください。',
   'settings.apiKeys.modal.createTitle': 'API キーを作成',
   'settings.apiKeys.modal.name': '名前',
@@ -564,7 +569,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.modal.creating': '作成中...',
   'settings.apiKeys.modal.create': '作成',
   'settings.apiKeys.modal.createdTitle': 'API キーを作成しました',
-  'settings.apiKeys.modal.createdWarning': '今すぐキーをコピーしてください。表示は一度きりで、あとから取得はできません。',
+  'settings.apiKeys.modal.createdWarning':
+    '今すぐキーをコピーしてください。表示は一度きりで、あとから取得はできません。',
   'settings.apiKeys.modal.done': '完了',
 };
 

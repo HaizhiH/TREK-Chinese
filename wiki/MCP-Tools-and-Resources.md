@@ -2,6 +2,8 @@
 
 TREK exposes **tools** (read and write actions) and **resources** (read-only `trek://` URIs). Tools are registered per-session based on OAuth scopes and enabled addons.
 
+Every built-in tool checks its arguments against its published schema before anything runs. An argument the tool does not declare (a misspelt field such as `stopType` for `stop_type`) is refused with `Unrecognized key`, so the AI sees the mistake and can retry rather than reporting a change that never happened. Plugin-contributed tools follow the schema their manifest declares.
+
 For addon-gated tools (Packing, To-Dos, Atlas, Collab, Collections, Vacay, Journey, Dawarich, Document sync, Road trip) and their resources, see [MCP-Addon-Tools](MCP-Addon-Tools).
 
 ## Tools
@@ -31,8 +33,8 @@ Requires `trips:read` or `trips:write` scope.
 | Tool | Description |
 |---|---|
 | `list_trips` | List all trips you own or are a member of. Supports `include_archived` flag. |
-| `create_trip` | Create a trip with title, dates, and currency. Days are auto-generated from the date range. |
-| `update_trip` | Update a trip's title, description, dates, or currency. |
+| `create_trip` | Create a trip with title, dates, and currency. Days are auto-generated from the date range. Without a currency the trip takes your display currency (Settings → General, or the admin's User Defaults preset), and EUR when that is left on *Trip currency*; see [Currencies](Currencies). |
+| `update_trip` | Update a trip's title, description, dates, or currency. Day plans follow their position, so dates that hold fewer days remove the last days with what is on them, also when only the start moved later. Every day a change removes is listed in `removed_days`, with its id, number and date as they stood before and a reason: `overflow` for a day past the new range, `spare` for an empty day without a date. |
 | `search_cover_images` | Search Unsplash for candidate cover photos and return their URLs, thumbnails and photographer credits. Nothing is saved; pass the chosen photo's URL to `update_trip` as `cover_image`. |
 | `delete_trip` | Delete a trip. Owner only. Requires `trips:delete`. |
 | `list_trip_members` | List the owner and all collaborators of a trip. |
@@ -66,7 +68,7 @@ Requires `places:read` or `places:write` scope.
 | `create_category` | Add a category to the instance-wide palette, with name, hex colour and emoji icon. Every trip on the instance sees it, so prefer an existing one from `list_categories`. Admin only; a non-admin gets `Admin access required`. Requires `places:write`. |
 | `update_category` | Rename a category or change its colour or icon. Every place already carrying it follows the change. Admin only. Requires `places:write`. |
 | `delete_category` | Remove a category from the palette. Places keep their data but lose the category, across every trip. Admin only. Requires `places:write`. |
-| `search_place` | Search for a place by name or address, the way the full search in the app does: TREK's own place index and OpenStreetMap together, and Google or Amap only when both are empty. Returns `osm_id` (and `google_place_id` / `google_ftid` when Google answered) for use in `create_place`. Takes an optional `locationBias` to rank results around the trip's destination. |
+| `search_place` | Search for a place by name or address, the way the full search in the app does: TREK's own place index and OpenStreetMap together, and Google or Amap only when both are empty. Returns `osm_id` (and `google_place_id` / `google_ftid` when Google answered) for use in `create_place`. Takes an optional `locationBias` to rank results around the trip's destination, and an optional `provider: 'google'` that sends this one search to Google Places alone, the same as the **Search Google instead** line under a result list in the app; it is ignored unless Google holds the keyed slot: an instance without a Google key, or one whose admin picked Amap or OpenStreetMap as the places provider, answers from the index and OpenStreetMap as usual. With the admin switch **Search with Google only** on (see [Places-and-Search](Places-and-Search#with-a-google-maps-api-key)), every call goes to Google whatever is passed, and the index and OpenStreetMap are never asked, so no result carries an `osm_id`. |
 | `search_places_via_plugins` | Search the place indexes installed plugins provide, alongside `search_place` rather than instead of it. Results have the shape `search_place` returns plus a `rating` and the `pluginId` that found them; only these results can carry a rating. Empty when no plugin offers a search index. Requires `places:read`. |
 
 ### Day Planning
@@ -76,8 +78,8 @@ Requires `trips:read` or `trips:write` scope.
 | Tool | Description |
 |---|---|
 | `update_day` | Set or clear a day's title. |
-| `create_day` | Add a new day to a trip with optional date and notes. |
-| `delete_day` | Delete a day from a trip. |
+| `create_day` | Add a new day to a trip with optional date and notes. With `position` an empty day is slotted in at that place. With `dated` the trip grows by the calendar day after its last date: the new day gets that date and goes right behind the last dated day, days without a date move one place back, and the end date of the trip moves to the new day. `dated` only works on a trip with dates, is refused once the trip spans 999 days, and cannot be combined with `date` or `position`; its result carries the updated `trip` next to the `day`. |
+| `delete_day` | Delete a day from a trip. Its places stay in the place list, its notes and texts go, and bookings on it stay without a day. A stay that checks in or out on the day is cancelled with its booking and expense; a stay that only runs across the day is kept. Later days move up one place; on a dated trip they and their bookings take the date one slot earlier, and the trip ends a day earlier when no day without a date is left to take the last date. The last day of a trip cannot be deleted. |
 | `reorder_days` | Reorder whole days by listing every day ID of the trip in the desired order. Each day keeps its places, notes, stays and bookings; on a dated trip the dates stay pinned to their slots, so the content moves across them. For places inside one day use `reorder_day_assignments`. Requires `trips:write`. |
 | `set_day_default_transport_mode` | Set the whole-day default travel mode. Per-leg modes still override it. Pass `null` to clear. |
 | `assign_place_to_day` | Pin a place to a specific day in the itinerary. Requires `places:write`. |
@@ -155,11 +157,12 @@ Requires `budget:read` or `budget:write` scope. The Budget addon must be enabled
 | `delete_budget_item` | Remove a budget item. |
 | `set_budget_item_members` | Set which members are splitting a budget item (replaces current list). |
 | `toggle_budget_member_paid` | Mark or unmark a member as having paid their share. |
-| `get_settlement_summary` | Each member's net balance, the suggested payments to settle shared expenses, and each member's final budget (`finalBudgets`: expenses paid, net reimbursements, pending reimbursements, final cost, each figure with the rows it is made of under `sources`), in the trip's base currency. Call this before recording a settlement. |
+| `get_settlement_summary` | Each member's net balance, the suggested payments to settle shared expenses, and each member's final budget (`finalBudgets`: expenses paid, net reimbursements, pending reimbursements, final cost, each figure with the rows it is made of under `sources`). `currency` says what the amounts are in: the `base` asked for when the server can quote it, otherwise the trip's base currency. An expense or payment in a foreign currency with no frozen rate, while the server has no live rate for it either, is left out of every figure and listed under `unconverted` (`item_ids`, `settlement_ids`, `currencies`). Call this before recording a settlement. |
 | `list_settlements` | List the recorded settle-up payments for a trip — who paid whom, how much, and when. |
 | `create_settlement` | Record a settle-up payment: one member paid another the given amount, with the payment's currency and the day it happened. |
 | `update_settlement` | Update a recorded settle-up payment (payer, recipient, amount, currency and the day it happened). |
 | `delete_settlement` | Delete a recorded settle-up payment. This is the undo for `create_settlement` and restores the affected balances. |
+| `freeze_budget_rates` | Pin today's server exchange rate on every expense and settle-up payment in a foreign currency that has no rate frozen yet, the rows under `unconverted` included. Rows with a frozen rate, in the trip currency or without a currency are never touched, and no rate is taken from the caller. Returns the rows it froze (`items`, `settlements`) and the currencies the server could not quote (`unresolved`). Needs the budget edit permission; an error when the trip currency changed meanwhile, with nothing written. |
 
 ### Tags
 

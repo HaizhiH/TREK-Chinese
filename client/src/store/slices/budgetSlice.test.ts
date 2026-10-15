@@ -1,8 +1,9 @@
-// FE-STORE-BUDGET-001 to FE-STORE-BUDGET-016
+// FE-STORE-BUDGET-001 to FE-STORE-BUDGET-021
 import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
-import { buildBudgetItem } from '../../../tests/helpers/factories';
+import { buildBudgetItem, buildTrip } from '../../../tests/helpers/factories';
+import { clearExchangeRateCache } from '../../hooks/useExchangeRates';
 import { useTripStore } from '../tripStore';
 
 let addToast: ReturnType<typeof vi.fn>;
@@ -282,5 +283,77 @@ describe('budgetSlice', () => {
     await expect(useTripStore.getState().reorderBudgetCategories(1, ['Transport'])).resolves.toBeUndefined();
 
     expect(addToast).toHaveBeenCalledTimes(2);
+  });
+});
+
+// An AUD trip whose server cannot fetch rates while the browser can: a write in another
+// currency lends the browser's rate, so the server can freeze one on entry.
+describe('budgetSlice: lent rates', () => {
+  let sent: Record<string, unknown>[] = [];
+
+  beforeEach(() => {
+    clearExchangeRateCache();
+    sent = [];
+    seedStore(useTripStore, { trip: buildTrip({ id: 1, currency: 'AUD' }) });
+    localStorage.setItem('trek_fx_AUD', JSON.stringify({ rates: { AUD: 1, VND: 18241.3 }, ts: Date.now() }));
+    server.use(
+      http.post('/api/trips/:id/budget', async ({ request }) => {
+        const body = await request.json() as Record<string, unknown>;
+        sent.push(body);
+        return HttpResponse.json({ item: buildBudgetItem({ trip_id: 1, name: String(body.name) }) });
+      }),
+      http.put('/api/trips/1/budget/:itemId', async ({ request }) => {
+        const body = await request.json() as Record<string, unknown>;
+        sent.push(body);
+        return HttpResponse.json({ item: { ...buildBudgetItem({ id: 50, trip_id: 1 }), ...body } });
+      }),
+    );
+  });
+
+  afterEach(clearExchangeRateCache);
+
+  it('FE-STORE-BUDGET-018: addBudgetItem lends the fresh trip-currency rate for a foreign currency', async () => {
+    await useTripStore.getState().addBudgetItem(1, { name: 'Pho', total_price: 8920000, currency: 'VND' });
+
+    expect(sent[0]).toMatchObject({ name: 'Pho', currency: 'VND', fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } });
+  });
+
+  it('FE-STORE-BUDGET-019: nothing is lent for the trip currency, another trip or a stale table', async () => {
+    await useTripStore.getState().addBudgetItem(1, { name: 'Tram', currency: 'AUD' });
+    // The store only knows the open trip's currency, and a rate has to be quoted against it.
+    await useTripStore.getState().addBudgetItem(2, { name: 'Pho', currency: 'VND' });
+    clearExchangeRateCache();
+    localStorage.setItem('trek_fx_AUD', JSON.stringify({ rates: { AUD: 1, VND: 18241.3 }, ts: Date.now() - 7 * 60 * 60 * 1000 }));
+    await useTripStore.getState().addBudgetItem(1, { name: 'Banh mi', currency: 'VND' });
+
+    expect(sent).toHaveLength(3);
+    for (const body of sent) expect(body).not.toHaveProperty('fallback_fx');
+  });
+
+  it('FE-STORE-BUDGET-020: updateBudgetItem lends it too, for a change into a foreign currency', async () => {
+    seedStore(useTripStore, { budgetItems: [buildBudgetItem({ id: 50, trip_id: 1, currency: 'USD', exchange_rate: 0.66 })] });
+
+    await useTripStore.getState().updateBudgetItem(1, 50, { currency: 'VND', total_price: 8920000 });
+
+    expect(sent[0]).toEqual({ currency: 'VND', total_price: 8920000, fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } });
+  });
+
+  it('FE-STORE-BUDGET-021: freezeMissingRates sends the lent rates and takes the healed rows in', async () => {
+    const bill = buildBudgetItem({ id: 60, trip_id: 1, currency: 'VND', exchange_rate: 1 });
+    const other = buildBudgetItem({ id: 61, trip_id: 1, currency: 'AUD', exchange_rate: 1 });
+    seedStore(useTripStore, { budgetItems: [bill, other] });
+    const bodies: unknown[] = [];
+    server.use(http.post('/api/trips/1/budget/freeze-rates', async ({ request }) => {
+      bodies.push(await request.json());
+      return HttpResponse.json({ items: [{ ...bill, exchange_rate: 18241.3 }], settlements: [], unresolved: [] });
+    }));
+
+    const result = await useTripStore.getState().freezeMissingRates(1, { base: 'AUD', rates: { VND: 18241.3 } });
+    // Without a table of its own to lend, the call asks the server to use its own rates.
+    await useTripStore.getState().freezeMissingRates(1);
+
+    expect(bodies).toEqual([{ fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } }, {}]);
+    expect(result.unresolved).toEqual([]);
+    expect(useTripStore.getState().budgetItems.map(i => [i.id, i.exchange_rate])).toEqual([[60, 18241.3], [61, 1]]);
   });
 });

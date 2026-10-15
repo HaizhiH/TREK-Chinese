@@ -157,7 +157,8 @@ const budget: TranslationStrings = {
   'costs.noReceipts': 'No receipts attached',
   'costs.deleteReceipt': 'Remove receipt',
   'costs.viewReceipt': 'View receipt',
-  'costs.receiptLeftBehind': 'Save failed, and {count} uploaded receipts are still there. Remove them in the Files tab.',
+  'costs.receiptLeftBehind':
+    'Save failed, and {count} uploaded receipts are still there. Remove them in the Files tab.',
 };
 
 export default budget;

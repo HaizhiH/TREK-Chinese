@@ -26,7 +26,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': 'Επιλέξτε πρότυπο...',
   'settings.mapDefaultHint': 'Αφήστε κενό για OpenStreetMap (προεπιλογή)',
   'settings.routingBase': 'Δική σας μηχανή δρομολόγησης',
-  'settings.routingBaseHint': 'Δική σας εγκατάσταση OSRM. Κενό σημαίνει τους δημόσιους διακομιστές, που επιτρέπουν περίπου ένα αίτημα ανά δευτερόλεπτο: αρκεί για μία ημέρα, λίγο για ένα οδικό ταξίδι. Ισχύει μετά από επανεκκίνηση του διακομιστή.',
+  'settings.routingBaseHint':
+    'Δική σας εγκατάσταση OSRM. Κενό σημαίνει τους δημόσιους διακομιστές, που επιτρέπουν περίπου ένα αίτημα ανά δευτερόλεπτο: αρκεί για μία ημέρα, λίγο για ένα οδικό ταξίδι. Ισχύει μετά από επανεκκίνηση του διακομιστή.',
   'settings.valhallaBase': 'Δική σας υπηρεσία Valhalla',
   'settings.valhallaBaseHint':
     'Το TREK χρησιμοποιεί από προεπιλογή τη δημόσια Valhalla της FOSSGIS για την αποφυγή διοδίων, αυτοκινητοδρόμων και πορθμείων. Εισαγάγετε εδώ τη διεύθυνση URL της δικής σας Valhalla για να τη χρησιμοποιήσετε αντί της δημόσιας. Αν έχει ρυθμιστεί μόνο ιδιωτική υπηρεσία δρομολόγησης, η δημόσια Valhalla δεν χρησιμοποιείται. Αφού εισαγάγετε ιδιωτική διεύθυνση URL, επανεκκινήστε τον διακομιστή και φορτώστε ξανά τη σελίδα.',
@@ -516,12 +517,15 @@ const settings: TranslationStrings = {
   'settings.offline.storage.tripOff': 'Μη αποθηκευμένο',
   'settings.offline.storage.tripFinished': 'Ολοκληρώθηκε. Αποθηκεύεται μόνο αν το ενεργοποιήσετε.',
   'settings.offline.notice.stored': 'Αποθηκεύτηκαν {count} ταξίδια σε αυτή τη συσκευή',
-  'settings.offline.notice.nothing': 'Δεν υπάρχει τίποτα για αποθήκευση. Ενεργοποιήστε τα ταξίδια που θέλετε να κρατήσετε.',
+  'settings.offline.notice.nothing':
+    'Δεν υπάρχει τίποτα για αποθήκευση. Ενεργοποιήστε τα ταξίδια που θέλετε να κρατήσετε.',
   'settings.offline.notice.busy': 'Γίνεται ήδη συγχρονισμός. Δοκιμάστε ξανά σε λίγο.',
-  'settings.offline.notice.offline': 'Δεν υπάρχει σύνδεση. Συνδεθείτε για να αποθηκεύσετε ταξίδια για χρήση χωρίς σύνδεση.',
+  'settings.offline.notice.offline':
+    'Δεν υπάρχει σύνδεση. Συνδεθείτε για να αποθηκεύσετε ταξίδια για χρήση χωρίς σύνδεση.',
   'settings.offline.notice.signedOut': 'Η συνεδρία σας έληξε. Συνδεθείτε ξανά για συγχρονισμό.',
   'settings.offline.notice.failed': 'Η λήψη δεν ολοκληρώθηκε. Ελέγξτε τη σύνδεσή σας και δοκιμάστε ξανά.',
-  'settings.offline.notice.loadFailed': 'Δεν ήταν δυνατή η ανάγνωση του τοπικού χώρου αποθήκευσης. Συνήθως βοηθάει η εκκαθάριση της προσωρινής μνήμης.',
+  'settings.offline.notice.loadFailed':
+    'Δεν ήταν δυνατή η ανάγνωση του τοπικού χώρου αποθήκευσης. Συνήθως βοηθάει η εκκαθάριση της προσωρινής μνήμης.',
   'settings.offline.clear': 'Εκκαθάριση προσωρινής μνήμης',
   'settings.offline.clearConfirm':
     'Εκκαθάριση όλων των δεδομένων ταξιδιού εκτός σύνδεσης; Μπορείτε να επανασυγχρονίσετε ανά πάσα στιγμή όσο είστε συνδεδεμένοι.',
@@ -569,7 +573,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.hint':
     'Αφήστε τα όλα ενεργά για ένα κλειδί που πρέπει να τα βλέπει όλα. Ό,τι απενεργοποιήσετε απορρίπτεται για αυτό το κλειδί, δεν παραλείπεται απλώς από την απάντηση.',
   'settings.apiScopes.all': 'Τα πάντα',
-  'settings.apiScopes.noneSelected': 'Διάλεξε τουλάχιστον έναν τομέα, αλλιώς το κλειδί δεν θα μπορούσε να διαβάσει τίποτα.',
+  'settings.apiScopes.noneSelected':
+    'Διάλεξε τουλάχιστον έναν τομέα, αλλιώς το κλειδί δεν θα μπορούσε να διαβάσει τίποτα.',
   'settings.apiScopes.limited': '{count} από {total}',
   'settings.apiScopes.trips': 'Ταξίδια',
   'settings.apiScopes.days': 'Ημέρες',
@@ -581,13 +586,15 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': 'Λίστα επιθυμιών',
   'settings.apiScopes.stats': 'Σύνολα',
   'settings.apiKeys.title': 'Κλειδιά API',
-  'settings.apiKeys.description': 'Κλειδιά για το δημόσιο API, ώστε άλλο λογισμικό να μπορεί να διαβάζει τα ταξίδια σου. Μόνο για ανάγνωση: ένα κλειδί δεν μπορεί να αλλάξει ή να διαγράψει τίποτα.',
+  'settings.apiKeys.description':
+    'Κλειδιά για το δημόσιο API, ώστε άλλο λογισμικό να μπορεί να διαβάζει τα ταξίδια σου. Μόνο για ανάγνωση: ένα κλειδί δεν μπορεί να αλλάξει ή να διαγράψει τίποτα.',
   'settings.apiKeys.create': 'Δημιουργία κλειδιού',
   'settings.apiKeys.empty': 'Δεν υπάρχουν κλειδιά ακόμη. Δημιούργησε ένα για να συνδέσεις άλλο λογισμικό.',
   'settings.apiKeys.createdAt': 'δημιουργήθηκε',
   'settings.apiKeys.usedAt': 'τελευταία χρήση',
   'settings.apiKeys.deleteTitle': 'Διαγραφή κλειδιού',
-  'settings.apiKeys.deleteMessage': 'Ό,τι χρησιμοποιεί αυτό το κλειδί σταματά αμέσως να λειτουργεί. Η ενέργεια δεν αναιρείται.',
+  'settings.apiKeys.deleteMessage':
+    'Ό,τι χρησιμοποιεί αυτό το κλειδί σταματά αμέσως να λειτουργεί. Η ενέργεια δεν αναιρείται.',
   'settings.apiKeys.deleted': 'Το κλειδί διαγράφηκε',
   'settings.apiKeys.deleteFailed': 'Δεν ήταν δυνατή η διαγραφή του κλειδιού',
   'settings.apiKeys.createFailed': 'Δεν ήταν δυνατή η δημιουργία του κλειδιού',
@@ -595,8 +602,10 @@ const settings: TranslationStrings = {
   'settings.apiKeys.docsHint': 'Στείλε το κλειδί ως "Authorization: Bearer ..." ή "X-API-Key: ..." στο /api/v1.',
   'settings.apiKeys.endpoint': 'Endpoint',
   'settings.apiKeys.neverUsed': 'δεν χρησιμοποιήθηκε ποτέ',
-  'settings.apiKeys.loadFailed': 'Δεν ήταν δυνατή η φόρτωση των κλειδιών σου. Φόρτωσε ξανά τη σελίδα για να δοκιμάσεις πάλι.',
-  'settings.apiKeys.limitReached': 'Έχεις {max} κλειδιά, το μέγιστο για έναν λογαριασμό. Διάγραψε ένα που δεν χρησιμοποιείς πια για να δημιουργήσεις νέο.',
+  'settings.apiKeys.loadFailed':
+    'Δεν ήταν δυνατή η φόρτωση των κλειδιών σου. Φόρτωσε ξανά τη σελίδα για να δοκιμάσεις πάλι.',
+  'settings.apiKeys.limitReached':
+    'Έχεις {max} κλειδιά, το μέγιστο για έναν λογαριασμό. Διάγραψε ένα που δεν χρησιμοποιείς πια για να δημιουργήσεις νέο.',
   'settings.apiKeys.copyFailed': 'Η αντιγραφή απέτυχε. Επίλεξε το κείμενο και αντίγραψέ το χειροκίνητα.',
   'settings.apiKeys.modal.createTitle': 'Δημιουργία κλειδιού API',
   'settings.apiKeys.modal.name': 'Όνομα',
@@ -605,7 +614,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.modal.creating': 'Δημιουργία...',
   'settings.apiKeys.modal.create': 'Δημιουργία',
   'settings.apiKeys.modal.createdTitle': 'Το κλειδί API δημιουργήθηκε',
-  'settings.apiKeys.modal.createdWarning': 'Αντίγραψε το κλειδί τώρα. Εμφανίζεται μία φορά και δεν μπορεί να ανακτηθεί αργότερα.',
+  'settings.apiKeys.modal.createdWarning':
+    'Αντίγραψε το κλειδί τώρα. Εμφανίζεται μία φορά και δεν μπορεί να ανακτηθεί αργότερα.',
   'settings.apiKeys.modal.done': 'Έτοιμο',
 };
 

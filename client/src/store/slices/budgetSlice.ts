@@ -3,8 +3,9 @@ import { budgetRepo } from '../../repo/budgetRepo'
 import type { StoreApi } from 'zustand'
 import type { TripStoreState } from '../tripStore'
 import type { BudgetItem, BudgetItemMember } from '../../types'
-import type { BudgetCreateItemRequest, BudgetUpdateItemRequest } from '@trek/shared'
+import type { BudgetCreateItemRequest, BudgetFallbackFx, BudgetFreezeRatesResponse, BudgetUpdateItemRequest } from '@trek/shared'
 import { getApiErrorMessage } from '../../types'
+import { withFallbackFx } from '../../hooks/useExchangeRates'
 import { notify } from '../notify'
 
 type SetState = StoreApi<TripStoreState>['setState']
@@ -19,6 +20,16 @@ export interface BudgetSlice {
   toggleBudgetMemberPaid: (tripId: number | string, itemId: number, userId: number, paid: boolean) => Promise<void>
   reorderBudgetItems: (tripId: number | string, orderedIds: number[]) => Promise<void>
   reorderBudgetCategories: (tripId: number | string, orderedCategories: string[]) => Promise<void>
+  freezeMissingRates: (tripId: number | string, fallback?: BudgetFallbackFx) => Promise<BudgetFreezeRatesResponse>
+}
+
+/**
+ * The open trip's currency when `tripId` is that trip, which is what a lent rate has to be
+ * quoted against. Null for any other trip: the store only knows the one that is open.
+ */
+function openTripCurrency(get: GetState, tripId: number | string): string | null {
+  const trip = get().trip
+  return trip && String(trip.id) === String(tripId) ? trip.currency : null
 }
 
 export const createBudgetSlice = (set: SetState, get: GetState): BudgetSlice => ({
@@ -33,7 +44,9 @@ export const createBudgetSlice = (set: SetState, get: GetState): BudgetSlice => 
 
   addBudgetItem: async (tripId, data) => {
     try {
-      const result = await budgetApi.create(tripId, data)
+      // A foreign currency goes out with the rate the browser holds for it, so the server
+      // can freeze one even when its own fetch fails.
+      const result = await budgetApi.create(tripId, withFallbackFx(data, openTripCurrency(get, tripId)))
       set(state => ({ budgetItems: [...state.budgetItems, result.item] }))
       return result.item
     } catch (err: unknown) {
@@ -43,7 +56,7 @@ export const createBudgetSlice = (set: SetState, get: GetState): BudgetSlice => 
 
   updateBudgetItem: async (tripId, id, data) => {
     try {
-      const result = await budgetApi.update(tripId, id, data)
+      const result = await budgetApi.update(tripId, id, withFallbackFx(data, openTripCurrency(get, tripId)))
       set(state => ({
         budgetItems: state.budgetItems.map(item => item.id === id ? result.item : item)
       }))
@@ -150,5 +163,16 @@ export const createBudgetSlice = (set: SetState, get: GetState): BudgetSlice => 
       } catch { /* offline too — the next successful load restores the order */ }
       notify(getApiErrorMessage(err, 'Error reordering budget items'), 'error')
     }
+  },
+
+  // Freezes a rate onto the rows the settlement could not count (see useFreezeMissingRates).
+  // Not optimistic: nothing changes locally until the server says which rows it froze.
+  freezeMissingRates: async (tripId, fallback) => {
+    const result = await budgetApi.freezeRates(tripId, fallback ? { fallback_fx: fallback } : {})
+    if (result.items.length > 0) {
+      const healed = new Map(result.items.map(item => [item.id, item]))
+      set(state => ({ budgetItems: state.budgetItems.map(item => healed.get(item.id) ?? item) }))
+    }
+    return result
   },
 })

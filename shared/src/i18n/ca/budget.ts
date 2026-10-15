@@ -157,7 +157,8 @@ const budget: TranslationStrings = {
   'costs.noReceipts': 'Cap rebut adjunt',
   'costs.deleteReceipt': 'Eliminar rebut',
   'costs.viewReceipt': 'Veure rebut',
-  'costs.receiptLeftBehind': 'No es pot desar i encara hi ha {count} rebuts pujats. Elimina aquests fitxers a la pestanya Fitxers.',
+  'costs.receiptLeftBehind':
+    'No es pot desar i encara hi ha {count} rebuts pujats. Elimina aquests fitxers a la pestanya Fitxers.',
 };
 
 export default budget;

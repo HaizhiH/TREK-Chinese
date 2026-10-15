@@ -10,6 +10,7 @@ import { markdownLinkComponents } from '../shared/markdownLink'
 import { X, Clock, MapPin, ExternalLink, Phone, Banknote, Edit2, Trash2, Plus, Minus, ChevronDown, ChevronUp, FileText, Upload, File, FileImage, Star, Navigation, Map as MapIcon, Users, Mountain, TrendingUp, Bookmark, BookmarkCheck, Copy, Route, StickyNote } from 'lucide-react'
 import PlaceAvatar from '../shared/PlaceAvatar'
 import PlaceAvatarUpload from '../shared/PlaceAvatarUpload'
+import { BlurredCode } from '../shared/BookingCode'
 import PlaceRating from '../shared/StarRating'
 import TrackColorPicker from '../shared/TrackColorPicker'
 import { resolveTrackColor, inheritedTrackColor } from '../Map/trackColors'
@@ -33,6 +34,7 @@ import type { Place, Category, Day, Assignment, Reservation, TripFile, Assignmen
 import type { CollectionStatus } from '@trek/shared'
 import { splitReservationDateTime, formatTime, formatMoney } from '../../utils/formatters'
 import { useTripStore } from '../../store/tripStore'
+import { useCanDo } from '../../store/permissionsStore'
 import { formatDistance, formatElevation } from '../../utils/units'
 import { getNavigationTargets, openNavigationTarget } from './placeNavigation'
 import { TRANSPORT_TYPES, getAssignmentReservations } from '../../utils/dayMerge'
@@ -186,11 +188,21 @@ interface PlaceInspectorProps {
 export default function PlaceInspector({
   place, categories, mode = 'trip', days = [], selectedDayId = null, selectedAssignmentId = null,
   assignments = {}, reservations = [], onEditTransport, onEditReservation,
-  onClose, onEdit, onDelete, onAssignToDay, onRemoveAssignment,
-  files = [], onFileUpload, tripMembers = [], onSetParticipants, onUpdatePlace, onUploadImage, onRate,
+  onClose, onEdit: editPlace, onDelete: deletePlace, onAssignToDay, onRemoveAssignment,
+  files = [], onFileUpload, tripMembers = [], onSetParticipants, onUpdatePlace: updatePlace, onUploadImage, onRate,
   leftWidth = 0, rightWidth = 0,
   collectionStatus, onCopyToTrip, onSetStatus, onRemoveFromList, roadtripEndDay, roadtripStay, roadtripActive,
 }: PlaceInspectorProps) {
+  // Editing the place is a place right. The planner hands the handlers over
+  // regardless, and a member without the right saw Edit, Delete and the inline
+  // rename and got the server's 403 for each (#2446). Collection mode gates
+  // its own actions.
+  const can = useCanDo()
+  const trip = useTripStore(s => s.trip)
+  const mayEditPlace = mode !== 'trip' || can('place_edit', trip)
+  const onEdit = mayEditPlace ? editPlace : undefined
+  const onDelete = mayEditPlace ? deletePlace : undefined
+  const onUpdatePlace = mayEditPlace ? updatePlace : undefined
   // Plugins that declared a place-detail slot mount at the bottom of this panel,
   // scoped to the open place (trip mode only). Inline-filter like the other sites.
   const placeDetailPlugins = usePluginStore((s) => s.plugins).filter((p) => p.type === 'widget' && p.slot === 'place-detail')
@@ -973,7 +985,7 @@ function PlaceReservationParticipants({ selectedAssignmentId, reservations, assi
                             {res.confirmation_number && (
                               <div>
                                 <div className="text-content-faint" style={{ fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 600, textTransform: 'uppercase' }}>{t('reservations.confirmationCode')}</div>
-                                <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}>{res.confirmation_number}</div>
+                                <div className="text-content" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 500, marginTop: 1 }}><BlurredCode>{res.confirmation_number}</BlurredCode></div>
                               </div>
                             )}
                           </div>

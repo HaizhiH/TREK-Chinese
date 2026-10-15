@@ -49,7 +49,8 @@ Both are membership-checked against the current user — same gate as `ctx.trips
 const place = await ctx.places.create(tripId, { name: 'Teamlab', lat: 35.62, lng: 139.78 })
 const day   = await ctx.days.create(tripId, { date: '2027-04-02', notes: 'Odaiba' })
 await ctx.itinerary.assign(tripId, day.id, place.id, 'buy tickets first')
-// days.create reads { date?, notes? } and always appends at the end — a position is honoured on the REST route only, not on the plugin path.
+// days.create reads { date?, notes?, dated? } and appends at the end; a position is honoured on the REST route only, not on the plugin path.
+// { dated: true } instead adds the day after the trip's last date and extends the trip to it.
 // Set a day title later with ctx.days.update(tripId, day.id, { title: 'Odaiba' }).
 ```
 

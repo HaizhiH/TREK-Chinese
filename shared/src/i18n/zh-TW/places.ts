@@ -88,6 +88,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': '預訂備註、確認號...',
   'places.mapsSearchPlaceholder': '搜尋地點...',
   'places.mapsSearchError': '地點搜尋失敗。',
+  'places.searchGoogleInstead': '不是想找的地點？改用 Google 搜尋',
   'places.loadingDetails': '正在載入地點詳情…',
   'places.osmHint': '使用 OpenStreetMap 搜尋（無照片、營業時間或評分）。在設定中新增 Google API 金鑰以獲取完整資訊。',
   'places.source.amap': '高德地圖',

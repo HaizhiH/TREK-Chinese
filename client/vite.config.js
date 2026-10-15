@@ -2,7 +2,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { visualizer } from 'rollup-plugin-visualizer';
-import { rtlTextAlias } from './rtlTextAlias.js';
+import { rtlTextAlias, plyrSpriteAlias } from './rtlTextAlias.js';
 import { readFileSync } from 'node:fs';
 
 // The version this bundle is built as, baked in at build time. The release image
@@ -259,7 +259,7 @@ export default defineConfig(({ mode }) => ({
       },
     }),
   ].filter(Boolean),
-  resolve: { alias: [rtlTextAlias] },
+  resolve: { alias: [rtlTextAlias, plyrSpriteAlias] },
   build: {
     // Pin the output level instead of inheriting whatever the current Vite default
     // is, so a toolchain bump can't silently change which browsers still work.

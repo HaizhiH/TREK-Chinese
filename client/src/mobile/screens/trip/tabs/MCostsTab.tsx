@@ -1,4 +1,4 @@
-import { convertBooked } from '../../../../hooks/useExchangeRates'
+import { convertBooked, convertedLine } from '../../../../hooks/useExchangeRates'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AlertCircle, ArrowDown, ArrowLeftRight, ArrowRight, ArrowUp, Check, ChevronDown, ChevronUp,
@@ -7,14 +7,15 @@ import {
 import MDancingTrek from '../../../components/MDancingTrek'
 import { useAuthStore } from '../../../../store/authStore'
 import { useSettingsStore } from '../../../../store/settingsStore'
-import { useExchangeRates } from '../../../../hooks/useExchangeRates'
+import { useExchangeRates, withFallbackFx } from '../../../../hooks/useExchangeRates'
 import { useTranslation } from '../../../../i18n'
 import { amountToInputString, formatMoney } from '../../../../utils/formatters'
 import { downloadBlob, openFile } from '../../../../utils/fileDownload'
 import { budgetApi } from '../../../../api/client'
 import MCostSheet from '../sheets/MCostSheet'
 import { ReceiptPreviewModal } from '../../../../components/Budget/ReceiptPreviewModal'
-import { finalBudgetFor, finalBudgetSources, readUserNote, settlementDate } from '../../../../components/Budget/CostsPanel.helpers'
+import { useFreezeMissingRates } from '../../../../components/Budget/useFreezeMissingRates'
+import { finalBudgetFor, finalBudgetSources, paidByUser, readUserNote, settlementDate } from '../../../../components/Budget/CostsPanel.helpers'
 import { catMeta, COST_CAT_META } from '../../../../components/Budget/costsCategories'
 import CustomSelect from '../../../../components/shared/CustomSelect'
 import { CustomDatePicker } from '../../../../components/shared/CustomDateTimePicker'
@@ -27,8 +28,8 @@ import { Eyebrow, FIELD_CLS, FormSheetFooter, FormSheetHeader } from '../sheets/
 import { CountPill, TabScroller } from './tabChrome'
 import { STATUS_COLOR, type MTabScreenProps } from './tabModel'
 import {
-  baseTotal, buildCostsCsv, categoryBreakdown, categoryFilterKeys, computeTotals, currencyOf,
-  dayFilterKeys, filterBudgetItems, filterSettlements, groupLedgerByDay, isUnfinished, memberShareOf, tint,
+  baseTotal, buildCostsCsv, categoryBreakdown, categoryFilterKeys, computeTotals,
+  dayFilterKeys, filterBudgetItems, filterSettlements, groupLedgerByDay, isUnfinished, lineOf, memberShareOf, tint,
   type CostsCtx, type CostsSegment, type CostsSettlement, type CostsSettlementResponse,
 } from './costsModel'
 import type { BudgetParticipantFinal } from '@trek/shared'
@@ -55,18 +56,20 @@ export default function MCostsTab({ planner, shell }: MTabScreenProps) {
   const displayCurrency = useSettingsStore(s => s.settings.default_currency)
   const base = (displayCurrency || trip?.currency || 'EUR').toUpperCase()
   const tripCurrency = (trip?.currency || base).toUpperCase()
-  const { convert } = useExchangeRates(base)
-  const ctx: CostsCtx = useMemo(() => ({ me, tripCurrency, convert }), [me, tripCurrency, convert])
+  // Anchored on the trip currency's quote, the one the server books with (#2525).
+  const { convert, displayPerTrip } = useExchangeRates(base, tripCurrency)
+  const ctx: CostsCtx = useMemo(() => ({ me, tripCurrency, displayCurrency: base, convert }), [me, tripCurrency, base, convert])
 
   const [settlement, setSettlement] = useState<CostsSettlementResponse | null>(null)
   // A failed settlement read leaves `settlement` null, and the final budget would
   // read that as "the trip cost nobody anything", a claim we cannot make.
   const [settlementError, setSettlementError] = useState(false)
+  // Sends the browser's own figure for the display currency, as CostsPanel.tsx does.
   const loadSettlement = useCallback(() => {
-    budgetApi.settlement(tripId, base)
+    budgetApi.settlement(tripId, base, base !== tripCurrency ? displayPerTrip : null)
       .then(s => { setSettlement(s); setSettlementError(false) })
       .catch(() => setSettlementError(true))
-  }, [tripId, base])
+  }, [tripId, base, tripCurrency, displayPerTrip])
 
   // Mirrors CostsPanel.tsx: items reload on trip change, settlement reloads on
   // trip/base change; further refreshes are explicit after each mutation below
@@ -78,6 +81,7 @@ export default function MCostsTab({ planner, shell }: MTabScreenProps) {
   useEffect(() => {
     loadSettlement()
   }, [loadSettlement])
+  useFreezeMissingRates({ tripId, tripCurrency, canEdit, unconverted: settlement?.unconverted, onHealed: loadSettlement })
 
   const [search, setSearch] = useState('')
   const [segment, setSegment] = useState<CostsSegment>('all')
@@ -339,7 +343,7 @@ export default function MCostsTab({ planner, shell }: MTabScreenProps) {
                   : <ChevronDown size={13} strokeWidth={2.2} className="flex-none text-m-faint" />}
               </button>
               {open && (
-                <FinalBudgetBreakdown row={row} items={budgetItems} base={base} locale={locale} t={t} personName={personName} />
+                <FinalBudgetBreakdown row={row} items={budgetItems} ctx={ctx} base={base} locale={locale} t={t} personName={personName} />
               )}
             </div>
           )
@@ -570,6 +574,7 @@ export default function MCostsTab({ planner, shell }: MTabScreenProps) {
         }}
         tripId={tripId}
         base={base}
+        tripCurrency={tripCurrency}
         people={tripMembers}
         me={me}
         toast={toast}
@@ -622,8 +627,8 @@ function ExpenseRow({ item, ctx, base, locale, t, canEdit, onEdit, onDelete, onT
 }) {
   const meta = catMeta(item.category)
   const Icon = meta.Icon
-  const cur = currencyOf(item, ctx)
   const total = baseTotal(item, ctx)
+  const line = lineOf(item.total_price || 0, item, ctx, total)
   const unfinished = isUnfinished(item, ctx)
   const borderColor = tint(meta.color, 0.55)
   const members = item.members || []
@@ -670,9 +675,9 @@ function ExpenseRow({ item, ctx, base, locale, t, canEdit, onEdit, onDelete, onT
                 </button>
               )}
             </div>
-            {cur !== base && (
+            {line && (
               <div className="mt-[1px] truncate font-geist text-[0.59375rem] text-m-faint">
-                {formatMoney(item.total_price, cur, locale)} {'→'} {formatMoney(total, base, locale)}
+                {formatMoney(line.entered.amount, line.entered.currency, locale)} {'→'} {formatMoney(line.into.amount, line.into.currency, locale)}
               </div>
             )}
             {members.length > 0 && (
@@ -756,7 +761,9 @@ function PaymentRow({ settlement, ctx, base, locale, t, personName, canEdit, onE
 }) {
   const cur = (settlement.currency || base).toUpperCase()
   // At the rate it was settled at, not today's (#1445), matching the desktop ledger.
-  const amount = convertBooked(settlement.amount, settlement.currency, settlement.exchange_rate, ctx.tripCurrency, ctx.convert)
+  // A transfer without a currency was entered in the display currency, not the trip's.
+  const amount = convertBooked(settlement.amount, cur, settlement.exchange_rate, ctx.tripCurrency, ctx.convert)
+  const line = convertedLine(settlement.amount, cur, settlement.exchange_rate, ctx.tripCurrency, base, amount)
   return (
     <div className="mt-2 flex items-center gap-[6px]">
       <div className="relative min-w-0 flex-1 rounded-2xl border border-[color:var(--m-rowbr)] bg-m-card px-3 py-[12px]">
@@ -767,9 +774,9 @@ function PaymentRow({ settlement, ctx, base, locale, t, personName, canEdit, onE
           <div className="min-w-0 flex-1">
             <div className="truncate text-[0.8125rem] font-bold text-m-ink">{t('costs.payment')}</div>
             <div className="truncate font-geist text-[0.65625rem] text-m-faint">{personName(settlement.from_user_id)} → {personName(settlement.to_user_id)}</div>
-            {cur !== base && (
+            {line && (
               <div className="mt-[1px] truncate font-geist text-[0.59375rem] text-m-faint">
-                {formatMoney(settlement.amount, cur, locale)} {'→'} {formatMoney(amount, base, locale)}
+                {formatMoney(line.entered.amount, line.entered.currency, locale)} {'→'} {formatMoney(line.into.amount, line.into.currency, locale)}
               </div>
             )}
           </div>
@@ -799,9 +806,10 @@ function PaymentRow({ settlement, ctx, base, locale, t, personName, canEdit, onE
  * with the balances; each line is signed by what it does to the final, so the
  * column reads as a subtraction and the rows add up to the line above them.
  */
-function FinalBudgetBreakdown({ row, items, base, locale, t, personName }: {
+function FinalBudgetBreakdown({ row, items, ctx, base, locale, t, personName }: {
   row: BudgetParticipantFinal
   items: BudgetItem[]
+  ctx: CostsCtx
   base: string
   locale: string
   t: TFn
@@ -810,6 +818,12 @@ function FinalBudgetBreakdown({ row, items, base, locale, t, personName }: {
   const signed = (v: number) => (v < 0 ? '−' : '+') + formatMoney(Math.abs(v), base, locale)
   const { fronted, moved, outstanding } = finalBudgetSources(row, items)
   const transfer = (fromId: number, toId: number) => `${personName(fromId)} → ${personName(toId)}`
+  // Beside a converted row's name, what was entered, as the list above names it (#2525).
+  const nameOf = (itemId: number, name: string, shown: number) => {
+    const e = items.find(i => i.id === itemId)
+    const entered = e ? lineOf(paidByUser(e, row.user_id), e, ctx, shown)?.entered : null
+    return entered ? `${name} · ${formatMoney(entered.amount, entered.currency, locale)}` : name
+  }
   const line = (key: string, label: string, value: string) => (
     <div key={key} className="flex items-baseline gap-2 py-[2px] font-geist text-[0.6875rem]">
       <span className="min-w-0 flex-1 truncate text-m-muted">{label}</span>
@@ -828,7 +842,7 @@ function FinalBudgetBreakdown({ row, items, base, locale, t, personName }: {
       {line('expenses', t('costs.finalExpenses'), signed(row.expenses))}
       {line('reimbursed', t('costs.finalReimbursed'), signed(-row.reimbursed))}
       {line('pending', t('costs.finalPending'), signed(-row.pending))}
-      {section(t('costs.finalExpenses'), fronted.map(r => line(`e${r.item_id}`, r.name, signed(r.amount))))}
+      {section(t('costs.finalExpenses'), fronted.map(r => line(`e${r.item_id}`, nameOf(r.item_id, r.name, r.amount), signed(r.amount))))}
       {section(t('costs.finalReimbursed'), moved.map(r => line(`s${r.settlement_id}`, transfer(r.from_user_id, r.to_user_id), signed(-r.amount))))}
       {section(t('costs.finalPending'), outstanding.map((r, i) => line(`f${i}`, transfer(r.from_user_id, r.to_user_id), signed(-r.amount))))}
     </div>
@@ -871,12 +885,13 @@ function MemberAvatar({ name, avatarUrl, isMe, variant, size, t }: {
  * (editable like an expense's, unlike the legacy created_at-only date, see
  * `settlementDate` in CostsPanel.helpers.ts).
  */
-function AddPaymentSheet({ open, editing, onClose, tripId, base, people, me, toast, t, onSaved }: {
+function AddPaymentSheet({ open, editing, onClose, tripId, base, tripCurrency, people, me, toast, t, onSaved }: {
   open: boolean
   editing: CostsSettlement | null
   onClose: () => void
   tripId: number
   base: string
+  tripCurrency: string
   people: TripMember[]
   me: number
   toast: { error: (message: string) => void }
@@ -907,7 +922,7 @@ function AddPaymentSheet({ open, editing, onClose, tripId, base, people, me, toa
   const save = async () => {
     if (!valid || saving) return
     setSaving(true)
-    const data = { from_user_id: fromId, to_user_id: toId, amount: amt, currency, settled_at: day }
+    const data = withFallbackFx({ from_user_id: fromId, to_user_id: toId, amount: amt, currency, settled_at: day }, tripCurrency)
     try {
       if (editing) await budgetApi.updateSettlement(tripId, editing.id, data)
       else await budgetApi.createSettlement(tripId, data)

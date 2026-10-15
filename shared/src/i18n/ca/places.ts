@@ -36,7 +36,8 @@ const places: TranslationStrings = {
   'places.importNaverList': 'Llista de Naver',
   'places.googleListHint': "Enganxa un enllaç compartit d'una llista de Google Maps per importar tots els llocs.",
   'places.googleListImported': '{count} llocs importats de "{list}"',
-  'places.googleDirHint': 'Un enllaç d’indicacions també serveix: les seves parades esdevenen llocs, en ordre de conducció.',
+  'places.googleDirHint':
+    'Un enllaç d’indicacions també serveix: les seves parades esdevenen llocs, en ordre de conducció.',
   'places.googleListError': 'Error en importar la llista de Google Maps',
   'places.naverListHint': "Enganxa un enllaç compartit d'una llista de Naver Maps per importar tots els llocs.",
   'places.naverListImported': '{count} llocs importats de "{list}"',
@@ -87,6 +88,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Notes de reserva, número de confirmació...',
   'places.mapsSearchPlaceholder': 'Cerca llocs...',
   'places.mapsSearchError': 'La cerca de llocs ha fallat.',
+  'places.searchGoogleInstead': 'No és el lloc correcte? Cerca a Google',
   'places.loadingDetails': 'Carregant els detalls del lloc…',
   'places.osmHint':
     "S'està utilitzant la cerca amb OpenStreetMap (sense fotos, horaris ni valoracions). Afegeix una clau API de Google a Configuració per obtenir tots els detalls.",

@@ -161,6 +161,27 @@ function markerSvg(dayColor: string, dayLabel: number, highlighted: boolean): st
   </div>`
 }
 
+/**
+ * Pan, don't zoom: the initial fitBounds decides how far out the reader starts,
+ * and a focus keeps that (discussion #2299).
+ *
+ * Deferred until the map has its first view. That view is set on a rAF after
+ * the build, and the active entry asks for its pan on a 50 ms timer, so a tab
+ * in the background or a slow frame lets the pan come first. Leaflet does not
+ * refuse a pan on a viewless map, it takes it as the first view, with the zoom
+ * still undefined: the tile layer aborts its own add on that, the load event
+ * stops halfway, and every marker queued behind it never makes it onto the map.
+ * The next rebuild then tears down markers that were never added and dies in
+ * Leaflet's icon removal, which took the whole journey page with it after each
+ * save. whenReady runs the pan at once on a map with a view and otherwise right
+ * after the fit lands.
+ */
+function panToMarker(map: L.Map, marker: L.Marker): void {
+  map.whenReady(() => {
+    map.panTo(marker.getLatLng(), { animate: true, duration: 0.5 })
+  })
+}
+
 const EMPTY_TRAIL: { lat: number; lng: number }[] = []
 const EMPTY_TRACKS: JourneyTrack[] = []
 /** Fallback when a track carries no colour of its own, matching the planner's default. */
@@ -254,11 +275,7 @@ function JourneyMap(
   const focusMarker = useCallback((id: string) => {
     highlightMarker(id)
     const marker = markersRef.current.get(id)
-    if (marker && mapRef.current) {
-      try {
-        mapRef.current.panTo(marker.getLatLng(), { animate: true, duration: 0.5 })
-      } catch { /* map not yet initialized */ }
-    }
+    if (marker && mapRef.current) panToMarker(mapRef.current, marker)
   }, [])
 
   const invalidateSize = useCallback(() => {
@@ -511,14 +528,7 @@ function JourneyMap(
       highlightMarker(activeMarkerId)
       const marker = markersRef.current.get(activeMarkerId)
       if (!marker || !mapRef.current) return
-      // Pan, don't zoom — see focusMarker. fitBounds may still be pending when this
-      // fires, and panTo on a map with no view throws "Set map center and zoom
-      // first", so the catch is where the map gets its first one.
-      try {
-        mapRef.current.panTo(marker.getLatLng(), { animate: true, duration: 0.5 })
-      } catch {
-        mapRef.current.setView(marker.getLatLng(), 12)
-      }
+      panToMarker(mapRef.current, marker)
     }, 50)
     return () => clearTimeout(timer)
   }, [activeMarkerId])

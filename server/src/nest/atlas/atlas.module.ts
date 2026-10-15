@@ -11,6 +11,8 @@ import { PublicStatsController } from './public-stats.controller';
 import { ApiTokenGuard } from '../public-api/api-token.guard';
 import { TokensModule } from '../tokens/tokens.module';
 import { RateLimitModule } from '../common/rate-limit.module';
+import { SchedulingModule } from '../scheduling/scheduling.module';
+import { PlaceRegionsRepairJob } from './place-regions-repair.job';
 
 /**
  * Atlas addon domain (L7 leaf module). Registered in AppModule. Exports
@@ -29,11 +31,13 @@ import { RateLimitModule } from '../common/rate-limit.module';
  * than pulled in with PublicApiModule: @UseGuards instantiates a guard in the
  * declaring controller's module, so exporting it from over there would still leave
  * its TokenService unresolvable here. TokensModule is a leaf, so the edge is free.
+ *
+ * PlaceRegionsRepairJob puts right, once, the place_regions rows cached before #2527.
  */
 @Module({
-  imports: [AuthModule, PluginGuardsModule, AddonsModule, TokensModule, RateLimitModule],
+  imports: [AuthModule, PluginGuardsModule, AddonsModule, TokensModule, RateLimitModule, SchedulingModule],
   controllers: [AtlasController, TravelStatsController, PublicStatsController],
-  providers: [AtlasService, AtlasMcp, AtlasRpc, ApiTokenGuard],
+  providers: [AtlasService, AtlasMcp, AtlasRpc, ApiTokenGuard, PlaceRegionsRepairJob],
   exports: [AtlasService],
 })
 export class AtlasModule {}

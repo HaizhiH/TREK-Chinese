@@ -8,7 +8,7 @@ import { journeyApi, addonsApi, memoriesApi } from '../../api/client'
 import { useToast } from '../shared/Toast'
 import { getApiErrorMessage } from '../../types'
 import type { JourneyEntry, GalleryPhoto, JourneyTrip } from '../../store/journeyStore'
-import { photoUrl } from '../../pages/journeyDetail/JourneyDetailPage.helpers'
+import { photoUrl, posterlessVideo } from '../../pages/journeyDetail/JourneyDetailPage.helpers'
 import { ProviderPicker } from './JourneyDetailPageProviderPicker'
 import { ScrollTrigger } from './JourneyDetailPageScrollTrigger'
 import EmptyState from '../shared/EmptyState'
@@ -151,9 +151,7 @@ export function GalleryView({ entries, gallery, journeyId, userId, trips, onPhot
               onClick={() => onPhotoClick(allPhotos, i)}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPhotoClick(allPhotos, i) } }}
             >
-              {photo.media_type === 'video' &&
-                photo.provider === 'local' &&
-                !photo.thumbnail_path ? (
+              {posterlessVideo(photo) ? (
                 // Poster-less local video: show a neutral tile.
                 <div className="w-full h-full bg-zinc-200 dark:bg-zinc-800" />
               ) : (

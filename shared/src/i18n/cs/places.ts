@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Poznámky k rezervaci, potvrzovací kód...',
   'places.mapsSearchPlaceholder': 'Hledat místa...',
   'places.mapsSearchError': 'Hledání místa se nezdařilo.',
+  'places.searchGoogleInstead': 'Není to správné místo? Hledat na Googlu',
   'places.loadingDetails': 'Načítání podrobností místa…',
   'places.osmHint':
     'Používáte hledání přes OpenStreetMap (bez fotek a hodnocení). Pro plné detaily přidejte Google API klíč v nastavení.',

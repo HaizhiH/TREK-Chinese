@@ -36,6 +36,7 @@ import { startConnectivityProbe } from './sync/connectivity'
 import { requestPersistentStorage } from './sync/persistentStorage'
 import ErrorBoundary, { RootErrorFallback } from './components/shared/ErrorBoundary'
 import { installGlobalErrorHandlers } from './utils/globalErrorHandlers'
+import { schedulePrecacheRepair } from './utils/serviceWorkerShell'
 
 maybeInstallTouchDragPolyfill()
 startConnectivityProbe()
@@ -43,6 +44,9 @@ startConnectivityProbe()
 requestPersistentStorage()
 // Event handlers and async code never reach a boundary; this is where they land.
 installGlobalErrorHandlers()
+// A page the precache keeps under a stylesheet's or a script's name would be
+// handed on to every later release (#2524).
+schedulePrecacheRepair()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

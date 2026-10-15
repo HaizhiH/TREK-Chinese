@@ -3,6 +3,10 @@ import type { TranslationStrings } from '../types';
 const shared: TranslationStrings = {
   'shared.expired': 'Link lejárt vagy érvénytelen',
   'shared.expiredHint': 'Ez a megosztott utazási link már nem aktív.',
+  'shared.loadFailed': 'Az utazást nem sikerült betölteni',
+  'shared.loadFailedHint':
+    'Ez nem jelenti azt, hogy a link lejárt. Ellenőrizd a kapcsolatot, és próbáld újra egy kicsit később.',
+  'shared.retry': 'Újrapróbálás',
   'shared.readOnly': 'Csak olvasható megosztott nézet',
   'shared.tabPlan': 'Terv',
   'shared.tabBookings': 'Foglalások',

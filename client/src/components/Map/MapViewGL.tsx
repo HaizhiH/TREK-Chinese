@@ -22,6 +22,7 @@ import { visibleRouteReservations } from '../../utils/reservationRoutes'
 import { safeHexColor } from '../../utils/safeColor'
 import { MAPBOX_DEFAULT_STYLE, styleForActiveProvider, basemapLanguage, type GlMapProvider } from './glProviders'
 import LocationButton from './LocationButton'
+import { useIsPhone } from '../../mobile/useIsPhone'
 import { useGeolocation } from '../../hooks/useGeolocation'
 import type { Day, Place, Reservation, RouteVia } from '../../types'
 import type { MapHoverInfo } from './mapHover'
@@ -41,6 +42,7 @@ import { buildPoiPopupHtml } from './placePopup'
 import { pluginsApi, type PluginMapMarker, type PluginMapLayer } from '../../api/client'
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, SATELLITE_TILE_URL, SATELLITE_TILE_ATTRIBUTION, SATELLITE_TILE_MAXZOOM } from '../../constants/mapDefaults'
 import { computeMapViewport, TILE_SIZE_GL, type ViewportPadding } from '../../utils/mapViewport'
+import { selectedPlaceTarget } from './selectedPlaceTarget'
 
 function categoryIconSvg(iconName: string | null | undefined, size: number): string {
   const IconComponent = (iconName && CATEGORY_ICON_MAP[iconName]) || CATEGORY_ICON_MAP['MapPin']
@@ -146,6 +148,8 @@ interface Props {
   routeColors?: ({ line: string; casing: string } | undefined)[] | null
   routeSegments?: RouteSegment[]
   selectedPlaceId?: number | null
+  /** The selected place itself, for when no pin on this map stands for it. */
+  selectedPlace?: Place | null
   onMarkerClick?: (id: number) => void
   hoverDisabled?: boolean
   onMapClick?: (info: { latlng: { lat: number; lng: number } }) => void
@@ -163,6 +167,11 @@ interface Props {
   showTransitRoutes?: boolean
   days?: Day[]
   selectedDayId?: number | null
+  /**
+   * Whether a booking switched on by hand also has to run on the selected day to be
+   * drawn. Only the phone's plan map asks for it; see RouteVisibilityOptions.
+   */
+  scopeConnectionsToDay?: boolean
   showReservationStats?: boolean
   onReservationClick?: (reservationId: number) => void
   pois?: Poi[]
@@ -671,6 +680,7 @@ export function MapViewGL({
   routeColors = null,
   routeSegments = NO_ROUTE_SEGMENTS,
   selectedPlaceId = null,
+  selectedPlace = null,
   hoverDisabled = false,
   onMarkerClick,
   onMapClick,
@@ -695,6 +705,7 @@ export function MapViewGL({
   showTransitRoutes = true,
   days = NO_DAYS,
   selectedDayId = null,
+  scopeConnectionsToDay = false,
   showReservationStats = false,
   onReservationClick,
   pois = NO_POIS,
@@ -1163,6 +1174,12 @@ export function MapViewGL({
   const onProviderReadyRef = useRef(_onProviderReady)
   onProviderReadyRef.current = _onProviderReady
   const { position: userPosition, mode: trackingMode, error: trackingError, errorCode: trackingErrorCode, cycleMode: cycleTrackingMode, setMode: setTrackingMode } = useGeolocation()
+  // Desktop browsers only get IP-based geolocation (city-level accuracy), so
+  // the location button would be misleading; the phone, where real GPS lives,
+  // keeps it. Read here with the other hooks rather than beside the button:
+  // the tokenless branch below returns early, and a hook after it runs on some
+  // renders and not others.
+  const isMobile = useIsPhone()
   const onClickRefs = useRef({ marker: onMarkerClick, map: onMapClick, context: onMapContextMenu })
   onClickRefs.current.marker = onMarkerClick
   onClickRefs.current.map = onMapClick
@@ -2185,8 +2202,8 @@ export function MapViewGL({
   // DayPlanSidebar — nothing is rendered until the user enables a
   // booking's route, matching the Leaflet MapView's behaviour.
   const visibleReservations = useMemo(() => (
-    visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes, selectedDayId, days })
-  ), [reservations, visibleConnectionIds, showTransitRoutes, selectedDayId, days])
+    visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes, selectedDayId, days, scopeConnectionsToDay })
+  ), [reservations, visibleConnectionIds, showTransitRoutes, selectedDayId, days, scopeConnectionsToDay])
   // Real road geometry for car/bus/taxi/bicycle bookings (straight line until it loads/if it fails).
   const transportRoutes = useTransportRoutes(visibleReservations)
 
@@ -2301,7 +2318,7 @@ export function MapViewGL({
   useEffect(() => {
     const map = mapRef.current
     if (!map || !selectedPlaceId) return
-    const target = places.find(p => p.id === selectedPlaceId) || dayPlaces.find(p => p.id === selectedPlaceId)
+    const target = selectedPlaceTarget(selectedPlaceId, places, dayPlaces, selectedPlace)
     if (!target?.lat || !target?.lng) return
     try {
       map.flyTo({
@@ -2388,9 +2405,6 @@ export function MapViewGL({
     )
   }
 
-  // Desktop browsers only get IP-based geolocation (city-level accuracy),
-  // so the button would be misleading. Mobile, where real GPS lives, keeps it.
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   // When the day-detail panel is open it slides up over the map (bottom: navh+20,
   // height var(--day-panel-h)) and covers the button's band, so lift the button
   // above it; otherwise keep the plain bottom-nav offset. #1348

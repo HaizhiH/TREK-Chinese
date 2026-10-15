@@ -157,6 +157,7 @@ const budget: TranslationStrings = {
   'costs.noReceipts': 'Inga bifogade kvitton',
   'costs.deleteReceipt': 'Ta bort kvitto',
   'costs.viewReceipt': 'Visa kvitto',
-  'costs.receiptLeftBehind': 'Sparandet misslyckades och {count} uppladdade kvitton finns kvar. Ta bort dem under Filer.',
+  'costs.receiptLeftBehind':
+    'Sparandet misslyckades och {count} uppladdade kvitton finns kvar. Ta bort dem under Filer.',
 };
 export default budget;

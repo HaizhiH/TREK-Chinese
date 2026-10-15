@@ -40,17 +40,28 @@ const utcOffsetMinutes = looseNumber;
 
 // ── Immich ────────────────────────────────────────────────────────────────
 
+/**
+ * Trust a self-signed certificate on the Immich server (#2475). Absent means
+ * "leave the stored choice as it is", so a client that predates the switch
+ * cannot turn it off by saving. A plain boolean: the field is new, and the
+ * settings form has always sent its checkboxes as booleans, so none of the
+ * string leniency `synology_skip_ssl` carries is owed here.
+ */
+const immichAllowInsecureTls = z.boolean().optional();
+
 export const immichSettingsSchema = z.looseObject({
   immich_url: optionalText,
   immich_api_key: optionalText,
   // Applied only when it is a real boolean (`typeof auto_upload === 'boolean'`),
   // so anything else is accepted and ignored, exactly as before.
   auto_upload: z.unknown().optional(),
+  allow_insecure_tls: immichAllowInsecureTls,
 });
 
 export const immichTestSchema = z.looseObject({
   immich_url: optionalText,
   immich_api_key: optionalText,
+  allow_insecure_tls: immichAllowInsecureTls,
 });
 
 export const immichSearchSchema = z.looseObject({

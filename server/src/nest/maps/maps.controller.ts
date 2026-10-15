@@ -86,7 +86,7 @@ export class MapsController {
     @Query('lang') lang?: string,
   ): Promise<MapsSearchResult> {
     try {
-      return await this.maps.search(user.id, body.query, lang, body.locationBias);
+      return await this.maps.search(user.id, body.query, lang, body.locationBias, body.provider);
     } catch (err: unknown) {
       console.error('Maps search error:', err);
       throw toHttpException(err, 'Search error', 500);

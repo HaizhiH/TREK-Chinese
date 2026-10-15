@@ -21,6 +21,7 @@ import { TodoService } from '../../src/nest/todo/todo.service';
 import { PackingService } from '../../src/nest/packing/packing.service';
 import { DayNotesService } from '../../src/nest/day-notes/day-notes.service';
 import { DaysService } from '../../src/nest/days/days.service';
+import { DayRemovalService } from '../../src/nest/days/day-removal.service';
 import { AssignmentsService } from '../../src/nest/assignments/assignments.service';
 import { LlmConfigResolver } from '../../src/nest/llm-parse/llm-config.resolver';
 import { SettingsService } from '../../src/nest/settings/settings.service';
@@ -113,7 +114,7 @@ export function createPluginRpcHostFactory(dbs: DatabaseService): PluginRpcHostF
   const places = new PlacesService(dbs, permissions, realtime, new MapsService(dbs, photoCache, {} as never, { getAmapConfig: () => ({ enabled: false }) } as never), queryHelpers, unsplash, photoCache, journey, generalStorage, accommodations);
   // After accommodations: a hotel booking writes the stay's day stop through it.
   const reservations = new ReservationsService(dbs, permissions, budget, realtime, notificationsStub(), new ReservationsReadRepository(dbs), accommodations);
-  const trips = new TripsService(dbs, reservations, days, permissions, budget, vacay, realtime, unsplash, generalStorage);
+  const trips = new TripsService(dbs, reservations, days, permissions, budget, vacay, realtime, unsplash, generalStorage, new SettingsService(dbs));
   const members = new TripMembersService(dbs, budget, new UserCleanupService(dbs, budget), permissions, realtime, notificationsStub());
   const guards = new PluginGuards(dbs, permissions, addons);
 
@@ -127,7 +128,7 @@ export function createPluginRpcHostFactory(dbs: DatabaseService): PluginRpcHostF
     new PackingRpc(packing, realtime, guards),
     new FilesRpc(files, realtime, dbs, guards, generalStorage),
     new PlacesRpc(places, journey, realtime, guards),
-    new DaysRpc(days, realtime, guards),
+    new DaysRpc(days, realtime, guards, new DayRemovalService(dbs, days, accommodations, assignments)),
     new AccommodationsRpc(accommodations, realtime, guards),
     new ItineraryRpc(assignments, realtime, guards),
     new TripsRpc(trips, reservations, days, membership, dbs, realtime, guards, accommodations, members),

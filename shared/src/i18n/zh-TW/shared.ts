@@ -3,6 +3,9 @@ import type { TranslationStrings } from '../types';
 const shared: TranslationStrings = {
   'shared.expired': '連結已過期或無效',
   'shared.expiredHint': '此共享旅行連結已失效。',
+  'shared.loadFailed': '無法載入此旅行',
+  'shared.loadFailedHint': '這並不代表連結已過期。請檢查網路連線，稍後再試。',
+  'shared.retry': '重試',
   'shared.readOnly': '只讀共享檢視',
   'shared.tabPlan': '計劃',
   'shared.tabBookings': '預訂',

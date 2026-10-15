@@ -3,6 +3,7 @@ import {
   createAlbumLinkSchema,
   immichSearchSchema,
   immichSettingsSchema,
+  immichTestSchema,
   setTripPhotoSharingSchema,
   synologySearchSchema,
   synologySettingsSchema,
@@ -26,6 +27,32 @@ describe('immich contracts', () => {
   it('accepts auto_upload in any shape, since only a real boolean is acted on', () => {
     for (const auto_upload of [true, false, 'yes', 1, null]) {
       expect(immichSettingsSchema.safeParse({ auto_upload }).success).toBe(true);
+    }
+  });
+
+  it('accepts the self-signed switch as a boolean, on save and on test (#2475)', () => {
+    for (const allow_insecure_tls of [true, false]) {
+      expect(immichSettingsSchema.safeParse({ allow_insecure_tls }).success).toBe(true);
+      expect(
+        immichTestSchema.safeParse({
+          immich_url: 'https://immich.example.org',
+          immich_api_key: 'k',
+          allow_insecure_tls,
+        }).success,
+      ).toBe(true);
+    }
+  });
+
+  it('leaves the switch optional, since an older client never sends it', () => {
+    const parsed = immichSettingsSchema.safeParse({ immich_url: 'https://immich.example.org', immich_api_key: 'k' });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.allow_insecure_tls).toBeUndefined();
+  });
+
+  it('refuses a switch value that is not a boolean, its string included', () => {
+    for (const allow_insecure_tls of ['true', 'yes', 1, null]) {
+      expect(immichSettingsSchema.safeParse({ allow_insecure_tls }).success).toBe(false);
+      expect(immichTestSchema.safeParse({ allow_insecure_tls }).success).toBe(false);
     }
   });
 

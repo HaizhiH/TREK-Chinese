@@ -1,7 +1,7 @@
 import { isEffectivelyOffline } from '../sync/networkMode'
 import axios, { AxiosInstance } from 'axios'
 import type { z } from 'zod'
-import type { Place } from '../types'
+import type { Day, Place, Trip } from '../types'
 import type { TransitProvider } from '@trek/shared'
 import { randomId } from '../utils/randomId'
 import {
@@ -40,6 +40,8 @@ import {
   type PackingImportRequest, type PackingBagMembersRequest, type PackingUpdateBagRequest,
   type PackingCategoryAssigneesRequest, type PackingApplyTemplateRequest,
   type BudgetUpdateMembersRequest, type BudgetToggleMemberPaidRequest, type BudgetReorderCategoriesRequest,
+  type BudgetCreateSettlementRequest, type BudgetUpdateSettlementRequest, type BudgetSettlementQuery,
+  type BudgetFreezeRatesRequest, type BudgetFreezeRatesResponse,
   type TodoCategoryAssigneesRequest,
   type CollabNoteCreateRequest, type CollabNoteUpdateRequest, type CollabPollCreateRequest,
   type CollabPollVoteRequest, type CollabMessageCreateRequest, type CollabReactionRequest,
@@ -434,11 +436,17 @@ export const tripsApi = {
 
 export const daysApi = {
   list: (tripId: number | string) => apiClient.get(`/trips/${tripId}/days`).then(r => r.data),
-  create: (tripId: number | string, data: DayCreateRequest) => apiClient.post(`/trips/${tripId}/days`, data).then(r => r.data),
+  // `trip` comes along when the new day changed the trip itself: a dated day
+  // (`dated: true`) moved its end date, an insert at a position grew it by a day.
+  create: (tripId: number | string, data: DayCreateRequest): Promise<{ day: Day; trip?: Trip }> =>
+    apiClient.post(`/trips/${tripId}/days`, data).then(r => r.data),
   update: (tripId: number | string, dayId: number | string, data: DayUpdateRequest) => apiClient.put(`/trips/${tripId}/days/${dayId}`, data).then(r => r.data),
   // Whole-day default route mode (#1281); per-segment leg modes override it.
   updateTransport: (tripId: number | string, dayId: number | string, mode: string | null) => apiClient.put(`/trips/${tripId}/days/${dayId}/transport`, { transport_mode: mode }).then(r => r.data),
-  delete: (tripId: number | string, dayId: number | string) => apiClient.delete(`/trips/${tripId}/days/${dayId}`).then(r => r.data),
+  // Answers with the trip in list shape: its day count changed, and its end
+  // date when the day took the last date along.
+  delete: (tripId: number | string, dayId: number | string): Promise<{ success: boolean; trip?: Trip }> =>
+    apiClient.delete(`/trips/${tripId}/days/${dayId}`).then(r => r.data),
   reorder: (tripId: number | string, orderedIds: number[]) => apiClient.put(`/trips/${tripId}/days/reorder`, { orderedIds } satisfies DayReorderRequest).then(r => r.data),
 }
 
@@ -671,6 +679,8 @@ export const adminApi = {
   updatePlacesAutocomplete: (enabled: boolean) => apiClient.put('/admin/places-autocomplete', { enabled }).then(r => r.data),
   getPlacesDetails: () => apiClient.get('/admin/places-details').then(r => r.data),
   updatePlacesDetails: (enabled: boolean) => apiClient.put('/admin/places-details', { enabled }).then(r => r.data),
+  getPlacesGoogleOnly: () => apiClient.get('/admin/places-google-only').then(r => r.data),
+  updatePlacesGoogleOnly: (enabled: boolean) => apiClient.put('/admin/places-google-only', { enabled }).then(r => r.data),
   getPlacesEnrich: () => apiClient.get('/admin/places-enrich').then(r => r.data),
   updatePlacesEnrich: (enabled: boolean) => apiClient.put('/admin/places-enrich', { enabled }).then(r => r.data),
   getTransitProvider: () => apiClient.get('/admin/transit-provider').then(r => r.data),
@@ -1218,14 +1228,19 @@ export const mapsApi = {
    * caller of this one function gets them without knowing they exist. Appended rather
    * than interleaved: the core list is ordered by relevance and has earned that order,
    * and a plugin's row carries its own `source` for a caller that wants to mark it.
+   *
+   * `provider: 'google'` sends this one search to Google alone, the "search Google
+   * instead" link under a list the index answered with the wrong place. The server
+   * ignores it unless Google holds the keyed slot: without a Google key, or with
+   * Amap or OpenStreetMap picked as the provider, the index answers as usual.
    */
-  search: (query: string, lang?: string, locationBias?: { lat: number; lng: number; radius?: number }) =>
+  search: (query: string, lang?: string, locationBias?: { lat: number; lng: number; radius?: number }, provider?: 'google') =>
     withCachedPlaces(query, (places) => ({ places, source: 'offline-cache' }), async () => {
       // Side by side, so the wait is the slower of the two rather than their sum. Only
       // the core call may reject: that rejection is what hands withCachedPlaces the
       // offline path, and a plugin failure must never trigger it.
       const [core, extra] = await Promise.all([
-        apiClient.post(`/maps/search?lang=${lang || 'en'}`, { query, locationBias }).then(r => checkInDev(mapsSearchResultSchema, r.data, 'maps.search')),
+        apiClient.post(`/maps/search?lang=${lang || 'en'}`, { query, locationBias, ...(provider ? { provider } : {}) }).then(r => checkInDev(mapsSearchResultSchema, r.data, 'maps.search')),
         pluginSearchPlaces(query, lang, locationBias),
       ])
       if (extra.length === 0) return core
@@ -1347,9 +1362,13 @@ export const budgetApi = {
   togglePaid: (tripId: number | string, id: number, userId: number, paid: boolean) => apiClient.put(`/trips/${tripId}/budget/${id}/members/${userId}/paid`, { paid } satisfies BudgetToggleMemberPaidRequest).then(r => r.data),
   setPayers: (tripId: number | string, id: number, payers: { user_id: number; amount: number }[]) => apiClient.put(`/trips/${tripId}/budget/${id}/payers`, { payers }).then(r => r.data),
   perPersonSummary: (tripId: number | string) => apiClient.get(`/trips/${tripId}/budget/summary/per-person`).then(r => r.data),
-  settlement: (tripId: number | string, base?: string) => apiClient.get(`/trips/${tripId}/budget/settlement`, base ? { params: { base } } : undefined).then(r => r.data),
-  createSettlement: (tripId: number | string, data: { from_user_id: number; to_user_id: number; amount: number; currency?: string; settled_at?: string | null }) => apiClient.post(`/trips/${tripId}/budget/settlements`, data).then(r => r.data),
-  updateSettlement: (tripId: number | string, settlementId: number, data: { from_user_id: number; to_user_id: number; amount: number; currency?: string; settled_at?: string | null }) => apiClient.put(`/trips/${tripId}/budget/settlements/${settlementId}`, data).then(r => r.data),
+  // `baseRate` is units of `base` per 1 trip currency from the client's own rates. The server
+  // uses it only in place of a display quote it cannot fetch itself, which also reads legacy
+  // transfers without a currency (in the display currency, as with a live quote).
+  settlement: (tripId: number | string, base?: string, baseRate?: number | null) => apiClient.get(`/trips/${tripId}/budget/settlement`, base ? { params: { base, ...(baseRate != null ? { base_rate: baseRate } : {}) } satisfies BudgetSettlementQuery } : undefined).then(r => r.data),
+  createSettlement: (tripId: number | string, data: BudgetCreateSettlementRequest) => apiClient.post(`/trips/${tripId}/budget/settlements`, data).then(r => r.data),
+  updateSettlement: (tripId: number | string, settlementId: number, data: BudgetUpdateSettlementRequest) => apiClient.put(`/trips/${tripId}/budget/settlements/${settlementId}`, data).then(r => r.data),
+  freezeRates: (tripId: number | string, data: BudgetFreezeRatesRequest): Promise<BudgetFreezeRatesResponse> => apiClient.post(`/trips/${tripId}/budget/freeze-rates`, data).then(r => r.data),
   deleteSettlement: (tripId: number | string, settlementId: number) => apiClient.delete(`/trips/${tripId}/budget/settlements/${settlementId}`).then(r => r.data),
   reorderItems: (tripId: number | string, orderedIds: number[]) => apiClient.put(`/trips/${tripId}/budget/reorder/items`, { orderedIds }).then(r => r.data),
   reorderCategories: (tripId: number | string, orderedCategories: string[]) => apiClient.put(`/trips/${tripId}/budget/reorder/categories`, { orderedCategories } satisfies BudgetReorderCategoriesRequest).then(r => r.data),

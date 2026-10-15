@@ -410,7 +410,9 @@ describe('PlacesController (parity with the legacy /api/trips/:tripId/places rou
 
     it('400s a website that window.open would not treat as a page', async () => {
       const canEdit = vi.fn().mockReturnValue(false);
-      for (const website of ['javascript:fetch("/api/trips")', 'data:text/html,x', 'louvre.fr', 42]) {
+      // 'louvre' rather than 'louvre.fr': a bare host is completed since #2483,
+      // a single word is still no address.
+      for (const website of ['javascript:fetch("/api/trips")', 'data:text/html,x', 'mailto:info@louvre.fr', 'louvre', 42]) {
         expect(await thrownAsync(() => ctl({ canEdit }).update(user, '5', '9', { website }))).toEqual(siteErr);
       }
       expect(canEdit).not.toHaveBeenCalled();
@@ -420,7 +422,22 @@ describe('PlacesController (parity with the legacy /api/trips/:tripId/places rou
       const update = vi.fn().mockReturnValue({ id: 9 });
       for (const website of ['https://louvre.fr', 'http://pension.at', '', null]) {
         expect(await ctl({ update } as Partial<PlacesService>).update(user, '5', '9', { website })).toEqual({ place: { id: 9 } });
+        expect(update).toHaveBeenLastCalledWith('5', '9', { website }, undefined);
       }
+    });
+
+    // #2483: the value that reaches the service is the parsed one, on both write
+    // routes. The MCP tools parse the same schema (tools-places.test.ts), so an
+    // agent and the web app store the same string for the same input.
+    it('PLACES-CTRL-2483-01: hands the service a bare host with https, on create and on update', async () => {
+      const site = 'fr.wikipedia.org/wiki/Chapelle_Sainte-Barbe_du_Faouët';
+      const create = vi.fn().mockReturnValue({ id: 9 });
+      ctl({ create } as Partial<PlacesService>).create(user, '5', { name: 'Chapelle', website: site });
+      expect(create).toHaveBeenCalledWith('5', { name: 'Chapelle', website: `https://${site}` });
+
+      const update = vi.fn().mockReturnValue({ id: 9 });
+      await ctl({ update } as Partial<PlacesService>).update(user, '5', '9', { website: '//www.example.fr' });
+      expect(update).toHaveBeenCalledWith('5', '9', { website: 'https://www.example.fr' }, undefined);
     });
   });
 

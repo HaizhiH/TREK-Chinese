@@ -4,20 +4,32 @@ import type { AtlasLocateResponse } from '@trek/shared';
 import { Trip, Place } from '../../types';
 import { DatabaseService } from '../database/database.service';
 import {
+  getCountryFromAddress,
   getCountryFromCoords,
   getCountryGeoGz,
   getRegionFromCoords,
   getRegionGeo,
   geocodingInFlight,
   resolveCountryCodeSync,
+  resolveRegionFromBundle,
   reverseGeocodeRegion,
 } from './atlas-geo';
+import type { RegionInfo } from './atlas-geo';
 import { KNOWN_COUNTRIES } from './known-countries';
 import { cityFromAddress } from './city-from-address';
 import { transferEndpointIds } from './transfer-endpoints';
 import type { FlightEndpointRow } from './transfer-endpoints';
 import { countryVisitDates } from './visit-dates';
 import { haversineKm } from '../common/geo';
+
+/** The part of a place that its cached region is derived from. */
+type LocatedPlace = Pick<Place, 'id' | 'lat' | 'lng' | 'address'>;
+
+/** A place_regions row next to the location of its place. */
+type CachedRegionRow = LocatedPlace & { country_code: string; region_code: string };
+
+/** How many cached rows the #2527 repair checks before it lets other work run. */
+const REPAIR_YIELD_EVERY = 200;
 
 /**
  * A reservation endpoint plus the two booking columns that decide whether it may
@@ -175,30 +187,129 @@ export class AtlasService {
       }
     }
 
-    if (uncachedForGeocode.length > 0) {
-      const insertStmt = this.db.prepare(
-        'INSERT OR REPLACE INTO place_regions (place_id, country_code, region_code, region_name) VALUES (?, ?, ?, ?)',
-      );
-      for (const p of uncachedForGeocode) geocodingInFlight.add(p.id);
-      void (async () => {
-        try {
-          for (const place of uncachedForGeocode) {
-            try {
-              const info = await reverseGeocodeRegion(place.lat!, place.lng!, place.address);
-              if (info) insertStmt.run(place.id, info.country_code, info.region_code, info.region_name);
-            } catch {
-              /* continue */
-            } finally {
-              geocodingInFlight.delete(place.id);
-            }
-          }
-        } catch {
-          for (const p of uncachedForGeocode) geocodingInFlight.delete(p.id);
-        }
-      })();
-    }
+    this.cacheRegionsInBackground(uncachedForGeocode);
 
     return out;
+  }
+
+  /**
+   * Resolve each place's region in the background and cache it in place_regions.
+   */
+  private cacheRegionsInBackground(places: Place[]): void {
+    if (places.length === 0) return;
+    for (const p of places) geocodingInFlight.add(p.id);
+    void (async () => {
+      try {
+        for (const place of places) {
+          try {
+            const info = await reverseGeocodeRegion(place.lat!, place.lng!, place.address);
+            if (info) this.cacheRegionWhileUnmoved(place, info);
+          } catch {
+            // individual failure, continue with the remaining places
+          } finally {
+            geocodingInFlight.delete(place.id);
+          }
+        }
+      } catch {
+        for (const p of places) geocodingInFlight.delete(p.id);
+      }
+    })();
+  }
+
+  /**
+   * Cache a resolved region, but only while the place still sits where it was resolved
+   * from. A place moved while its lookup was running has already had its row dropped by
+   * the place_regions trigger (#2527), and writing the old answer back would pin it to
+   * the country it just left. A place deleted in the meantime is skipped the same way.
+   */
+  private cacheRegionWhileUnmoved(place: LocatedPlace, info: RegionInfo): boolean {
+    const written = this.db.run(
+      `INSERT OR REPLACE INTO place_regions (place_id, country_code, region_code, region_name)
+       SELECT id, ?, ?, ? FROM places WHERE id = ? AND lat = ? AND lng = ? AND address IS ?`,
+      info.country_code,
+      info.region_code,
+      info.region_name,
+      place.id,
+      place.lat,
+      place.lng,
+      place.address ?? null,
+    );
+    return written.changes > 0;
+  }
+
+  // ── One time repair of the rows cached before #2527 ───────────────────────
+
+  /**
+   * Before #2527 nothing dropped a place_regions row when its place moved, so an
+   * install that upgrades still holds the country every corrected place left. This
+   * re-derives each row with the bundled resolver alone, never Nominatim, and puts
+   * right the ones that no longer match where their place is now.
+   *
+   * Where the bundle answers for the place's current location with another country
+   * or region, the row gets that answer, which is what a fresh lookup would cache. A
+   * good row matches it, the address fallback case included.
+   *
+   * Where the bundle has no answer (a coastal point outside the simplified polygons,
+   * a country the bundle has no regions for), the row came from Nominatim and only
+   * Nominatim could judge it, so it stays, unless the coordinates put the place in
+   * another country and the address does not name the cached one either. Then it is
+   * dropped and the next Atlas load looks the place up again.
+   *
+   * A place without coordinates keeps no row, the same as the trigger does.
+   *
+   * Every write only lands while the place still holds the location it was read with,
+   * so a place edited while this runs keeps what the trigger and the next lookup give it.
+   */
+  async repairStaleRegionCache(): Promise<{ replaced: number; dropped: number }> {
+    const rows = this.db.all<CachedRegionRow>(`
+      SELECT pr.place_id AS id, pr.country_code, pr.region_code, p.lat, p.lng, p.address
+      FROM place_regions pr
+      JOIN places p ON p.id = pr.place_id
+      ORDER BY pr.place_id
+    `);
+    let replaced = 0;
+    let dropped = 0;
+    for (const [i, row] of rows.entries()) {
+      // A big install holds many rows, so requests get a turn every so often.
+      if (i > 0 && i % REPAIR_YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve));
+      const fix = await this.staleRegionFix(row);
+      if (fix === 'drop') {
+        if (this.dropRegionWhileUnmoved(row)) dropped++;
+      } else if (fix && this.cacheRegionWhileUnmoved(row, fix)) {
+        replaced++;
+      }
+    }
+    return { replaced, dropped };
+  }
+
+  /** What a cached row needs: a new region, 'drop', or null when it is right. */
+  private async staleRegionFix(row: CachedRegionRow): Promise<RegionInfo | 'drop' | null> {
+    if (row.lat == null || row.lng == null) return 'drop';
+    const cachedCountry = row.country_code.toUpperCase();
+    const fresh = await resolveRegionFromBundle(row.lat, row.lng, row.address);
+    if (fresh) {
+      const same = fresh.country_code.toUpperCase() === cachedCountry && fresh.region_code === row.region_code;
+      return same ? null : fresh;
+    }
+    const countryNow = resolveCountryCodeSync(row);
+    const contradicted = !!countryNow && countryNow !== cachedCountry && getCountryFromAddress(row.address) !== cachedCountry;
+    return contradicted ? 'drop' : null;
+  }
+
+  private dropRegionWhileUnmoved(row: CachedRegionRow): boolean {
+    const removed = this.db.run(
+      `DELETE FROM place_regions
+       WHERE place_id = ? AND country_code = ? AND region_code = ?
+         AND EXISTS (SELECT 1 FROM places WHERE id = ? AND lat IS ? AND lng IS ? AND address IS ?)`,
+      row.id,
+      row.country_code,
+      row.region_code,
+      row.id,
+      row.lat ?? null,
+      row.lng ?? null,
+      row.address ?? null,
+    );
+    return removed.changes > 0;
   }
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -731,29 +842,9 @@ export class AtlasService {
     const cachedMap = new Map(cached.map((c) => [c.place_id, c]));
 
     // Kick off background geocoding for uncached places; return cached data immediately.
-    const uncached = places.filter((p) => p.lat && p.lng && !cachedMap.has(p.id) && !geocodingInFlight.has(p.id));
-    if (uncached.length > 0) {
-      const insertStmt = this.db.prepare(
-        'INSERT OR REPLACE INTO place_regions (place_id, country_code, region_code, region_name) VALUES (?, ?, ?, ?)',
-      );
-      for (const p of uncached) geocodingInFlight.add(p.id);
-      void (async () => {
-        try {
-          for (const place of uncached) {
-            try {
-              const info = await reverseGeocodeRegion(place.lat!, place.lng!, place.address);
-              if (info) insertStmt.run(place.id, info.country_code, info.region_code, info.region_name);
-            } catch {
-              // individual failure — continue with remaining places
-            } finally {
-              geocodingInFlight.delete(place.id);
-            }
-          }
-        } catch {
-          for (const p of uncached) geocodingInFlight.delete(p.id);
-        }
-      })();
-    }
+    this.cacheRegionsInBackground(
+      places.filter((p) => p.lat && p.lng && !cachedMap.has(p.id) && !geocodingInFlight.has(p.id)),
+    );
 
     // Group by country → regions with place counts
     const regionMap: Record<

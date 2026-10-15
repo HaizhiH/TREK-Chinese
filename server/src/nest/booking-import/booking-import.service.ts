@@ -12,7 +12,7 @@ import type { User } from '../../types';
 import { KitineraryExtractorService } from './kitinerary-extractor.service';
 import { LlmParseService } from '../llm-parse/llm-parse.service';
 import { mapReservations } from './kitinerary-mapper';
-import { typeToCostCategory } from '@trek/shared';
+import { normalizePlaceWebsite, typeToCostCategory } from '@trek/shared';
 import type { BookingImportPreviewItem, BookingImportPreviewResponse, BookingImportConfirmResponse, BookingImportMode, BookingImportFileReport, Reservation } from '@trek/shared';
 import type { ParsedBookingItem, KiReservation } from './kitinerary.types';
 
@@ -257,7 +257,9 @@ export class BookingImportService {
             lat,
             lng,
             address: _venue.address,
-            website: _venue.website,
+            // A booking mail gives the venue's site however its sender wrote it;
+            // it lands as https or not at all (#2483).
+            website: normalizePlaceWebsite(_venue.website) ?? undefined,
             phone: _venue.phone,
           });
           placeId = (place as any).id;

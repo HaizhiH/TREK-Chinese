@@ -9,6 +9,7 @@ import { typeToCostCategory } from '@trek/shared'
 import CustomSelect from '../../../../components/shared/CustomSelect'
 import CustomTimePicker from '../../../../components/shared/CustomTimePicker'
 import { CustomDatePicker } from '../../../../components/shared/CustomDateTimePicker'
+import { BookingCodeInput } from '../../../../components/shared/BookingCode'
 import { Eyebrow, FIELD_AREA_CLS, FIELD_CLS, FormSheetFooter, FormSheetHeader } from './PlSheetChrome'
 import PlFileAttach from './PlFileAttach'
 import { buildAssignmentOptions } from '../../../../components/Planner/assignmentOptions'
@@ -19,6 +20,7 @@ import { useTripStore } from '../../../../store/tripStore'
 import type { TripMember } from '../../../../types'
 import type { BookingExpenseRequest } from '../../../../components/Planner/BookingCostsSection.types'
 import type { TripPlanner } from '../MTripShell'
+import { stayPlaces } from '../../../../utils/stayPlaces'
 
 export interface MReservationSheetProps {
   planner: TripPlanner
@@ -211,6 +213,7 @@ export default function MReservationSheet({ planner, onOpenExpense }: MReservati
     d ? new Date(`${d.slice(0, 10)}T00:00:00Z`).toLocaleDateString(locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }) : undefined
 
   const placeOptions = [{ value: '', label: '—' }, ...places.map(p => ({ value: p.id, label: p.name }))]
+  const hotelPlaceOptions = [{ value: '', label: '—' }, ...stayPlaces(places, form.hotel_place_id).map(p => ({ value: p.id, label: p.name }))]
   const dayOptions = days.map(d => ({
     value: d.id,
     label: d.title || t('dayplan.dayN', { n: d.day_number }),
@@ -448,7 +451,7 @@ export default function MReservationSheet({ planner, onOpenExpense }: MReservati
                   return next
                 })
               }}
-              options={placeOptions}
+              options={hotelPlaceOptions}
               placeholder={t('reservations.meta.pickHotel')}
               searchable
               size="sm"
@@ -513,8 +516,7 @@ export default function MReservationSheet({ planner, onOpenExpense }: MReservati
         <div className="mt-3 flex gap-2">
           <div className="min-w-0 flex-1">
             <Eyebrow className="mb-[5px] uppercase">{t('reservations.confirmationCode')}</Eyebrow>
-            <input
-              type="text"
+            <BookingCodeInput
               value={form.confirmation_number}
               onChange={e => set('confirmation_number', e.target.value)}
               placeholder={t('reservations.confirmationPlaceholder')}

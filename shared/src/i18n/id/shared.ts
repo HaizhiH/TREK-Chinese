@@ -3,6 +3,10 @@ import type { TranslationStrings } from '../types';
 const shared: TranslationStrings = {
   'shared.expired': 'Tautan kedaluwarsa atau tidak valid',
   'shared.expiredHint': 'Tautan perjalanan bersama ini tidak lagi aktif.',
+  'shared.loadFailed': 'Perjalanan ini tidak dapat dimuat',
+  'shared.loadFailedHint':
+    'Ini tidak berarti tautannya sudah kedaluwarsa. Periksa koneksi Anda dan coba lagi sebentar lagi.',
+  'shared.retry': 'Coba lagi',
   'shared.readOnly': 'Tampilan bersama — hanya baca',
   'shared.tabPlan': 'Rencana',
   'shared.tabBookings': 'Pemesanan',

@@ -131,8 +131,10 @@ describe('PhotoCaptureBackfillService — local files', () => {
   }
 
   it('CAPTURE-007: reads a local file rather than asking a provider', async () => {
+    // Raw values, as exifr hands them over with reviveValues off (#2512).
     vi.mocked(exifr.parse).mockResolvedValue({
-      DateTimeOriginal: new Date('2026-03-15T10:20:00Z'),
+      DateTimeOriginal: '2026:03:15 11:20:00',
+      OffsetTimeOriginal: '+01:00',
       latitude: 48.8584,
       longitude: 2.2945,
     });
@@ -149,7 +151,7 @@ describe('PhotoCaptureBackfillService — local files', () => {
   });
 
   it('CAPTURE-008: falls back to CreateDate when the original timestamp is missing', async () => {
-    vi.mocked(exifr.parse).mockResolvedValue({ CreateDate: new Date('2026-03-16T08:00:00Z') });
+    vi.mocked(exifr.parse).mockResolvedValue({ CreateDate: '2026:03:16 08:00:00', OffsetTimeDigitized: '+00:00' });
     const { svc, recordCaptureMetadata } = localBuild([
       { id: 7, provider: 'local', file_path: 'journey/a.jpg' },
     ]);
@@ -159,6 +161,35 @@ describe('PhotoCaptureBackfillService — local files', () => {
     expect(recordCaptureMetadata).toHaveBeenCalledWith(7, {
       takenAt: '2026-03-16T08:00:00.000Z', lat: null, lng: null,
     });
+  });
+
+  it('CAPTURE-016: a coordinate that is not a real one drops the pair, not the capture time', async () => {
+    // 0,0 is what a receiver without a fix writes, not a place (#2512).
+    for (const [latitude, longitude] of [[Number.NaN, 2.2945], [48.8584, 200], [91, 2.2945], [48.8584, undefined], [0, 0]]) {
+      vi.mocked(exifr.parse).mockResolvedValue({
+        DateTimeOriginal: '2026:03:15 11:20:00', OffsetTimeOriginal: '+01:00', latitude, longitude,
+      });
+      const { svc, recordCaptureMetadata } = localBuild([
+        { id: 7, provider: 'local', file_path: 'journey/a.jpg' },
+      ]);
+
+      await svc.run([7], 1);
+
+      expect(recordCaptureMetadata).toHaveBeenCalledWith(7, {
+        takenAt: '2026-03-15T10:20:00.000Z', lat: null, lng: null,
+      });
+    }
+  });
+
+  it('CAPTURE-017: a bad coordinate with no usable date records nothing', async () => {
+    vi.mocked(exifr.parse).mockResolvedValue({ DateTimeOriginal: 'garbage', latitude: 48.8584 });
+    const { svc, recordCaptureMetadata } = localBuild([
+      { id: 7, provider: 'local', file_path: 'journey/a.jpg' },
+    ]);
+
+    await svc.run([7], 1);
+
+    expect(recordCaptureMetadata).not.toHaveBeenCalled();
   });
 
   it('CAPTURE-009: a file with nothing readable is left alone', async () => {
@@ -224,7 +255,7 @@ describe('PhotoCaptureBackfillService — local files', () => {
   });
 
   it('CAPTURE-015: schedule kicks the run off for a non-empty batch', async () => {
-    vi.mocked(exifr.parse).mockResolvedValue({ DateTimeOriginal: new Date('2026-03-15T10:20:00Z') });
+    vi.mocked(exifr.parse).mockResolvedValue({ DateTimeOriginal: '2026:03:15 10:20:00', OffsetTimeOriginal: '+00:00' });
     const { svc, recordCaptureMetadata } = localBuild([
       { id: 7, provider: 'local', file_path: 'journey/a.jpg' },
     ]);

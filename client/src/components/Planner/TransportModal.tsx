@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router'
 import { Plane, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront, Paperclip, FileText, X, ExternalLink, Link2, Plus, Trash2, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react'
 import Modal from '../shared/Modal'
+import ConfirmDialog from '../shared/ConfirmDialog'
 import CustomSelect from '../shared/CustomSelect'
+import { BookingCodeInput } from '../shared/BookingCode'
 import CustomTimePicker from '../shared/CustomTimePicker'
 import AirportSelect, { type Airport } from './AirportSelect'
 import LocationSelect, { type LocationPoint } from './LocationSelect'
+import { toLocationPicks } from './locationPicks'
 import { useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
 import { useTripStore } from '../../store/tripStore'
@@ -14,8 +17,9 @@ import { formatDate, splitReservationDateTime, resolveDayId } from '../../utils/
 import { openFile } from '../../utils/fileDownload'
 import apiClient, { mapsApi, reservationsApi } from '../../api/client'
 import type { Day, Place, Accommodation, Reservation, ReservationEndpoint, TripFile, BudgetItem, AssignmentsMap } from '../../types'
-import { parseReservationMetadata, orderedEndpoints } from '../../utils/flightLegs'
+import { parseReservationMetadata, orderedEndpoints, stripAirportCode } from '../../utils/flightLegs'
 import { BookingCostsSection } from './BookingCostsSection'
+import { importedPriceEntry } from './importedPrice'
 import { TravelerPicker } from './TravelerPicker'
 import type { TripMember } from '../Budget/BudgetPanelMemberChips'
 import type { BookingExpenseRequest } from './BookingCostsSection.types'
@@ -54,14 +58,6 @@ function endpointFromLocation(l: LocationPoint, role: 'from' | 'to' | 'stop', se
     local_date: date,
     local_time: time,
   }
-}
-
-// "Paris Charles de Gaulle (CDG)" → "Paris Charles de Gaulle". Done as a trim
-// plus an anchored test instead of /\s*\([A-Z]{3}\)\s*$/, because the leading
-// \s* backtracks over every space in a long name for a quadratic worst case.
-function stripAirportCode(name: string): string {
-  const trimmed = name.trimEnd()
-  return /\([A-Z]{3}\)$/.test(trimmed) ? trimmed.slice(0, -5).trimEnd() : name
 }
 
 function airportFromEndpoint(e: ReservationEndpoint | undefined): Airport | null {
@@ -181,6 +177,8 @@ interface TransportModalProps {
   files?: TripFile[]
   onFileUpload?: (fd: FormData) => Promise<unknown>
   onFileDelete?: (fileId: number) => Promise<void>
+  /** Deletes the reservation being edited. Omit to hide the delete action (create mode, or no permission). */
+  onDelete?: () => void | Promise<void>
   onOpenExpense?: (req: BookingExpenseRequest) => void
   // Pre-fill a brand-new transport booking from a parsed import item (review-
   // before-save); like `reservation` for the form but stays in create mode.
@@ -200,9 +198,11 @@ interface TransportModalProps {
   tripMembers?: TripMember[]
 }
 
-export function TransportModal({ isOpen, onClose, onSave, reservation, days, selectedDayId, files = [], onFileUpload, onFileDelete, onOpenExpense, prefill = null, places = [], assignments = {}, accommodations = [], initialAutomated = false, transitPrefill = null, tripHasDates = true, tripMembers = [] }: TransportModalProps) {
+export function TransportModal({ isOpen, onClose, onSave, reservation, days, selectedDayId, files = [], onFileUpload, onFileDelete, onDelete, onOpenExpense, prefill = null, places = [], assignments = {}, accommodations = [], initialAutomated = false, transitPrefill = null, tripHasDates = true, tripMembers = [] }: TransportModalProps) {
   const { t, locale } = useTranslation()
   const toast = useToast()
+  // The trip's places, offered by every location field of the manual tab (#2468).
+  const locationPicks = useMemo(() => toLocationPicks(places), [places])
   const isBudgetEnabled = useAddonStore(s => s.isEnabled('budget'))
   const budgetItems = useTripStore(s => s.budgetItems)
   const deleteBudgetItem = useTripStore(s => s.deleteBudgetItem)
@@ -216,6 +216,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
   // Manual vs Automated (public transit search) creation mode (#1065).
   const [automated, setAutomated] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [fromPick, setFromPick] = useState<EndpointPick>({})
   const [toPick, setToPick] = useState<EndpointPick>({})
   // Flight route as an ordered list of airports (origin .. stops .. destination).
@@ -737,11 +738,8 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       // Imported booking → auto-create the linked cost from the parsed price (what the
       // old direct import did). Only on create (not edit) and only when there's a price.
       if (!reservation && prefill && isBudgetEnabled) {
-        const pmeta = prefill.metadata && typeof prefill.metadata === 'object' ? (prefill.metadata as Record<string, unknown>) : {}
-        const price = Number(pmeta.price)
-        if (Number.isFinite(price) && price > 0) {
-          ;(payload as Record<string, unknown>).create_budget_entry = { total_price: price, category: typeToCostCategory(form.type) }
-        }
+        const entry = importedPriceEntry(prefill.metadata, form.type)
+        if (entry) (payload as Record<string, unknown>).create_budget_entry = entry
       }
       const saved = await onSave(payload)
       // Persist the traveler assignment once we have the reservation id (create → save
@@ -785,12 +783,10 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
     try { await deleteBudgetItem(Number(tripId), item.id) } catch { toast.error(t('common.unknownError')) }
   }
 
-  // On an import review (not yet saved), preview the parsed price as the cost that will be linked.
-  const prefillMeta = prefill?.metadata && typeof prefill.metadata === 'object' ? (prefill.metadata as Record<string, unknown>) : null
-  const prefillPrice = Number(prefillMeta?.price)
-  const pendingExpense = !reservation && Number.isFinite(prefillPrice) && prefillPrice > 0
-    ? { total_price: prefillPrice, currency: (prefillMeta?.priceCurrency as string | null) ?? null, category: typeToCostCategory(form.type) }
-    : null
+  // On an import review (not yet saved), preview the parsed price as the cost that will be
+  // linked: the same entry the save sends, so the two cannot name different currencies.
+  const importedEntry = !reservation && prefill ? importedPriceEntry(prefill.metadata, form.type) : null
+  const pendingExpense = importedEntry ? { ...importedEntry, currency: importedEntry.currency ?? null } : null
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -853,15 +849,24 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       title={automated ? t('transit.title') : reservation ? t('transport.modalTitle.edit') : t('transport.modalTitle.create')}
       size="2xl"
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" onClick={onClose} className="text-content-muted" style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit' }}>
-            {t('common.cancel')}
-          </button>
-          {!automated && (
-          <button type="button" onClick={handleSubmit} disabled={isSaving || !form.title.trim()} className="bg-[var(--text-primary)] text-[var(--bg-primary)]" style={{ padding: '8px 20px', borderRadius: 10, border: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: isSaving || !form.title.trim() ? 0.5 : 1 }}>
-            {isSaving ? t('common.saving') : reservation ? t('common.update') : t('common.add')}
-          </button>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
+          <div>
+            {!automated && reservation?.id && onDelete && (
+              <button type="button" onClick={() => setShowDeleteConfirm(true)} className="text-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <Trash2 size={13} /> {t('common.delete')}
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={onClose} className="text-content-muted" style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit' }}>
+              {t('common.cancel')}
+            </button>
+            {!automated && (
+            <button type="button" onClick={handleSubmit} disabled={isSaving || !form.title.trim()} className="bg-[var(--text-primary)] text-[var(--bg-primary)]" style={{ padding: '8px 20px', borderRadius: 10, border: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: isSaving || !form.title.trim() ? 0.5 : 1 }}>
+              {isSaving ? t('common.saving') : reservation ? t('common.update') : t('common.add')}
+            </button>
+            )}
+          </div>
         </div>
       }
     >
@@ -1024,7 +1029,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                           {writesFlightLegs && (
                             <div>
                               <label className={labelClass}>{t('reservations.confirmationCode')}</label>
-                              <input type="text" value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
+                              <BookingCodeInput value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
                                 placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
                             </div>
                           )}
@@ -1095,7 +1100,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="text-content-faint" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', flexShrink: 0 }}>{roleLabel}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <LocationSelect value={wp.location} onChange={l => updateWp({ location: l || null })} />
+                        <LocationSelect value={wp.location} onChange={l => updateWp({ location: l || null })} places={locationPicks} />
                       </div>
                       {!isFirst && !isLast && (
                         <button type="button" onClick={() => setTrainWaypoints(prev => prev.filter((_, j) => j !== i))} aria-label={t('common.delete')} className="text-content-faint" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4, flexShrink: 0 }}>
@@ -1143,7 +1148,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                           {writesTrainLegs && (
                             <div>
                               <label className={labelClass}>{t('reservations.confirmationCode')}</label>
-                              <input type="text" value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
+                              <BookingCodeInput value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
                                 placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
                             </div>
                           )}
@@ -1167,11 +1172,11 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>{t('reservations.meta.from')}</label>
-                <LocationSelect value={fromPick.location || null} onChange={l => setFromPick({ location: l || undefined })} />
+                <LocationSelect value={fromPick.location || null} onChange={l => setFromPick({ location: l || undefined })} places={locationPicks} />
               </div>
               <div>
                 <label className={labelClass}>{t('reservations.meta.to')}</label>
-                <LocationSelect value={toPick.location || null} onChange={l => setToPick({ location: l || undefined })} />
+                <LocationSelect value={toPick.location || null} onChange={l => setToPick({ location: l || undefined })} places={locationPicks} />
               </div>
             </div>
 
@@ -1215,6 +1220,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                       <LocationSelect
                         value={stop.location}
                         onChange={l => setCarStops(prev => prev.map((s, j) => (j === i ? { ...s, location: l || null } : s)))}
+                        places={locationPicks}
                       />
                     </div>
                     <div style={{ width: 110, flexShrink: 0 }}>
@@ -1278,7 +1284,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={labelClass}>{t('reservations.confirmationCode')}</label>
-            <input type="text" value={form.confirmation_number} onChange={e => set('confirmation_number', e.target.value)}
+            <BookingCodeInput value={form.confirmation_number} onChange={e => set('confirmation_number', e.target.value)}
               placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
           </div>
           <div>
@@ -1411,6 +1417,20 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
 
       </form>
       )}
+
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title={t('reservations.confirm.deleteTitle')}
+        message={t('reservations.confirm.deleteBody', { name: reservation?.title ?? '' })}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        onConfirm={async () => {
+          setShowDeleteConfirm(false)
+          await onDelete?.()
+          onClose()
+        }}
+      />
     </Modal>
   )
 }

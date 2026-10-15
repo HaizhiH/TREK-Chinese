@@ -157,6 +157,7 @@ const budget: TranslationStrings = {
   'costs.noReceipts': 'Keine Belege angehängt',
   'costs.deleteReceipt': 'Beleg entfernen',
   'costs.viewReceipt': 'Beleg ansehen',
-  'costs.receiptLeftBehind': 'Speichern fehlgeschlagen, {count} hochgeladene Belege liegen noch da. Im Dateien-Tab entfernen.',
+  'costs.receiptLeftBehind':
+    'Speichern fehlgeschlagen, {count} hochgeladene Belege liegen noch da. Im Dateien-Tab entfernen.',
 };
 export default budget;

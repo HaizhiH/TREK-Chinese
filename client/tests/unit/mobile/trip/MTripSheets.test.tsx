@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import { BedDouble, MapPin } from 'lucide-react'
 import type { BookingExpenseRequest } from '../../../../src/components/Planner/BookingCostsSection.types'
 import type { ExpensePrefill } from '../../../../src/components/Budget/CostsPanel'
 import type { MTripShellApi, TripPlanner } from '../../../../src/mobile/screens/trip/MTripShell'
@@ -11,7 +12,7 @@ import { buildPlanner, buildShell } from '../../../helpers/mobileTrip'
 import { resetAllStores, seedStore } from '../../../helpers/store'
 import { fireEvent, render, screen, waitFor } from '../../../helpers/render'
 
-// FE-MOB-SHOST-001 to FE-MOB-SHOST-029
+// FE-MOB-SHOST-001 to FE-MOB-SHOST-029 and FE-MOB-SHOST-032 (030 and 031 live in MTripSheets.members.test.tsx)
 //
 // Every child sheet is stubbed: this file is about the host — which sheet is
 // mounted for which shell.sheet id, and how the host's own callbacks wire the
@@ -101,12 +102,14 @@ vi.mock('../../../../src/mobile/screens/trip/sheets/MCostSheet', () => ({
 }))
 
 vi.mock('../../../../src/mobile/screens/settings/MConfirmSheet', () => ({
-  default: ({ open, title, message, onClose, onConfirm }: {
+  default: ({ open, title, message, onClose, onConfirm, danger, confirmLabel, children }: {
     open: boolean; title: string; message: ReactNode; onClose: () => void; onConfirm?: () => void
+    danger?: boolean; confirmLabel?: string; children?: ReactNode
   }) =>
     open ? (
-      <div data-testid="stub-confirm" data-title={title}>
+      <div data-testid="stub-confirm" data-title={title} data-danger={String(!!danger)} data-confirm={confirmLabel}>
         <span>{message}</span>
+        {children}
         <button type="button" onClick={onConfirm}>confirm delete</button>
         <button type="button" onClick={onClose}>cancel delete</button>
       </div>
@@ -442,6 +445,28 @@ describe('MTripSheets', () => {
     fireEvent.click(screen.getByText('cancel delete'))
     expect(planner.confirmDeletePlace).not.toHaveBeenCalled()
     expect(planner.setDeletePlaceId).toHaveBeenCalledWith(null)
+  })
+
+  it('FE-MOB-SHOST-032: the delete-day confirm names the day, lists what goes with it and runs the planner confirmation', () => {
+    const lines = [
+      { key: 'stay-9', icon: BedDouble, tone: 'danger' as const, text: 'Stay at Harbour Hotel', hint: 'Cancelled with its booking.' },
+      { key: 'places', icon: MapPin, tone: 'neutral' as const, text: 'Planned places: 2' },
+    ]
+    const { planner } = renderHost({ deleteDayId: 12, deleteDayTitle: 'Delete Tue, Oct 13?', deleteDayLines: lines })
+
+    const confirm = screen.getByTestId('stub-confirm')
+    expect(confirm).toHaveAttribute('data-title', 'Delete Tue, Oct 13?')
+    expect(confirm).toHaveAttribute('data-danger', 'true')
+    expect(confirm).toHaveAttribute('data-confirm', 'dayplan.deleteDay')
+    expect(confirm).toHaveTextContent('dayplan.deleteDayBody')
+    const list = screen.getByRole('list', { name: 'Delete Tue, Oct 13?' })
+    expect(list).toHaveTextContent('Stay at Harbour Hotel')
+    expect(list).toHaveTextContent('Planned places: 2')
+
+    fireEvent.click(screen.getByText('confirm delete'))
+    expect(planner.confirmDeleteDay).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByText('cancel delete'))
+    expect(planner.setDeleteDayId).toHaveBeenCalledWith(null)
   })
 
   it('FE-MOB-SHOST-027: the place edit sheet owns the confirm while its own form is open', () => {

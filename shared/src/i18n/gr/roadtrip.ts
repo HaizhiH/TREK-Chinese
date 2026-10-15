@@ -118,6 +118,9 @@ const roadtrip: TranslationStrings = {
   'roadtrip.line.connect': 'Σύνδεση των ημερών',
   'roadtrip.line.dayColors': 'Ένα χρώμα ανά ημέρα',
   'roadtrip.line.hint': 'Υπολογίζει και το τμήμα ανάμεσα σε δύο ημέρες, στην ημέρα άφιξης.',
+  'roadtrip.line.hotelBookends': 'Έναρξη και λήξη κάθε ημέρας στο κατάλυμα',
+  'roadtrip.line.hotelBookendsHint':
+    'Μετά από μια κρατημένη νύχτα η ημέρα ξεκινά από εκείνο το κατάλυμα, και πριν από μία τελειώνει στο κατάλυμα που έχει κρατηθεί για εκείνη τη νύχτα.',
   'roadtrip.avoid.section': 'Αποφυγή όπου γίνεται',
   'roadtrip.avoid.toll': 'Δρόμοι με διόδια',
   'roadtrip.avoid.motorway': 'Αυτοκινητόδρομοι',
@@ -225,6 +228,18 @@ const roadtrip: TranslationStrings = {
   'roadtrip.alt.slower': '{time} πιο αργή',
   'roadtrip.alt.quicker': '{time} πιο γρήγορη',
   'roadtrip.alt.otherEngine': 'Χρόνος από τον δρομολογητή αποφυγής, όχι τον κύριο.',
+  'roadtrip.alt.notHeld': 'Ο δρομολογητής του ταξιδιού δεν ακολουθεί αυτή τη διαδρομή, οπότε δεν αποθηκεύτηκε.',
+  'roadtrip.alt.ferryNotHeld':
+    'Αυτή η διαδρομή περνά με πλοίο. Πρόσθεσε το πλοίο ως κράτηση μεταφοράς και η οδήγηση θα το ακολουθήσει. Αν φτάνει την επόμενη μέρα, βάλε τις στάσεις στην απέναντι ακτή σε εκείνη τη μέρα.',
+  'roadtrip.alt.legChanged': 'Το σκέλος άλλαξε κατά τον έλεγχο, οπότε δεν αποθηκεύτηκε τίποτα.',
+  'roadtrip.alt.offline': 'Οι άλλες διαδρομές αποθηκεύονται μόνο online. Συνδέσου ξανά για να επιλέξεις αυτή.',
+  'roadtrip.alt.otherEngineStandard':
+    'Χρόνος από τον κύριο δρομολογητή, όχι από αυτόν με τον οποίο σχεδιάζεται αυτό το σκέλος.',
+  'roadtrip.alt.avoidNotHeld':
+    'Το ταξίδι ακολουθεί αυτή τη διαδρομή μόνο αν είναι επιλεγμένο το «{class}» στο «{setting}» στις ρυθμίσεις του.',
+  'roadtrip.alt.checking': 'Έλεγχος αυτής της διαδρομής με τον δρομολογητή του ταξιδιού…',
+  'roadtrip.alt.standIn':
+    'Ο δρομολογητής αποφυγής δεν απάντησε για αυτό το σκέλος, οπότε το σχεδίασε ο κύριος δρομολογητής. Ο δρομολογητής αποφυγής ερωτάται ξανά.',
   'roadtrip.day': 'Ημέρα {number}',
   'roadtrip.quietDay.empty': 'Καμία στάση ακόμη — αφήστε μία εδώ',
   'roadtrip.quietDay.one': 'Μέχρι στιγμής μόνο {name} — αφήστε μια στάση εδώ',
@@ -239,6 +254,7 @@ const roadtrip: TranslationStrings = {
   'roadtrip.stop.fillDefault': 'Χρήση της προεπιλογής μου',
   'roadtrip.stop.fillSet': 'Όρισε πόσο γεμίζει αυτή η στάση',
   'roadtrip.leg.pending': 'Χωρίς διαδρομή',
+  'roadtrip.leg.arrivingFrom': 'Από {name}',
   'roadtrip.stop.addTitle': 'Προσθήκη ως στάση',
   'roadtrip.stop.kind': 'Είδος στάσης',
   'roadtrip.stop.landsOn': 'Ημέρα {day}, ως στάση {position}',
@@ -271,7 +287,44 @@ const roadtrip: TranslationStrings = {
   'roadtrip.summary.partial': 'Υπολογίζεται ακόμη η υπόλοιπη διαδρομή',
   'roadtrip.stay.releaseTitle': 'Να αφαιρεθεί η διανυκτέρευση;',
   'roadtrip.stay.releaseBody': 'Η διανυκτέρευση στο «{name}» θα αφαιρεθεί. Η στάση παραμένει στη διαδρομή ως παύση.',
-  'roadtrip.stay.releaseBookedBody': 'Η διανυκτέρευση στο «{name}» θα αφαιρεθεί μαζί με την κράτηση «{booking}» και κάθε συνδεδεμένο έξοδο. Η στάση παραμένει στη διαδρομή ως παύση.',
+  'roadtrip.stay.releaseBookedBody':
+    'Η διανυκτέρευση στο «{name}» θα αφαιρεθεί μαζί με την κράτηση «{booking}» και κάθε συνδεδεμένο έξοδο. Η στάση παραμένει στη διαδρομή ως παύση.',
   'roadtrip.stay.releaseAction': 'Κάνε το παύση',
+  'roadtrip.ride.departure': 'Αναχώρηση {time}',
+  'roadtrip.ride.arrival': 'Άφιξη {time}',
+  'roadtrip.ride.pickup': 'Παραλαβή {time}',
+  'roadtrip.ride.return': 'Επιστροφή {time}',
+  'roadtrip.ride.open': 'Άνοιγμα κράτησης',
+  'roadtrip.ride.undated':
+    'Η κράτηση {title} δεν βρίσκεται σε καμία μέρα αυτού του ταξιδιού, οπότε η διαδρομή δεν τη λαμβάνει υπόψη.',
+  'roadtrip.bookings.loose': 'Επίσης κρατημένο αυτή τη μέρα',
+  'roadtrip.ride.departureFlight': 'Αναχώρηση {time}',
+  'roadtrip.ride.duration': 'Διάρκεια σύμφωνα με την κράτηση',
+  'roadtrip.ride.checkIn': 'Check-in',
+  'roadtrip.ride.boarding': 'Επιβίβαση',
+  'roadtrip.ride.missed': 'Χάθηκε',
+  'roadtrip.ride.lateBy': '{time} καθυστέρηση',
+  'roadtrip.ride.reachedAt': 'άφιξη {time}',
+  'roadtrip.ride.hintFlight': '{title}: αναχώρηση στις {departs}, check-in έως τις {pin}.',
+  'roadtrip.ride.hintShip': '{title}: απόπλους στις {departs}, check-in έως τις {pin}.',
+  'roadtrip.ride.hintBoarding': '{title}: αναχώρηση στις {departs}, επιβίβαση έως τις {pin}.',
+  'roadtrip.ride.lateHintFlight':
+    '{place}: άφιξη μόλις στις {time}. {title}: αναχώρηση στις {departs}, check-in έως τις {pin}.',
+  'roadtrip.ride.lateHintShip':
+    '{place}: άφιξη μόλις στις {time}. {title}: απόπλους στις {departs}, check-in έως τις {pin}.',
+  'roadtrip.ride.lateHintBoarding':
+    '{place}: άφιξη μόλις στις {time}. {title}: αναχώρηση στις {departs}, επιβίβαση έως τις {pin}.',
+  'roadtrip.day.rideMissed.flight': 'Χαμένη πτήση',
+  'roadtrip.day.rideMissed.train': 'Χαμένο τρένο',
+  'roadtrip.day.rideMissed.ferry': 'Χαμένο φέρι',
+  'roadtrip.day.rideMissed.cruise': 'Χαμένη κρουαζιέρα',
+  'roadtrip.day.rideMissed.bus': 'Χαμένο λεωφορείο',
+  'roadtrip.bookend.checkOut': 'Check-out',
+  'roadtrip.bookend.from': 'Έναρξη ημέρας',
+  'roadtrip.bookend.back': 'Διανυκτέρευση',
+  'roadtrip.bookend.checkIn': 'Check-in',
+  'roadtrip.bookend.afterCheckOut': 'Αναχώρηση μετά το check-out',
+  'roadtrip.bookend.noVia':
+    'Δεν μπαίνει ενδιάμεσο σημείο στη διαδρομή προς ή από το κατάλυμα. Προσθέστε εκεί μια στάση.',
 };
 export default roadtrip;

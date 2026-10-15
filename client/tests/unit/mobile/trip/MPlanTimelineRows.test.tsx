@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '../../../helpers/render'
+import { useSettingsStore } from '../../../../src/store/settingsStore'
+import { isBlurred } from '../../../helpers/bookingCodeBlur'
 import {
   ConnRow, HotelConnRow, NoteRow, PlaceRow, PlanScheduleRow, ReorderStack, TransitRow, TransportRow,
 } from '../../../../src/mobile/screens/trip/plan/MPlanTimelineRows'
@@ -7,7 +9,7 @@ import type { TransitMeta, TransportEntry } from '../../../../src/mobile/screens
 import type { PluginDayScheduleItem } from '../../../../src/api/client'
 import type { Assignment, DayNote, Place, Reservation, RouteSegment, TranslationFn } from '../../../../src/types'
 
-// FE-MOB-PLROW-001 to FE-MOB-PLROW-041
+// FE-MOB-PLROW-001 to FE-MOB-PLROW-044
 
 // Same echo strategy as tests/helpers/mobileTrip: assertions stay on keys, not copy.
 const t: TranslationFn = (key, params) =>
@@ -529,5 +531,44 @@ describe('NoteRow', () => {
 
     fireEvent.click(screen.getByText('Buy museum tickets'))
     expect(onEdit).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── Blur booking codes on the plan row (#2457) ────────────────────────────────
+
+describe('PlaceRow blur booking codes (#2457)', () => {
+  const props = {
+    assignment: assignment(),
+    fullPlace: undefined,
+    chrome: chrome(),
+    reorder: REORDER,
+    onOpen: vi.fn(),
+    onEdit: vi.fn(),
+    onRemove: vi.fn(),
+  }
+  const blurOn = (on: boolean) =>
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, blur_booking_codes: on } })
+
+  it('FE-MOB-PLROW-042: the booking code in the row subtitle is blurred while the setting is on', () => {
+    blurOn(true)
+    const linkedRes = { id: 31, status: 'confirmed', confirmation_number: 'ROW-SECRET' } as unknown as Reservation
+    render(<PlaceRow {...props} linkedReservations={[linkedRes]} />)
+    expect(isBlurred(screen.getByText(/ROW-SECRET/))).toBe(true)
+  })
+
+  it('FE-MOB-PLROW-043: the extra booking lines of a stop with several bookings blur their codes too', () => {
+    blurOn(true)
+    const first = { id: 31, title: 'Lunch', status: 'confirmed', confirmation_number: 'ROW-ONE' } as unknown as Reservation
+    const second = { id: 32, title: 'Tour', status: 'pending', confirmation_number: 'ROW-TWO' } as unknown as Reservation
+    render(<PlaceRow {...props} linkedReservations={[first, second]} />)
+    expect(isBlurred(screen.getByText(/ROW-ONE/))).toBe(true)
+    expect(isBlurred(screen.getByText(/ROW-TWO/))).toBe(true)
+  })
+
+  it('FE-MOB-PLROW-044: with the setting off the code stays plain', () => {
+    blurOn(false)
+    const linkedRes = { id: 31, status: 'confirmed', confirmation_number: 'ROW-PLAIN' } as unknown as Reservation
+    render(<PlaceRow {...props} linkedReservations={[linkedRes]} />)
+    expect(isBlurred(screen.getByText(/ROW-PLAIN/))).toBe(false)
   })
 })

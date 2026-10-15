@@ -21,8 +21,20 @@ function makeService(overrides: Partial<ReservationsService> = {}): Reservations
     syncBudgetOnCreate: vi.fn(),
     syncBudgetOnUpdate: vi.fn(),
     notifyBookingChange: vi.fn(),
+    // Hands the entry back as it came: what freezing does to it is the service's test.
+    withFrozenRate: vi.fn(async (_tripId: string, entry: unknown) => entry),
     ...overrides,
   } as unknown as ReservationsService;
+}
+
+/** The create route awaits the price's rate, so its 400s arrive as a rejection. */
+async function rejected(promise: Promise<unknown>): Promise<{ status: number; body: unknown }> {
+  try { await promise; } catch (err) {
+    expect(err).toBeInstanceOf(HttpException);
+    const e = err as HttpException;
+    return { status: e.getStatus(), body: e.getResponse() };
+  }
+  throw new Error('expected throw');
 }
 
 function thrown(fn: () => unknown): { status: number; body: unknown } {
@@ -46,31 +58,31 @@ describe('ReservationsController (parity with the legacy /api/trips/:tripId/rese
     // The bespoke 'Title is required' 400 moved to the global ZodValidationPipe
     // (ReservationCreateDto) — covered by the e2e suite.
 
-    it('creates, runs budget sync, broadcasts accommodation + reservation, notifies', () => {
+    it('creates, runs budget sync, broadcasts accommodation + reservation, notifies', async () => {
       const create = vi.fn().mockReturnValue({ reservation: { id: 9 }, accommodationCreated: true });
       const broadcast = vi.fn(); const syncBudgetOnCreate = vi.fn(); const notifyBookingChange = vi.fn();
       const svc = makeService({ create, broadcast, syncBudgetOnCreate, notifyBookingChange } as Partial<ReservationsService>);
       const body = { title: 'Hotel', type: 'lodging', create_budget_entry: { total_price: 200 } };
-      expect(new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', body, 'sock')).toEqual({ reservation: { id: 9 } });
+      expect(await new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', body, 'sock')).toEqual({ reservation: { id: 9 } });
       expect(broadcast).toHaveBeenCalledWith('5', 'accommodation:created', {}, 'sock');
       expect(syncBudgetOnCreate).toHaveBeenCalledWith('5', 9, 'Hotel', 'lodging', { total_price: 200 }, 'sock');
       expect(broadcast).toHaveBeenCalledWith('5', 'reservation:created', { reservation: { id: 9 } }, 'sock');
       expect(notifyBookingChange).toHaveBeenCalledWith('5', user.id, 'Hotel', 'lodging');
     });
 
-    it('400s on a body id belonging to another trip, without writing', () => {
+    it('400s on a body id belonging to another trip, without writing', async () => {
       const create = vi.fn();
       const svc = makeService({
         create,
         referencesOutsideTrip: vi.fn().mockReturnValue(['accommodation_id']),
       } as Partial<ReservationsService>);
       const body = { title: 'Hotel', accommodation_id: 4711 };
-      expect(thrown(() => new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', body)))
+      expect(await rejected(new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', body)))
         .toEqual({ status: 400, body: { error: 'Not part of this trip: accommodation_id' } });
       expect(create).not.toHaveBeenCalled();
     });
 
-    it('400s on a body id that exists nowhere, in its own words, without writing', () => {
+    it('400s on a body id that exists nowhere, in its own words, without writing', async () => {
       const create = vi.fn();
       const svc = makeService({
         create,
@@ -79,19 +91,35 @@ describe('ReservationsController (parity with the legacy /api/trips/:tripId/rese
       const body = { title: 'Hotel', place_id: 4711 };
       // Not 'Not part of this trip': an id that is part of nothing would send
       // the caller looking for it on another trip.
-      expect(thrown(() => new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', body)))
+      expect(await rejected(new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', body)))
         .toEqual({ status: 400, body: { error: 'Unknown reference: place_id' } });
       expect(create).not.toHaveBeenCalled();
     });
 
-    it('answers a foreign id with the older message when it is both', () => {
+    it('answers a foreign id with the older message when it is both', async () => {
       const svc = makeService({
         create: vi.fn(),
         referencesOutsideTrip: vi.fn().mockReturnValue(['place_id']),
         unresolvedReferences: vi.fn().mockReturnValue(['place_id']),
       } as Partial<ReservationsService>);
-      expect(thrown(() => new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', { title: 'Hotel', place_id: 4711 })))
+      expect(await rejected(new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', { title: 'Hotel', place_id: 4711 })))
         .toEqual({ status: 400, body: { error: 'Not part of this trip: place_id' } });
+    });
+
+    // #2525: an imported booking quoted in dollars. The price has to reach the linked
+    // cost in dollars, at a rate frozen before anything is written.
+    it('hands the budget sync the entry with its currency and frozen rate', async () => {
+      const create = vi.fn().mockReturnValue({ reservation: { id: 9 }, accommodationCreated: false });
+      const syncBudgetOnCreate = vi.fn();
+      const withFrozenRate = vi.fn(async () => {
+        expect(create).not.toHaveBeenCalled();
+        return { total_price: 801.76, currency: 'USD', exchange_rate: 1.17 };
+      });
+      const svc = makeService({ create, syncBudgetOnCreate, withFrozenRate } as Partial<ReservationsService>);
+      const body = { title: 'Aparthotel Silver', type: 'hotel', create_budget_entry: { total_price: 801.76, currency: 'usd' } };
+      await new ReservationsController(svc, airtrailLink, {} as never).create(user, '5', body, 'sock');
+      expect(withFrozenRate).toHaveBeenCalledWith('5', { total_price: 801.76, currency: 'usd' });
+      expect(syncBudgetOnCreate).toHaveBeenCalledWith('5', 9, 'Aparthotel Silver', 'hotel', { total_price: 801.76, currency: 'USD', exchange_rate: 1.17 }, 'sock');
     });
   });
 

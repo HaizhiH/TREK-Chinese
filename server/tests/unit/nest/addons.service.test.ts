@@ -495,6 +495,36 @@ describe('AddonsService transit provider', () => {
  * PlaceShadowService.enabled(), which reads the same key itself — if the two
  * diverge the admin panel shows "off" while the log keeps collecting picks.
  */
+/**
+ * The Google-only switch reads like the shadow log: nobody had it before it
+ * existed, so an absent row is off, and MapsService.googleOnly() compares the
+ * same key against the same literal.
+ */
+describe('AddonsService places Google-only flag', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('ADDONS-SVC-095 an unset flag reads as OFF, only the literal "true" switches it on', () => {
+    dbMock._stmt.get.mockReturnValueOnce(undefined);
+    expect(svc().getPlacesGoogleOnly()).toEqual({ enabled: false });
+    expect(dbMock._stmt.get).toHaveBeenLastCalledWith('places_google_only');
+    for (const value of ['false', 'TRUE', '1', '']) {
+      dbMock._stmt.get.mockReturnValueOnce({ value });
+      expect(svc().getPlacesGoogleOnly()).toEqual({ enabled: false });
+    }
+    dbMock._stmt.get.mockReturnValueOnce({ value: 'true' });
+    expect(svc().getPlacesGoogleOnly()).toEqual({ enabled: true });
+  });
+
+  it('ADDONS-SVC-096 the setter persists the literal string under its own key', () => {
+    expect(svc().updatePlacesGoogleOnly(true)).toEqual({ enabled: true });
+    expect(dbMock._stmt.run).toHaveBeenLastCalledWith('places_google_only', 'true');
+    expect(svc().updatePlacesGoogleOnly(false)).toEqual({ enabled: false });
+    expect(dbMock._stmt.run).toHaveBeenLastCalledWith('places_google_only', 'false');
+  });
+});
+
 describe('AddonsService place shadow flag', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Нотатки про бронювання, номер підтвердження...',
   'places.mapsSearchPlaceholder': 'Пошук місць...',
   'places.mapsSearchError': 'Помилка пошуку місць.',
+  'places.searchGoogleInstead': 'Не те місце? Пошукати в Google',
   'places.loadingDetails': 'Завантаження даних про місце…',
   'places.osmHint':
     'Пошук через OpenStreetMap (без фото, годин роботи та рейтингів). Додайте API-ключ Google у налаштуваннях для повної інформації.',

@@ -157,6 +157,7 @@ const budget: TranslationStrings = {
   'costs.noReceipts': '添付されたレシートはありません',
   'costs.deleteReceipt': 'レシートを削除',
   'costs.viewReceipt': 'レシートを表示',
-  'costs.receiptLeftBehind': '保存に失敗し、アップロード済みの領収書が {count} 件残っています。ファイルタブで削除してください。',
+  'costs.receiptLeftBehind':
+    '保存に失敗し、アップロード済みの領収書が {count} 件残っています。ファイルタブで削除してください。',
 };
 export default budget;

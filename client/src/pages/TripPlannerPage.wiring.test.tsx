@@ -1170,6 +1170,27 @@ describe('TripPlannerPage — modals', () => {
     expect(tripActions.deleteFile).toHaveBeenCalledWith(42, 2)
   })
 
+  it('FE-PAGE-TPW-053b: the transport edit window deletes the booking when the user may edit reservations', async () => {
+    const res = buildReservation({ id: 55, type: 'flight', title: 'LH 400' })
+    renderPage({ showTransportModal: true, editingTransport: res })
+
+    await act(async () => { await props('transportModal').onDelete() })
+    expect(hookState.handleDeleteReservation).toHaveBeenCalledWith(55)
+  })
+
+  it('FE-PAGE-TPW-053c: no transport delete without an edited booking or permission', () => {
+    renderPage({ showTransportModal: true })
+    expect(props('transportModal').onDelete).toBeUndefined()
+
+    cleanup()
+    renderPage({
+      showTransportModal: true,
+      editingTransport: buildReservation({ id: 55, type: 'flight' }),
+      can: vi.fn((action: string) => action !== 'reservation_edit'),
+    })
+    expect(props('transportModal').onDelete).toBeUndefined()
+  })
+
   it('FE-PAGE-TPW-054: during a review the transport modal exits advance the queue too', async () => {
     renderPage({ showTransportModal: true, importReviewActive: true })
 
@@ -1298,7 +1319,9 @@ describe('TripPlannerPage — modals', () => {
   it('FE-PAGE-TPW-062: the question before a booked night becomes a pause answers through the hook', () => {
     renderPage({ stayRelease: { stop: { stopType: null, dwellMinutes: 30 }, name: 'Hotel Fjord', booking: 'Booking 4711' } })
 
-    const [, , release] = confirmDialogs as unknown as Array<Record<string, () => unknown> & { isOpen: boolean }>
+    // Found by its handler rather than its place: the delete-day question sits in front of it now.
+    const release = (confirmDialogs as unknown as Array<Record<string, () => unknown> & { isOpen: boolean }>)
+      .find(dialog => dialog.onConfirm === hookState.confirmStayRelease)!
     expect(release.isOpen).toBe(true)
 
     act(() => { release.onClose() })

@@ -236,6 +236,20 @@ describe('MapsService.pois answered from the index', () => {
     });
   });
 
+  // #2483: the index keeps websites the way the operator typed them.
+  it('MAPS-POIS-015: a website without a scheme gains https, one that is no website becomes null', async () => {
+    mockNearby.mockResolvedValue([
+      { ...FULL, contact: { ...FULL.contact, website: 'cafecentral.wien/de' } },
+      { ...FULL, gers: 'a-2', contact: { ...FULL.contact, website: 'javascript:alert(1)' } },
+    ]);
+    const svc = make();
+    stubOverpass(svc);
+
+    const out = await svc.pois('cafe', BOX);
+
+    expect(out.pois.map((p) => p.website)).toEqual(['https://cafecentral.wien/de', null]);
+  });
+
   it('MAPS-POIS-004: asks the index for the categories behind the pill, around the viewport centre', async () => {
     mockNearby.mockResolvedValue([FULL]);
     const svc = make();

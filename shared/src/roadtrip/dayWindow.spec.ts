@@ -1,6 +1,7 @@
 import { MAX_TRIP_DAYS } from '../trip/trip.schema';
 import { dayWindow, planDayWindow, roadtripInsertion } from './dayWindow';
-import type { RoadtripStop, RoutedLeg } from './planning-types';
+import { withStationaryJoins } from './nightBookends';
+import type { BookendPhase, RoadtripStop, RoutedLeg } from './planning-types';
 
 import { describe, expect, it } from 'vitest';
 
@@ -337,10 +338,10 @@ describe('daily travel window', () => {
 
     expect(planned.issue).toBeNull();
     // One night inserted, not two: the stay ends inside the next day's window.
-    const dayTwo = planned.chains.find(c => c.dayNumber === 2)!;
-    expect(dayTwo.schedule.entries.find(e => e.departure === '08:04')).toBeTruthy();
+    const dayTwo = planned.chains.find((c) => c.dayNumber === 2)!;
+    expect(dayTwo.schedule.entries.find((e) => e.departure === '08:04')).toBeTruthy();
     // And the stop after it is reached that same morning.
-    expect(dayTwo.stops.some(s => s.assignmentId === 2)).toBe(true);
+    expect(dayTwo.stops.some((s) => s.assignmentId === 2)).toBe(true);
   });
 
   it('does not place a night pause halfway through a ferry crossing', () => {
@@ -394,30 +395,41 @@ describe('daily travel window', () => {
   });
 });
 
-it('waits for a check-in the drive overshoots rather than rushing it', () => {
-  const stops = [
-    stop(1, { time: '07:00', dwellMinutes: 60 }),
-    stop(2, { checkInTime: '09:11' }),
-    stop(3),
-  ];
-  const plan = calculate(stops, [72.5, 29]);
+it('holds a check-in the drive reaches within the minute a rounded leg can add', () => {
+  const stops = [stop(1, { time: '07:00', dwellMinutes: 60 }), stop(2, { checkInTime: '09:11' }), stop(3)];
+  const plan = calculate(stops, [71.5, 29]);
   expect(plan.issue).toBeNull();
-  // Arrives two minutes past the hour it may check in from, and is left there rather
-  // than pulled back to the round number.
-  expect(plan.chains[0]!.schedule.entries[1]!.arrival).toBe('09:13');
+  // Half a minute over is the rounding of the drive, not being late: the night keeps
+  // its check-in, the same grace a pinned stop gets.
+  expect(plan.chains[0]!.schedule.entries[1]!.arrival).toBe('09:11');
   const stops0 = plan.chains[0]!.stops;
   expect(stops0.at(-1)!.placeId).toBe(3);
-  // And carries straight on from there: nothing holds the traveller at the stop.
-  expect(plan.chains[0]!.schedule.entries.at(-1)!.arrival).toBe('09:42');
+  expect(plan.chains[0]!.schedule.entries.at(-1)!.arrival).toBe('09:40');
 });
 
-it('waits for check-in without treating it as a fixed appointment', () => {
+it('does not rush a check-in the drive overshoots, and does not quietly move it either', () => {
+  // Two minutes past the check-in is past it. A pinned time out of reach is a
+  // conflict here, and a check-in is one of those now.
+  const stops = [stop(1, { time: '07:00', dwellMinutes: 60 }), stop(2, { checkInTime: '09:11' }), stop(3)];
+  expect(calculate(stops, [72.5, 29]).issue).toBe('conflict');
+});
+
+it('waits for a check-in the drive reaches early', () => {
   const plan = calculate([stop(1), stop(2, { checkInTime: '15:00' }), stop(3)], [60, 29]);
   expect(plan.issue).toBeNull();
-  // The check-in is a door opening, not an appointment: the drive waits for it and then
-  // carries straight on, rather than the day being rebuilt around it.
+  // The night is held to its check-in the way a pinned stop is held to its time: the
+  // drive waits for it and carries on from there.
   expect(plan.chains[0]!.schedule.entries[1]!.arrival).toBe('15:00');
+  expect(plan.chains[0]!.schedule.entries[1]!.anchored).toBe(true);
   expect(plan.chains[0]!.schedule.entries.at(-1)!.arrival).toBe('15:29');
+});
+
+it('treats a check-in the drive cannot make as the conflict a missed pin is', () => {
+  // A night booked for ten with two hours of driving pinned ahead of it. The window
+  // planner does not invent a plan around a time it cannot keep; it hands back to the
+  // plain schedule, which keeps the ten and says how late the drive is.
+  const plan = calculate([stop(1, { time: '09:00' }), stop(2, { checkInTime: '10:00' })], [120]);
+  expect(plan.issue).toBe('conflict');
 });
 
 describe('a time set to leave a stop, with daily travel times', () => {
@@ -508,5 +520,138 @@ describe('a time set to leave a stop, with daily travel times', () => {
     const night = plan.chains[0]!.stops.find((s) => s.automaticNight);
     expect(night).toBeDefined();
     expect(night!.leaveAt).toBeUndefined();
+  });
+});
+
+describe('night bookends in the day window', () => {
+  const HOTEL = { lat: 1, lng: 1 };
+  const bookend = (id: number, dayId: number, phase: BookendPhase, ownerIndex: number, at = HOTEL) =>
+    stop(id, {
+      assignmentId: -6_000_000_000 - id,
+      ownerDayId: dayId,
+      ownerIndex,
+      ...at,
+      stopType: 'hotel',
+      name: `${phase} hotel`,
+      bookend: {
+        phase,
+        accommodationId: 5,
+        reservationId: null,
+        checkingOut: false,
+        checkingIn: false,
+        checkOut: null,
+      },
+    });
+  const minutesBetween = (table: Record<string, number>) =>
+    withStationaryJoins((a, b) => leg(table[`${a.assignmentId}>${b.assignmentId}`] ?? 60, a, b));
+  const names = (chain: { stops: RoadtripStop[] } | undefined) =>
+    (chain?.stops ?? []).map((s) => s.automaticNight?.phase ?? s.name);
+
+  // Day 1 drives to the hotel it sleeps in, day 2 sets out from it.
+  const p1 = stop(1, { time: '08:00' });
+  const p2 = stop(2, { dwellMinutes: 60 });
+  const evening = bookend(90, 1, 'evening', 2);
+  const morning = bookend(91, 2, 'morning', 0);
+  const p3 = stop(3, { ownerDayId: 2, ownerIndex: 0, lng: 7 });
+  const p4 = stop(4, { ownerDayId: 2, ownerIndex: 1, lng: 8 });
+  // Five hours to the second place, five more to the hotel: in at 19:00, past the window.
+  const long = minutesBetween({ '1>2': 300, [`2>${evening.assignmentId}`]: 300 });
+  const twoDays = (first: RoadtripStop[], second: RoadtripStop[] = [morning, p3, p4]) => [
+    day(1, first),
+    day(2, second),
+  ];
+
+  it('never cuts the drive to tonight’s hotel, and closes the day there', () => {
+    const plan = planDayWindow(twoDays([p1, p2, evening]), hours, long, 'metric', labels);
+    expect(plan.issue).toBeNull();
+    expect(names(plan.chains[0])).toEqual(['Stop 1', 'Stop 2', 'evening hotel', 'end']);
+    expect(plan.chains[0]!.schedule.entries.map((e) => e.arrival)).toEqual(['08:00', '13:00', '19:00', '19:00']);
+    expect(names(plan.chains[1])).toEqual(['start', 'morning hotel', 'Stop 3', 'Stop 4']);
+    expect(plan.chains[1]!.schedule.entries.slice(0, 2).map((e) => e.arrival)).toEqual(['08:00', '08:00']);
+  });
+
+  it('never puts the drive to tonight’s hotel off until the morning either', () => {
+    const plan = planDayWindow(twoDays([p1, p2, evening]), { ...hours, endMode: 'stop' }, long, 'metric', labels);
+    expect(plan.issue).toBeNull();
+    expect(names(plan.chains[0])).toEqual(['Stop 1', 'Stop 2', 'evening hotel', 'end']);
+  });
+
+  it('leaves the marker at the hotel without the hotel’s booking on it', () => {
+    const plan = planDayWindow(twoDays([p1, p2, evening]), hours, long, 'metric', labels);
+    const markers = plan.chains.flatMap((c) => c.stops.filter((s) => s.automaticNight));
+    expect(markers).toHaveLength(2);
+    for (const marker of markers) {
+      expect(marker.bookend).toBeUndefined();
+      expect(marker).toMatchObject(HOTEL);
+    }
+  });
+
+  it('ends a day ended at its last place behind the hotel, by hand or by the stop', () => {
+    const short = minutesBetween({});
+    const byStop = planDayWindow(twoDays([p1, { ...p2, endDay: true }, evening]), hours, short, 'metric', labels);
+    expect(byStop.issue).toBeNull();
+    expect(names(byStop.chains[0])).toEqual(['Stop 1', 'Stop 2', 'evening hotel', 'end']);
+    const byHand = planDayWindow(twoDays([p1, p2, evening]), hours, short, 'metric', labels, [
+      { day_number: 1, from_assignment_id: 2, to_assignment_id: null, fraction: 1 },
+    ]);
+    expect(byHand.issue).toBeNull();
+    expect(names(byHand.chains[0])).toEqual(['Stop 1', 'Stop 2', 'evening hotel', 'end']);
+    expect(byHand.chains[0]!.stops[3]!.automaticNight).toMatchObject({ manual: true });
+  });
+
+  it('lets a boundary across the night go: the booked night ends the day there already', () => {
+    const plan = planDayWindow(twoDays([p1, p2, evening]), hours, long, 'metric', labels, [
+      { day_number: 1, from_assignment_id: 2, to_assignment_id: 3, fraction: 0.5 },
+    ]);
+    expect(plan.issue).toBeNull();
+    expect(names(plan.chains[0])).toEqual(['Stop 1', 'Stop 2', 'evening hotel', 'end']);
+    // Across a stop it is still the conflict it always was.
+    const across = planDayWindow(twoDays([p1, p2, evening]), hours, long, 'metric', labels, [
+      { day_number: 1, from_assignment_id: 1, to_assignment_id: 3, fraction: 0.5 },
+    ]);
+    expect(across.issue).toBe('conflict');
+  });
+
+  it('sets out from the hotel early for a place pinned before the window opens', () => {
+    const pinned = { ...p3, time: '07:00' };
+    const plan = planDayWindow(
+      twoDays([p1, p2, evening], [morning, pinned, p4]),
+      hours,
+      minutesBetween({}),
+      'metric',
+      labels,
+    );
+    expect(plan.issue).toBeNull();
+    expect(plan.chains[1]!.schedule.entries.slice(0, 3).map((e) => e.arrival)).toEqual(['06:00', '06:00', '07:00']);
+  });
+
+  it('does so on the first day of the drive too, where no marker comes before the hotel', () => {
+    const pinned = { ...p3, time: '07:00' };
+    const plan = planDayWindow([day(2, [morning, pinned, p4])], hours, minutesBetween({}), 'metric', labels);
+    expect(plan.issue).toBeNull();
+    expect(plan.chains[0]!.schedule.entries.map((e) => e.arrival)).toEqual(['06:00', '07:00', '08:00']);
+  });
+
+  it('keeps the drive between two hotels when the morning moves early', () => {
+    const other = bookend(92, 2, 'morning', 0, { lat: 1, lng: 3 });
+    const pinned = { ...p3, time: '07:00' };
+    const lookup = minutesBetween({ [`${evening.assignmentId}>${other.assignmentId}`]: 30 });
+    const plan = planDayWindow(twoDays([p1, p2, evening], [other, pinned]), hours, lookup, 'metric', labels);
+    expect(plan.issue).toBeNull();
+    expect(plan.chains[1]!.schedule.entries.map((e) => e.arrival)).toEqual(['05:30', '06:00', '07:00']);
+  });
+
+  it('files a stop added behind tonight’s hotel or a desk behind the day’s last place', () => {
+    const card = { stops: [morning, p3, p4, bookend(93, 2, 'evening', 2)] };
+    expect(roadtripInsertion(card, 0)).toEqual({ dayId: 2, position: 0 });
+    expect(roadtripInsertion(card, 1)).toEqual({ dayId: 2, position: 0 });
+    expect(roadtripInsertion(card, 3)).toEqual({ dayId: 2, position: 2 });
+    expect(roadtripInsertion(card, 4)).toEqual({ dayId: 2, position: 2 });
+    const handedBack = stop(9, {
+      ownerIndex: 2,
+      carrier: { reservationId: 4, type: 'car', role: 'return', title: 'Car', code: null, at: null },
+    });
+    expect(roadtripInsertion({ stops: [p1, p2, handedBack] }, 3)).toEqual({ dayId: 1, position: 2 });
+    expect(roadtripInsertion({ stops: [p1, p2] }, 2)).toEqual({ dayId: 1, position: 2 });
   });
 });

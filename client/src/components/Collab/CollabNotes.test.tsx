@@ -201,7 +201,9 @@ describe('CollabNotes', () => {
     // Deleting now asks for confirmation first — the note stays until confirmed.
     expect(screen.getByText('Delete note?')).toBeInTheDocument();
     expect(screen.getByText('Remove Me')).toBeInTheDocument();
-    await user.click(document.querySelector('button.bg-red-600') as HTMLElement);
+    // The confirm button of the question itself, found by its role rather than a colour class.
+    const question = screen.getByText('Delete note?').closest('.trek-modal-enter') as HTMLElement;
+    await user.click(within(question).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(screen.queryByText('Remove Me')).not.toBeInTheDocument());
   });
 

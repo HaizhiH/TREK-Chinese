@@ -25,13 +25,13 @@ const budgetAddonOn = addonGate(ADDON_IDS.BUDGET);
  * signed like the REST contract's (#2176): a negative payer is the recipient
  * of a refund recorded as a negative expense.
  */
-const payersSchema = z.array(z.object({
+const payersSchema = z.array(z.strictObject({
   user_id: z.number().int().positive(),
   amount: z.number(),
 })).describe('Who actually paid, and how much each paid, in the expense currency. Ask the user; do not guess.');
 
 /** Reusable Zod shape for an unequal split: what each participant owes. Signed, like the REST contract (#2176). */
-const splitMembersSchema = z.array(z.object({
+const splitMembersSchema = z.array(z.strictObject({
   user_id: z.number().int().positive(),
   amount: z.number(),
 })).describe('Unequal split: what each participant owes, in the expense currency. The amounts must add up to the expense total. Ask the user; do not guess.');
@@ -72,7 +72,8 @@ function formatCents(cents: number): string {
  * through the freeze-then-write composites so REST and MCP can't diverge on
  * the #1445 FX freeze, and the settlement resource resolves the trip currency
  * and live rates like get_settlement_summary instead of silently defaulting
- * to an unconverted EUR base.
+ * to an unconverted EUR base. freeze_budget_rates has no legacy counterpart; it
+ * is the REST freeze-rates route without the rate table a browser may lend.
  */
 @McpController()
 export class BudgetMcp {
@@ -177,7 +178,7 @@ export class BudgetMcp {
 
   @Tool({
     name: 'create_budget_item',
-    description: 'Add a budget/expense item to a trip. The cost is split equally among member_ids (omit to split across all trip members, or pass [] for a planning-only entry with no split); for an uneven split, give `members` the amount each participant owes instead. Use `payers` to record who actually paid and how much. Ask the user which trip members share this expense and who paid (resolve user IDs with list_trip_members) rather than guessing.',
+    description: 'Add a budget/expense item to a trip. The cost is split equally among member_ids (omit to split across all trip members, or pass [] for a planning-only entry with no split); for an uneven split, give `members` the amount each participant owes instead. Use `payers` to record who actually paid and how much. Ask the user which trip members share this expense and who paid (resolve user IDs with list_trip_members) rather than guessing. A foreign currency is frozen at the exchange rate the server quotes today; when the server has none, the expense counts in no balance or total and is listed under `unconverted` in get_settlement_summary until freeze_budget_rates pins one.',
     inputSchema: {
       tripId: z.number().int().positive(),
       name: z.string().min(1).max(200),
@@ -249,7 +250,7 @@ export class BudgetMcp {
 
   @Tool({
     name: 'update_budget_item',
-    description: 'Update an existing budget/expense item in a trip. You can also re-split it (equally via member_ids, unevenly via members), change the currency it was entered in, move it to another date, and record who actually paid via payers (amounts in the expense currency). When changing who shares an expense or who paid, ask the user rather than guessing; resolve user IDs with list_trip_members.',
+    description: 'Update an existing budget/expense item in a trip. You can also re-split it (equally via member_ids, unevenly via members), change the currency it was entered in, move it to another date, and record who actually paid via payers (amounts in the expense currency). When changing who shares an expense or who paid, ask the user rather than guessing; resolve user IDs with list_trip_members. A foreign currency is frozen at the exchange rate the server quotes today; when the server has none, the expense counts in no balance or total and is listed under `unconverted` in get_settlement_summary until freeze_budget_rates pins one.',
     inputSchema: {
       tripId: z.number().int().positive(),
       itemId: z.number().int().positive(),
@@ -390,7 +391,7 @@ export class BudgetMcp {
 
   @Tool({
     name: 'get_settlement_summary',
-    description: "See each member's net balance, the suggested payments to settle shared expenses, and what the trip finally costs each member once every reimbursement is accounted for (`finalBudgets`, each figure with the rows it is made of under `sources`). Amounts are in the trip's base currency. Call this before recording a settlement so you know who should pay whom and how much.",
+    description: "See each member's net balance, the suggested payments to settle shared expenses, and what the trip finally costs each member once every reimbursement is accounted for (`finalBudgets`, each figure with the rows it is made of under `sources`). Amounts are in `summary.currency`: the `base` asked for when the server can quote it, otherwise the trip's base currency. An expense or payment in a foreign currency with no exchange rate is left out of every figure and listed under `summary.unconverted` (item_ids, settlement_ids, currencies); freeze_budget_rates pins today's rate on those. Call this before recording a settlement so you know who should pay whom and how much.",
     inputSchema: {
       tripId: z.number().int().positive(),
       base: z.string().max(10).optional().describe('ISO currency code to compute balances in; defaults to the trip currency'),
@@ -402,10 +403,9 @@ export class BudgetMcp {
   async getSettlementSummary({ tripId, base }: { tripId: number; base?: string }, ctx: McpContext) {
     if (!this.budget.verifyTripAccess(tripId, ctx.userId)) return noAccess();
     const trip = this.db.get<{ currency?: string }>('SELECT currency FROM trips WHERE id = ?', tripId);
-    const tripCurrency = trip?.currency || 'EUR';
-    const effectiveBase = (base || tripCurrency).toUpperCase();
-    const rates = await this.exchangeRates.getRates(effectiveBase);
-    const summary = this.budget.calculateSettlement(tripId, { base: effectiveBase, rates, tripCurrency });
+    // The same call the REST route makes, so both convert with the trip currency's own
+    // quote and an amount entered in `base` reads back to the cent (#2525).
+    const summary = await this.budget.settlement(tripId, base, trip?.currency || 'EUR');
     return ok({ summary });
   }
 
@@ -426,7 +426,7 @@ export class BudgetMcp {
 
   @Tool({
     name: 'create_settlement',
-    description: "Record a settle-up payment: from_user_id paid to_user_id the given amount to settle shared expenses. The amount is in the trip's base currency unless `currency` says otherwise. Use get_settlement_summary first to find who owes whom and how much.",
+    description: "Record a settle-up payment: from_user_id paid to_user_id the given amount to settle shared expenses. The amount is in the trip's base currency unless `currency` says otherwise. Use get_settlement_summary first to find who owes whom and how much. When the server has no exchange rate for a foreign `currency`, the payment counts in no balance and is listed under `unconverted` in get_settlement_summary until freeze_budget_rates pins one.",
     inputSchema: {
       tripId: z.number().int().positive(),
       from_user_id: z.number().int().positive().describe('User ID of the member who paid'),
@@ -456,7 +456,7 @@ export class BudgetMcp {
 
   @Tool({
     name: 'update_settlement',
-    description: 'Update a recorded settle-up payment (who paid, who received, the amount and the currency it was made in). Every field is a full replace, so restate the ones that stay the same.',
+    description: 'Update a recorded settle-up payment (who paid, who received, the amount and the currency it was made in). Every field is a full replace, so restate the ones that stay the same. When the server has no exchange rate for a foreign `currency`, the payment counts in no balance and is listed under `unconverted` in get_settlement_summary until freeze_budget_rates pins one.',
     inputSchema: {
       tripId: z.number().int().positive(),
       settlementId: z.number().int().positive(),
@@ -504,6 +504,31 @@ export class BudgetMcp {
     if (!deleted) return errorResult('Settlement not found.');
     this.guards.safeBroadcast(tripId, 'budget:settlement-deleted', { settlementId });
     return ok({ success: true });
+  }
+
+  // --- EXCHANGE RATES ---
+
+  @Tool({
+    name: 'freeze_budget_rates',
+    description: "Pin today's server exchange rate on every expense and settle-up payment of a trip that is in a foreign currency and has no rate frozen yet. That takes in the rows get_settlement_summary lists under `unconverted`, which count in no balance or total until then, and also foreign rows it still converts at today's live rate. Rows that already carry a frozen rate, rows in the trip currency and rows without a currency are never touched, and no rate is taken from the caller. Returns the rows it froze (`items`, `settlements`) and the currencies the server could not quote (`unresolved`), whose rows stay unfrozen.",
+    inputSchema: {
+      tripId: z.number().int().positive(),
+    },
+    annotations: TOOL_ANNOTATIONS_WRITE,
+    when: budgetAddonOn,
+    access: { group: 'budget', mode: 'write' },
+  })
+  async freezeBudgetRates({ tripId }: { tripId: number }, ctx: McpContext) {
+    if (this.isDemoUser(ctx.userId)) return demoDenied();
+    if (!this.budget.verifyTripAccess(tripId, ctx.userId)) return noAccess();
+    if (!this.guards.hasTripPermission('budget_edit', tripId, ctx.userId)) return permissionDenied();
+    // The same service call as POST …/budget/freeze-rates, without a lent rate table:
+    // a rate from an MCP caller is never frozen, like everywhere else on this surface.
+    const healed = await this.budget.freezeMissingRates(tripId);
+    if (!healed) return errorResult('The trip currency changed. Reload and try again.');
+    for (const item of healed.items) this.guards.safeBroadcast(tripId, 'budget:updated', { item });
+    for (const settlement of healed.settlements) this.guards.safeBroadcast(tripId, 'budget:settlement-updated', { settlement });
+    return ok(healed);
   }
 
   // --- RESOURCES ---
@@ -556,7 +581,8 @@ export class BudgetMcp {
         }],
       };
     }
-    const summary = this.budget.getPerPersonSummary(id);
+    // In the trip currency, each share at the rate its expense was booked at (#2525).
+    const summary = await this.budget.perPersonSummary(id);
     return {
       contents: [{
         uri: uri.href,

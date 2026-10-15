@@ -1,5 +1,5 @@
-// FE-COMP-PLACEFORM-001 to FE-COMP-PLACEFORM-036, FE-PLANNER-PLACEFORM-016 to FE-PLANNER-PLACEFORM-067, plus FE-PLANNER-PLACEFORM-068 to -080
-import { render, screen, waitFor, fireEvent, within } from '../../../tests/helpers/render';
+// FE-COMP-PLACEFORM-001 to FE-COMP-PLACEFORM-036, FE-PLANNER-PLACEFORM-016 to FE-PLANNER-PLACEFORM-067, plus FE-PLANNER-PLACEFORM-068 to -091
+import { render, screen, waitFor, fireEvent, within, act } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
@@ -162,6 +162,88 @@ describe('PlaceFormModal', () => {
     expect(screen.queryByDisplayValue('Old Place')).not.toBeInTheDocument();
   });
 
+  it('FE-PLANNER-PLACEFORM-088: closing the dialog clears the search field', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<PlaceFormModal {...defaultProps} isOpen />);
+    await user.type(screen.getByPlaceholderText('Search places...'), 'Eiffel Tower');
+
+    rerender(<PlaceFormModal {...defaultProps} isOpen={false} />);
+    rerender(<PlaceFormModal {...defaultProps} isOpen />);
+
+    expect(screen.getByPlaceholderText('Search places...')).toHaveValue('');
+  });
+
+  it('FE-PLANNER-PLACEFORM-089: closing the dialog drops the result list and its Google line', async () => {
+    const user = userEvent.setup();
+    seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, hasMapsKey: true });
+    server.use(
+      http.post('/api/maps/search', () =>
+        HttpResponse.json({ places: [{ name: 'Weigh station', address: 'Ritzville', lat: '47.1', lng: '-118.4' }], source: 'trek-places+openstreetmap' }),
+      ),
+    );
+    const { rerender } = render(<PlaceFormModal {...defaultProps} isOpen />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Tokyo Station');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+    expect(await screen.findByText('Weigh station')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Search Google instead/ })).toBeInTheDocument();
+
+    rerender(<PlaceFormModal {...defaultProps} isOpen={false} />);
+    rerender(<PlaceFormModal {...defaultProps} isOpen />);
+
+    expect(screen.getByPlaceholderText('Search places...')).toHaveValue('');
+    expect(screen.queryByText('Weigh station')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Search Google instead/ })).toBeNull();
+  });
+
+  it('FE-PLANNER-PLACEFORM-090: suggestions still on their way when the dialog closes never open over the next one', async () => {
+    const user = userEvent.setup();
+    const gate: { started: boolean; release?: () => void } = { started: false };
+    server.use(
+      http.post('/api/maps/autocomplete', async () => {
+        gate.started = true;
+        await new Promise<void>(res => { gate.release = res; });
+        return HttpResponse.json({ suggestions: [{ placeId: 'late-1', mainText: 'Late Suggestion', secondaryText: 'Nowhere' }], source: 'trek-places' });
+      }),
+    );
+    const { rerender } = render(<PlaceFormModal {...defaultProps} isOpen />);
+    await user.type(screen.getByPlaceholderText('Search places...'), 'Late');
+    await waitFor(() => expect(gate.started).toBe(true));
+
+    rerender(<PlaceFormModal {...defaultProps} isOpen={false} />);
+    gate.release?.();
+    await act(async () => { await new Promise(res => setTimeout(res, 100)); });
+    rerender(<PlaceFormModal {...defaultProps} isOpen />);
+
+    expect(screen.queryByText('Late Suggestion')).toBeNull();
+  });
+
+  it('FE-PLANNER-PLACEFORM-091: a search that answers after the dialog closed leaves the next opening empty', async () => {
+    const user = userEvent.setup();
+    const gate: { started: boolean; release?: () => void } = { started: false };
+    server.use(
+      http.post('/api/maps/search', async () => {
+        gate.started = true;
+        await new Promise<void>(res => { gate.release = res; });
+        return HttpResponse.json({ places: [{ name: 'Late Result', address: 'Nowhere', lat: '1', lng: '2' }] });
+      }),
+    );
+    const { rerender } = render(<PlaceFormModal {...defaultProps} isOpen />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Late');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+    await waitFor(() => expect(gate.started).toBe(true));
+
+    rerender(<PlaceFormModal {...defaultProps} isOpen={false} />);
+    gate.release?.();
+    await act(async () => { await new Promise(res => setTimeout(res, 100)); });
+    rerender(<PlaceFormModal {...defaultProps} isOpen />);
+
+    expect(screen.queryByText('Late Result')).toBeNull();
+    // The button is back to its icon rather than the "..." of a search in flight.
+    expect(within(screen.getByPlaceholderText('Search places...').closest('.flex') as HTMLElement).getByRole('button')).not.toHaveTextContent('...');
+  });
+
   // ── Maps search ──────────────────────────────────────────────────────────────
 
   it('FE-PLANNER-PLACEFORM-018: maps search populates results via button click', async () => {
@@ -184,6 +266,128 @@ describe('PlaceFormModal', () => {
     await user.click(searchBtn);
 
     expect(await screen.findByText('Eiffel Tower')).toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-PLACEFORM-018b: a list the index answered offers Google instead, and the link sends the same query there alone', async () => {
+    const user = userEvent.setup();
+    seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, hasMapsKey: true });
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post('/api/maps/search', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        return body.provider === 'google'
+          ? HttpResponse.json({ places: [{ name: 'Tokyo Station', address: 'Chiyoda', lat: '35.68', lng: '139.77' }], source: 'google' })
+          : HttpResponse.json({ places: [{ name: 'Weigh station', address: 'Ritzville', lat: '47.1', lng: '-118.4' }], source: 'trek-places+openstreetmap' });
+      }),
+    );
+
+    render(<PlaceFormModal {...defaultProps} />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Tokyo Station');
+    const searchRow = searchInput.closest('.flex') as HTMLElement;
+    await user.click(within(searchRow).getByRole('button'));
+    expect(await screen.findByText('Weigh station')).toBeInTheDocument();
+
+    // The quiet line under the list, only because the instance has a key and
+    // this list did not come from Google.
+    const retry = screen.getByRole('button', { name: /Search Google instead/ });
+    await user.click(retry);
+    expect(await screen.findByText('Tokyo Station')).toBeInTheDocument();
+    expect(bodies[0]).not.toHaveProperty('provider');
+    expect(bodies[1]).toMatchObject({ query: 'Tokyo Station', provider: 'google' });
+    // A list Google produced has nowhere further to go.
+    expect(screen.queryByRole('button', { name: /Search Google instead/ })).toBeNull();
+  });
+
+  it('FE-PLANNER-PLACEFORM-018c: without a Google key the list offers nothing', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('/api/maps/search', () =>
+        HttpResponse.json({ places: [{ name: 'Weigh station', address: 'Ritzville', lat: '47.1', lng: '-118.4' }], source: 'trek-places+openstreetmap' }),
+      ),
+    );
+    render(<PlaceFormModal {...defaultProps} />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Tokyo Station');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+    expect(await screen.findByText('Weigh station')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Search Google instead/ })).toBeNull();
+  });
+
+  it('FE-PLANNER-PLACEFORM-018d: a key alone is not enough: with Amap or OpenStreetMap picked the list offers nothing', async () => {
+    // The server only honours the request while Google holds the keyed slot;
+    // under another provider the link would re-run the same search and stay.
+    const user = userEvent.setup();
+    seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, hasMapsKey: true, placesProvider: 'openstreetmap' });
+    server.use(
+      http.post('/api/maps/search', () =>
+        HttpResponse.json({ places: [{ name: 'Weigh station', address: 'Ritzville', lat: '47.1', lng: '-118.4' }], source: 'trek-places+openstreetmap' }),
+      ),
+    );
+    render(<PlaceFormModal {...defaultProps} />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Tokyo Station');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+    expect(await screen.findByText('Weigh station')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Search Google instead/ })).toBeNull();
+  });
+
+  it('FE-PLANNER-PLACEFORM-018e: the link sends the query the list came from, not what the field holds by then', async () => {
+    const user = userEvent.setup();
+    seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, hasMapsKey: true });
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post('/api/maps/autocomplete', () => HttpResponse.json({ suggestions: [], source: 'trek-places' })),
+      http.post('/api/maps/search', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        return body.provider === 'google'
+          ? HttpResponse.json({ places: [{ name: 'Tokyo Station', address: 'Chiyoda', lat: '35.68', lng: '139.77' }], source: 'google' })
+          : HttpResponse.json({ places: [{ name: 'Weigh station', address: 'Ritzville', lat: '47.1', lng: '-118.4' }], source: 'trek-places+openstreetmap' });
+      }),
+    );
+
+    render(<PlaceFormModal {...defaultProps} />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Tokyo Station');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+    expect(await screen.findByText('Weigh station')).toBeInTheDocument();
+
+    // The list stays while the field is retyped; the line still means this list.
+    await user.clear(searchInput);
+    await user.type(searchInput, 'Kyoto');
+    await user.click(screen.getByRole('button', { name: /Search Google instead/ }));
+    expect(await screen.findByText('Tokyo Station')).toBeInTheDocument();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ query: 'Tokyo Station', provider: 'google' });
+  });
+
+  it('FE-PLANNER-PLACEFORM-018f: the link still works after the field was cleared', async () => {
+    const user = userEvent.setup();
+    seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, hasMapsKey: true });
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post('/api/maps/search', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        return body.provider === 'google'
+          ? HttpResponse.json({ places: [{ name: 'Tokyo Station', address: 'Chiyoda', lat: '35.68', lng: '139.77' }], source: 'google' })
+          : HttpResponse.json({ places: [{ name: 'Weigh station', address: 'Ritzville', lat: '47.1', lng: '-118.4' }], source: 'trek-places+openstreetmap' });
+      }),
+    );
+
+    render(<PlaceFormModal {...defaultProps} />);
+    const searchInput = screen.getByPlaceholderText('Search places...');
+    await user.type(searchInput, 'Tokyo Station');
+    await user.click(within(searchInput.closest('.flex') as HTMLElement).getByRole('button'));
+    expect(await screen.findByText('Weigh station')).toBeInTheDocument();
+
+    // An empty field used to make the click a silent no-op.
+    await user.clear(searchInput);
+    await user.click(screen.getByRole('button', { name: /Search Google instead/ }));
+    expect(await screen.findByText('Tokyo Station')).toBeInTheDocument();
+    expect(bodies[1]).toMatchObject({ query: 'Tokyo Station', provider: 'google' });
   });
 
   it('FE-PLANNER-PLACEFORM-019: pressing Enter in search input triggers search', async () => {

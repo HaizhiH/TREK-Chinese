@@ -17,6 +17,7 @@ import { getTransportForDay, hasCarrierEndpointOnDay } from '../../../../utils/d
 import { splitReservationDateTime } from '../../../../utils/formatters'
 import { dayCoMapsUrl, dayGoogleMapsUrl, optimizeDayOrder } from '../lib/dayRoute'
 import GoogleMapsIcon from '../../../../components/shared/GoogleMapsIcon'
+import { BlurredCode } from '../../../../components/shared/BookingCode'
 import { splitNoteTime } from '../lib/dayNotes'
 import { weatherIconFor } from '../plan/planTimelineModel'
 import type { Assignment, DayNote, Reservation } from '../../../../types'
@@ -199,7 +200,7 @@ export default function MDaySheet({ planner, shell }: MTripSheetsProps) {
     if (!day) return
     const url = dayGoogleMapsUrl(
       day, planner.days, dayAssignments, planner.tripAccommodations, optimizeFromAccommodation !== false,
-      dayHasCarrier,
+      { located: dayHasCarrier },
     )
     if (url) window.open(url, '_blank', 'noopener,noreferrer')
   }
@@ -209,7 +210,7 @@ export default function MDaySheet({ planner, shell }: MTripSheetsProps) {
     if (!day) return
     const url = dayCoMapsUrl(
       day, planner.days, dayAssignments, planner.tripAccommodations, optimizeFromAccommodation !== false,
-      day.default_transport_mode ?? planner.routeProfile, dayHasCarrier,
+      day.default_transport_mode ?? planner.routeProfile, { located: dayHasCarrier },
     )
     if (url) window.open(url, '_blank', 'noopener,noreferrer')
   }
@@ -566,7 +567,8 @@ export default function MDaySheet({ planner, shell }: MTripSheetsProps) {
                           />
                           <span className="min-w-0 flex-1 truncate font-geist text-[0.6875rem] text-m-muted">
                             {linked.status === 'confirmed' ? t('reservations.confirmed') : t('reservations.pending')}
-                            {linked.confirmation_number ? ` · #${linked.confirmation_number}` : ''}
+                            {/* The strip is a button already, so the code gets the plain blur, not a toggle. */}
+                            {linked.confirmation_number ? <> · <BlurredCode interactive={false}>{`#${linked.confirmation_number}`}</BlurredCode></> : ''}
                           </span>
                         </button>
                       )}

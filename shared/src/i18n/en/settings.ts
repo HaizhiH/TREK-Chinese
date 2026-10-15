@@ -34,7 +34,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': 'Select template...',
   'settings.mapDefaultHint': 'Leave empty for OpenStreetMap (default)',
   'settings.routingBase': 'Own routing engine',
-  'settings.routingBaseHint': 'An OSRM instance of your own. Empty uses the public servers, which allow about one request a second — enough for a day, tight for a road trip. Takes effect after a server restart.',
+  'settings.routingBaseHint':
+    'An OSRM instance of your own. Empty uses the public servers, which allow about one request a second — enough for a day, tight for a road trip. Takes effect after a server restart.',
   'settings.valhallaBase': 'Own Valhalla instance',
   'settings.valhallaBaseHint':
     'TREK uses the public FOSSGIS Valhalla by default to avoid toll roads, motorways and ferries. Enter your own Valhalla URL here to use it instead. If only a custom routing instance is configured, the public Valhalla is not used. After entering a custom URL, restart the server and reload the page.',
@@ -511,7 +512,8 @@ const settings: TranslationStrings = {
   'settings.offline.notice.offline': 'No connection. Connect to store trips for offline use.',
   'settings.offline.notice.signedOut': 'Your session has ended. Sign in again to sync.',
   'settings.offline.notice.failed': 'The download could not finish. Check your connection and try again.',
-  'settings.offline.notice.loadFailed': 'Could not read this device’s offline storage. Clearing the cache usually fixes it.',
+  'settings.offline.notice.loadFailed':
+    'Could not read this device’s offline storage. Clearing the cache usually fixes it.',
   'settings.offline.clear': 'Clear cache',
   'settings.offline.clearConfirm': 'Clear all offline trip data? You can re-sync anytime while online.',
   'settings.offline.stats.trips': 'Cached trips',
@@ -560,7 +562,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': 'Wishlist',
   'settings.apiScopes.stats': 'Totals',
   'settings.apiKeys.title': 'API Keys',
-  'settings.apiKeys.description': 'Keys for the public API, so other software can read your trips. Read-only: a key cannot change or delete anything.',
+  'settings.apiKeys.description':
+    'Keys for the public API, so other software can read your trips. Read-only: a key cannot change or delete anything.',
   'settings.apiKeys.create': 'Create key',
   'settings.apiKeys.empty': 'No keys yet. Create one to connect other software.',
   'settings.apiKeys.createdAt': 'created',
@@ -575,7 +578,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.endpoint': 'Endpoint',
   'settings.apiKeys.neverUsed': 'never used',
   'settings.apiKeys.loadFailed': 'Could not load your keys. Reload the page to try again.',
-  'settings.apiKeys.limitReached': 'You have {max} keys, the most an account can hold. Delete one you no longer use to create another.',
+  'settings.apiKeys.limitReached':
+    'You have {max} keys, the most an account can hold. Delete one you no longer use to create another.',
   'settings.apiKeys.copyFailed': 'Could not copy. Select the text and copy it by hand.',
   'settings.apiKeys.modal.createTitle': 'Create API key',
   'settings.apiKeys.modal.name': 'Name',

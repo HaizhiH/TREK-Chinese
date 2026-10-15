@@ -31,6 +31,7 @@ function mockAmap() {
     on: vi.fn(),
     off: vi.fn(),
     getZoom: () => 14,
+    panTo: vi.fn(),
     remove: vi.fn(),
     setFitView: vi.fn(),
     setMapStyle: vi.fn(),
@@ -215,6 +216,7 @@ describe('MapViewAmap', () => {
 
     rerender(<MapViewAmap {...props} places={[{ ...place, category_color: '#dc2626' }]} selectedPlaceId={1} />);
     await waitFor(() => expect(AMap.MarkerCluster).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(map.panTo).toHaveBeenCalledTimes(1));
     expect(firstCluster.setMap).toHaveBeenCalledWith(null);
     const selected = AMap.MarkerCluster.mock.results[1].value.markers[0];
     expect(selected.options.content).toHaveStyle({ width: '42px', height: '42px', background: '#dc2626' });
@@ -255,5 +257,35 @@ describe('MapViewAmap', () => {
     const [fitMarkers] = map.setFitView.mock.calls[0];
     expect(fitMarkers).toHaveLength(1);
     expect(fitMarkers[0].options.position).toEqual([139.6503, 35.6762]);
+  });
+
+  it('pans to selected place safely and handles missing panTo or throws defensively', async () => {
+    const { map, AMap } = mockAmap();
+    const place1 = { id: 1, trip_id: 1, name: 'Beijing', lat: 39.9042, lng: 116.4074 } as any;
+    const place2 = { id: 2, trip_id: 1, name: 'Shanghai', lat: 31.2304, lng: 121.4737 } as any;
+    const props = { jsKey: 'js-key', securityCode: 'security-code', places: [place1, place2] };
+
+    const { rerender } = render(<MapViewAmap {...props} selectedPlaceId={1} />);
+    sdk.resolve(AMap);
+
+    await waitFor(() => expect(map.panTo).toHaveBeenCalledTimes(1));
+    expect(map.panTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ getLat: expect.any(Function), getLng: expect.any(Function) })
+    );
+
+    // Switching selected place triggers panTo with new target
+    rerender(<MapViewAmap {...props} selectedPlaceId={2} />);
+    await waitFor(() => expect(map.panTo).toHaveBeenCalledTimes(2));
+
+    // Defensive check: panTo is not a function
+    (map as any).panTo = undefined;
+    rerender(<MapViewAmap {...props} selectedPlaceId={1} />);
+
+    // Defensive check: panTo throws error
+    (map as any).panTo = vi.fn(() => {
+      throw new Error('map is transitioning');
+    });
+    rerender(<MapViewAmap {...props} selectedPlaceId={2} />);
+    await waitFor(() => expect(map.panTo).toHaveBeenCalled());
   });
 });

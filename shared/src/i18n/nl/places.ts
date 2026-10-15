@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Reserveringsnotities, bevestigingsnummer...',
   'places.mapsSearchPlaceholder': 'Plaatsen zoeken...',
   'places.mapsSearchError': 'Zoeken naar plaatsen mislukt.',
+  'places.searchGoogleInstead': 'Niet de juiste plek? Zoek in plaats daarvan op Google',
   'places.loadingDetails': 'Plaatsgegevens laden…',
   'places.osmHint':
     "Zoeken via OpenStreetMap (geen foto's, openingstijden of beoordelingen). Voeg een Google API-sleutel toe in instellingen voor volledige details.",

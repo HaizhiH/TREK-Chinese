@@ -1,3 +1,4 @@
+import { normalizePlaceWebsite } from '@trek/shared';
 import { stripEmoji } from '../text-sanitize';
 
 /**
@@ -46,20 +47,6 @@ const capOrNull = (v: unknown, n: number): string | null => {
 };
 
 /**
- * A url that may become an `<a href>`. Anything but http/https is dropped — a
- * `javascript:` or `data:` url rendered as a link is click-XSS into the search list.
- */
-function safeUrl(raw: unknown): string | null {
-  if (typeof raw !== 'string' || raw === '') return null;
-  try {
-    const u = new URL(raw);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? raw.slice(0, 2048) : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * A rating a plugin index carries, on the five-point scale every such index uses.
  *
  * Clamped rather than rejected: a provider answering on a ten-point scale is a bug in
@@ -94,7 +81,10 @@ export function normalizeSearchHits(pluginId: string, raw: unknown): SearchHit[]
       lat,
       lng,
       rating: safeRating(h.rating),
-      website: safeUrl(h.website),
+      // Through the helper every other source uses (#2483): a `javascript:` or
+      // `data:` url rendered as a link is click-XSS into the search list, and a
+      // bare host gains https here as it does from the core search.
+      website: normalizePlaceWebsite(h.website),
       phone: capOrNull(h.phone, 60),
       category: capOrNull(h.category, 60),
       description: capOrNull(h.description, 500),

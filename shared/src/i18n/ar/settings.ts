@@ -24,7 +24,8 @@ const settings: TranslationStrings = {
   'settings.mapTemplatePlaceholder.select': 'اختر قالبًا...',
   'settings.mapDefaultHint': 'اتركه فارغًا لاستخدام OpenStreetMap افتراضيًا',
   'settings.routingBase': 'محرك مسارات خاص',
-  'settings.routingBaseHint': 'خادم OSRM خاص بك. اتركه فارغًا لاستخدام الخوادم العامة التي تسمح بطلب واحد تقريبًا في الثانية — يكفي ليوم واحد، وضيّق لرحلة برية. يسري بعد إعادة تشغيل الخادم.',
+  'settings.routingBaseHint':
+    'خادم OSRM خاص بك. اتركه فارغًا لاستخدام الخوادم العامة التي تسمح بطلب واحد تقريبًا في الثانية — يكفي ليوم واحد، وضيّق لرحلة برية. يسري بعد إعادة تشغيل الخادم.',
   'settings.valhallaBase': 'خادم Valhalla خاص بك',
   'settings.valhallaBaseHint':
     'يستخدم TREK خدمة Valhalla العامة من FOSSGIS افتراضيًا لتجنب الطرق ذات الرسوم والطرق السريعة والعبّارات. أدخل رابط خادم Valhalla الخاص بك هنا لاستخدامه بدلًا منها. إذا تم إعداد خادم توجيه خاص فقط، فلن تُستخدم خدمة Valhalla العامة. بعد إدخال رابط خاص، أعد تشغيل الخادم وحمّل الصفحة مجددًا.',
@@ -495,7 +496,8 @@ const settings: TranslationStrings = {
   'settings.offline.notice.offline': 'لا يوجد اتصال. اتصل بالإنترنت لحفظ الرحلات للاستخدام دون اتصال.',
   'settings.offline.notice.signedOut': 'انتهت جلستك. سجّل الدخول مرة أخرى للمزامنة.',
   'settings.offline.notice.failed': 'تعذّر إكمال التنزيل. تحقّق من اتصالك ثم حاول مرة أخرى.',
-  'settings.offline.notice.loadFailed': 'تعذّرت قراءة التخزين غير المتصل على هذا الجهاز. عادةً ما يُصلِح مسح الذاكرة المؤقتة المشكلة.',
+  'settings.offline.notice.loadFailed':
+    'تعذّرت قراءة التخزين غير المتصل على هذا الجهاز. عادةً ما يُصلِح مسح الذاكرة المؤقتة المشكلة.',
   'settings.offline.clear': 'مسح ذاكرة التخزين المؤقت',
   'settings.offline.clearConfirm':
     'هل تريد مسح جميع بيانات الرحلة المخزّنة دون اتصال؟ يمكنك إعادة المزامنة في أي وقت أثناء الاتصال.',
@@ -554,7 +556,8 @@ const settings: TranslationStrings = {
   'settings.apiScopes.bucket-list': 'قائمة الأمنيات',
   'settings.apiScopes.stats': 'الإجماليات',
   'settings.apiKeys.title': 'مفاتيح API',
-  'settings.apiKeys.description': 'مفاتيح لواجهة API العامة، حتى تتمكن برامج أخرى من قراءة رحلاتك. للقراءة فقط: لا يمكن للمفتاح تغيير أي شيء أو حذفه.',
+  'settings.apiKeys.description':
+    'مفاتيح لواجهة API العامة، حتى تتمكن برامج أخرى من قراءة رحلاتك. للقراءة فقط: لا يمكن للمفتاح تغيير أي شيء أو حذفه.',
   'settings.apiKeys.create': 'إنشاء مفتاح',
   'settings.apiKeys.empty': 'لا توجد مفاتيح بعد. أنشئ مفتاحًا لربط برامج أخرى.',
   'settings.apiKeys.createdAt': 'أُنشئ',
@@ -569,7 +572,8 @@ const settings: TranslationStrings = {
   'settings.apiKeys.endpoint': 'نقطة النهاية',
   'settings.apiKeys.neverUsed': 'لم يُستخدم قط',
   'settings.apiKeys.loadFailed': 'تعذّر تحميل مفاتيحك. أعد تحميل الصفحة للمحاولة مرة أخرى.',
-  'settings.apiKeys.limitReached': 'لديك {max} مفاتيح، وهو الحد الأقصى للحساب الواحد. احذف مفتاحًا لم تعد تستخدمه لإنشاء مفتاح جديد.',
+  'settings.apiKeys.limitReached':
+    'لديك {max} مفاتيح، وهو الحد الأقصى للحساب الواحد. احذف مفتاحًا لم تعد تستخدمه لإنشاء مفتاح جديد.',
   'settings.apiKeys.copyFailed': 'تعذّر النسخ. حدّد النص وانسخه يدويًا.',
   'settings.apiKeys.modal.createTitle': 'إنشاء مفتاح API',
   'settings.apiKeys.modal.name': 'الاسم',

@@ -88,7 +88,10 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': 'Baldeações',
   'transit.walkLabel': 'A pé',
   'transit.searchHint': 'Busque conexões reais e adicione direto ao dia — dados via Transitous.',
-  'trip.confirm.deletePlaceNight': 'A noite reservada em “{name}” desaparece com o local.',
-  'trip.confirm.deletePlaceBooked': 'A noite reservada em “{name}” desaparece com o local, juntamente com a reserva “{booking}” e qualquer despesa associada.',
+  'trip.confirm.deletePlaceNight': 'Isso também exclui a estadia reservada em “{name}”.',
+  'trip.confirm.deletePlaceBooked':
+    'Isso também exclui a estadia reservada em “{name}”, a reserva “{booking}” e qualquer despesa vinculada a ela.',
+  'trip.confirm.deletePlaceBookedSame':
+    'Isso também exclui a estadia reservada em “{name}”, a reserva dela e qualquer despesa vinculada.',
 };
 export default trip;

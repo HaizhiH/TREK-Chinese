@@ -385,7 +385,15 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         dayOrderMap={planner.dayOrderMap}
         reservations={planner.reservations}
         showReservationStats={true}
-        visibleConnectionIds={planner.visibleConnections}
+        // On the stage the rides the chain seams in draw as their booking's own arc,
+        // toggled on or not, the way the desktop map does it in road trip mode. The
+        // ride's leg carries no geometry, so without this the road ended at the
+        // departure terminal and picked up again at the arrival with nothing between.
+        visibleConnectionIds={onStage ? planner.roadtripConnections : planner.visibleConnections}
+        // The plan map shows one day, so a booking switched on for another day stays off
+        // it until that day is picked, or the whole trip is. The switch itself is still
+        // trip-wide. The stage keeps its seamed rides whatever day they were booked on.
+        scopeConnectionsToDay={!onStage}
         // Transport overlay tap → the mobile transport detail sheet (desktop
         // routes this through mapTransportDetail into the day sidebar instead).
         onReservationClick={(rid: number) => shell.openSheet('transport', { reservationId: rid })}

@@ -1,4 +1,5 @@
 import { tagSchema } from '../tag/tag.schema';
+import { PLACE_WEBSITE_MAX_LENGTH, normalizePlaceWebsite } from './place-website';
 
 import { z } from 'zod';
 
@@ -41,14 +42,23 @@ export const placeImageUrlSchema = z
     { message: 'must be an uploaded path, a photo-proxy path, an inline image or an https URL' },
   );
 
+const HTTP_URL = /^https?:\/\//i;
+
 /**
  * A place's homepage. It reaches window.open() on the client, where a
  * javascript: value would run in this origin rather than opening a page.
+ *
+ * A bare host is completed to https before the check instead of refused
+ * (#2483): search results carry websites that way, and an older client, a
+ * cached offline result or an MCP agent must not be stopped by one. A value
+ * that already names http(s) is kept exactly as sent, and every other scheme
+ * still fails. Read the parsed value, not the input: that is the one to store.
  */
 export const placeWebsiteSchema = z
   .string()
-  .max(500)
-  .refine((v) => /^https?:\/\//i.test(v), { message: 'must be an http or https URL' });
+  .overwrite((v) => (HTTP_URL.test(v) ? v : (normalizePlaceWebsite(v) ?? v)))
+  .max(PLACE_WEBSITE_MAX_LENGTH)
+  .refine((v) => HTTP_URL.test(v), { message: 'must be an http or https URL' });
 
 /**
  * Embedded category as returned on a place — a trimmed projection of the

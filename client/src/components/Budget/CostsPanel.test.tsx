@@ -15,6 +15,7 @@ import type { BudgetParticipantFinal } from '@trek/shared'
 import type { BudgetItem } from '../../types'
 import CostsPanel, { ExpenseModal } from './CostsPanel'
 import { splitEqualShares, calculateTicketShares, type TicketItem } from './CostsPanel.helpers'
+import { resetFreezeAttempts } from './useFreezeMissingRates'
 
 const tripMembers = [
   { id: 1, username: 'alice', avatar_url: null },
@@ -875,10 +876,11 @@ describe('CostsPanel — overview', () => {
     const alice = within(card).getByRole('button', { name: /You/ })
     await user.click(alice)
     expect(alice).toHaveAttribute('aria-expanded', 'true')
-    // The dinner is the server's 92 €, once as the line and once as its only row;
-    // the raw 100 USD never shows up in the card.
+    // The dinner is the server's 92 €, once as the line and once as its only row; the
+    // 100 USD is never converted again here. What was entered labels the row (#2525).
     expect(within(card).getAllByText('+92,00 €')).toHaveLength(2)
     expect(within(card).queryByText(/100,00/)).toBeNull()
+    expect(within(card).getByText('· $100.00')).toBeInTheDocument()
     // Received and still pending both lower her cost, each line with its one row.
     expect(within(card).getAllByText('−15,00 €')).toHaveLength(2)
     expect(within(card).getAllByText('−16,00 €')).toHaveLength(2)
@@ -2291,5 +2293,392 @@ describe('CostsPanel — expense modal in another language', () => {
     await user.click(screen.getByRole('button', { name: /bob/i }))
     expect(screen.getByText('Nicht dabei')).toBeInTheDocument()
     expect(screen.queryByText('Excluded')).not.toBeInTheDocument()
+  })
+})
+
+// ── #2525: a bill entered in the display currency on a trip kept in another ───
+describe('CostsPanel: a bill entered in the display currency (#2525)', () => {
+  // The reporter's setup: a euro trip, read in dollars, with the bill entered in
+  // dollars. It was booked at 1.17 dollars to the euro, 685.26 EUR, and that is what
+  // the balances and settle-up net. Today the euro buys 1.1551 dollars, so those
+  // euros are $791.55. The dollar's own quote is rounded separately (0.865706 per
+  // dollar is 1.155126 per euro), which is why the panel converts with the euro's.
+  beforeEach(() => {
+    seedAlice()
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'USD' } })
+    clearExchangeRateCache()
+    localStorage.setItem('trek_fx_USD', JSON.stringify({ rates: { USD: 1, EUR: 0.865706 }, ts: Date.now() }))
+    localStorage.setItem('trek_fx_EUR', JSON.stringify({ rates: { EUR: 1, USD: 1.1551, SEK: 10 }, ts: Date.now() }))
+  })
+  afterEach(clearExchangeRateCache)
+
+  const hotel = (over: Partial<BudgetItem> = {}) => expense({
+    id: 401, name: 'Aparthotel Silver', category: 'accommodation', total_price: 801.76, currency: 'USD', exchange_rate: 1.17,
+    expense_date: '2026-08-06',
+    payers: [{ user_id: 1, amount: 801.76 }],
+    members: [{ user_id: 1, username: 'alice' }, { user_id: 2, username: 'bob' }],
+    ...over,
+  })
+
+  it('FE-W5COSTS-079: a bill whose rate moved shows what was entered and what it was booked at', async () => {
+    mount([hotel()])
+
+    await screen.findByText('Aparthotel Silver')
+    // The entered amount was nowhere on the row, so $791.57 read as a wrong copy of
+    // the 801.76 in the dialog. The pill beside the line is the last step.
+    expect(screen.getByText(/^\$801\.76 → 685,26\s€$/)).toBeInTheDocument()
+    // Row total and payer chip stay the booked euros at today's rate, and so does what
+    // I lent: half of 685.26 EUR, the figure settle-up offers. Printing $400.88 here
+    // had Bob pay back more than he owed and reopened the trip.
+    expect(screen.getAllByText('$791.55')).toHaveLength(2)
+    expect(screen.getByText('you lent $395.77')).toBeInTheDocument()
+    expect(screen.queryByText('you lent $400.88')).toBeNull()
+  })
+
+  it('FE-W5COSTS-087: a bill booked at today\'s rate reads exactly as typed everywhere on the page', async () => {
+    mount([
+      hotel({ id: 407, name: 'Villa', total_price: 12345.67, exchange_rate: 1.1551, payers: [{ user_id: 1, amount: 12345.67 }] }),
+      hotel({ id: 408, name: 'Unpaid deposit', total_price: 250, exchange_rate: 1.1551, payers: [], members: [] }),
+    ])
+
+    await screen.findByText('Villa')
+    // Pill and payer chip; converting back with the dollar's own quote gave $12,346.05.
+    expect(screen.getAllByText('$12,345.67')).toHaveLength(2)
+    expect(screen.queryByText(/12,346\.0[56]/)).toBeNull()
+    expect(screen.getByText('$12,595.67 spent')).toBeInTheDocument()
+    const total = screen.getByText('Total trip spend').parentElement!.parentElement!.parentElement!
+    expect(total.textContent).toContain('$12,595.67')
+    const outstanding = screen.getByText('Outstanding amount').parentElement!.parentElement!.parentElement!
+    expect(outstanding.textContent).toContain('$250.00')
+    // Nothing to explain under either row.
+    expect(screen.queryByText(/^\$12,345\.67 →/)).toBeNull()
+    expect(screen.queryByText(/^\$250\.00 →/)).toBeNull()
+  })
+
+  it('FE-W5COSTS-088: the CSV export adds the trip-currency amount every sum is built from', async () => {
+    let exported: Blob | null = null
+    const createObjURL = vi.spyOn(URL, 'createObjectURL').mockImplementation(b => { exported = b as Blob; return 'blob:mock' })
+    const revokeObjURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      mount([hotel()])
+      await screen.findByText('Aparthotel Silver')
+      fireEvent.click(screen.getByTitle('Export CSV'))
+      await waitFor(() => expect(exported).toBeTruthy())
+      const lines = (await exported!.text()).replace(/^\uFEFF/, '').split('\r\n')
+      expect(lines[0]).toBe('Date;Name;Category;Amount;Currency;Amount (EUR);Amount (USD);Note')
+      expect(lines[1]).toMatch(/;801\.76;USD;685\.26;791\.55;$/)
+    } finally {
+      createObjURL.mockRestore(); revokeObjURL.mockRestore(); clickSpy.mockRestore()
+    }
+  })
+
+  it('FE-W5COSTS-080: the totals add up the figures the rows show', async () => {
+    mount([
+      hotel(),
+      hotel({ id: 402, name: 'Dinner', category: 'food', total_price: 120, payers: [{ user_id: 2, amount: 120 }] }),
+    ])
+
+    await screen.findByText('Aparthotel Silver')
+    // 120 USD at 1.17 is 102.56 EUR, $118.47 today; with the hotel's $791.55 that is
+    // $910.02, on the day header and on the total spend card.
+    expect(screen.getByText(/^\$120\.00 → 102,56\s€$/)).toBeInTheDocument()
+    expect(screen.getByText('$910.02 spent')).toBeInTheDocument()
+    // Label, its text block, the header row, then the card itself.
+    const card = screen.getByText('Total trip spend').parentElement!.parentElement!.parentElement!
+    expect(card.textContent).toContain('$910.02')
+  })
+
+  it('FE-W5COSTS-084: the totals follow the rates when they arrive after the expenses', async () => {
+    // Nothing cached: the rates land after the expenses and the settlement, and the
+    // totals used to keep the figure they were first added up with.
+    clearExchangeRateCache()
+    server.use(http.get('https://api.frankfurter.dev/v2/rates', async () => {
+      await new Promise(r => setTimeout(r, 150))
+      return HttpResponse.json([{ quote: 'EUR', rate: 0.8 }])
+    }))
+    mount([hotel({ id: 406, name: 'Museum', category: 'activities', total_price: 100, currency: 'EUR', exchange_rate: 1, payers: [{ user_id: 1, amount: 100 }] })])
+
+    // 100 euro at 0.8 euro to the dollar.
+    expect(await screen.findByText(/100,00\s€ → \$125\.00/)).toBeInTheDocument()
+    const card = screen.getByText('Total trip spend').parentElement!.parentElement!.parentElement!
+    await waitFor(() => expect(card.textContent).toContain('$125.00'))
+  })
+
+  it('FE-W5COSTS-081: a euro row converts live, a third currency shows the euros it was booked at', async () => {
+    mount([
+      hotel({ id: 403, name: 'Museum', category: 'activities', total_price: 100, currency: 'EUR', exchange_rate: 1, payers: [{ user_id: 1, amount: 100 }] }),
+      hotel({ id: 404, name: 'Ferry', category: 'transport', total_price: 1000, currency: 'SEK', exchange_rate: 10, payers: [{ user_id: 1, amount: 1000 }] }),
+      // Written before the freeze existed: nothing was booked, so dollars stay dollars.
+      hotel({ id: 405, name: 'Old taxi', category: 'transport', total_price: 50, currency: 'USD', exchange_rate: 1, payers: [{ user_id: 1, amount: 50 }] }),
+    ])
+
+    await screen.findByText('Museum')
+    // The trip currency has no frozen rate of its own and goes to dollars live.
+    expect(screen.getByText(/^100,00\s€ → \$115\.51$/)).toBeInTheDocument()
+    // 1000 SEK at 10 per euro is 100 euro, then live to dollars in the pill.
+    expect(screen.getByText(/^1\s000,00\skr → 100,00\s€$/)).toBeInTheDocument()
+    expect(screen.getAllByText('$50.00').length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText(/^\$50\.00 →/)).toBeNull()
+  })
+
+  it('FE-W5COSTS-082: a payment recorded in dollars is booked like an expense, a legacy one stays as entered', async () => {
+    mount([hotel()], {
+      settlements: [
+        { id: 21, from_user_id: 2, to_user_id: 1, amount: 400.88, currency: 'USD', exchange_rate: 1.17, created_at: '2026-08-07 09:00:00' },
+        // Rows from before transfers had a currency were entered in the display
+        // currency, which is how the server settles them.
+        { id: 22, from_user_id: 2, to_user_id: 1, amount: 30, currency: null, created_at: '2026-08-08 09:00:00' },
+      ],
+    })
+
+    await screen.findByText('Aparthotel Silver')
+    expect(screen.getByText(/\$400\.88 → 342,63\s€$/)).toBeInTheDocument()
+    expect(screen.getByText('$395.77')).toBeInTheDocument()
+    expect(screen.getByText('$30.00')).toBeInTheDocument()
+    expect(screen.queryByText('$34.65')).toBeNull()
+  })
+
+  it('FE-W5COSTS-085: the edit dialog previews the rate the save keeps, the one the row was booked at', async () => {
+    const user = userEvent.setup()
+    mount([hotel()])
+
+    await screen.findByText('Aparthotel Silver')
+    await user.click(screen.getByTitle('Edit'))
+    expect(await screen.findByDisplayValue('801.76')).toBeInTheDocument()
+    // Same currency as the list, so the dialog said nothing, and 801.76 there beside
+    // $791.57 in the list looked like two different expenses.
+    const hint = screen.getByText(/live rate/).parentElement as HTMLElement
+    expect(within(hint).getByText('$801.76')).toBeInTheDocument()
+    expect(within(hint).getByText(/^685,26\s€$/)).toBeInTheDocument()
+    expect(within(hint).getByText('$791.55')).toBeInTheDocument()
+    // Each share next to what it counts as, the figure the row's "you lent" is made of.
+    expect(screen.getByText(/Split 2 ways · \$400\.88 → \$395\.77 each/)).toBeInTheDocument()
+  })
+
+  it('FE-W5COSTS-086: the final budget names the bill by what was entered beside its booked figure', async () => {
+    const user = userEvent.setup()
+    mount([hotel()], {
+      balances: [
+        { user_id: 1, username: 'alice', avatar_url: null, balance: 395.78 },
+        { user_id: 2, username: 'bob', avatar_url: null, balance: -395.78 },
+      ],
+      flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 395.78 }],
+      finalBudgets: [
+        {
+          user_id: 1, username: 'alice', avatar_url: null, expenses: 791.55, reimbursed: 0, pending: 395.78, final: 395.77,
+          sources: { fronted: [{ item_id: 401, cents: 79155 }], moved: [], outstanding: [{ from_user_id: 2, to_user_id: 1, cents: 39578 }] },
+        },
+      ],
+    })
+
+    const card = (await screen.findByText('Final budget')).parentElement as HTMLElement
+    await user.click(await within(card).findByRole('button', { name: /You/ }))
+    expect(within(card).getAllByText('+$791.55')).toHaveLength(2)
+    expect(within(card).getByText('Aparthotel Silver')).toBeInTheDocument()
+    expect(within(card).getByText('· $801.76')).toBeInTheDocument()
+  })
+
+  it('FE-W5COSTS-089: the final budget lists a bill that reads as typed without a second amount', async () => {
+    const user = userEvent.setup()
+    mount([hotel({ exchange_rate: 1.1551 })], {
+      balances: [
+        { user_id: 1, username: 'alice', avatar_url: null, balance: 400.88 },
+        { user_id: 2, username: 'bob', avatar_url: null, balance: -400.88 },
+      ],
+      flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 400.88 }],
+      finalBudgets: [
+        {
+          user_id: 1, username: 'alice', avatar_url: null, expenses: 801.76, reimbursed: 0, pending: 400.88, final: 400.88,
+          sources: { fronted: [{ item_id: 401, cents: 80176 }], moved: [], outstanding: [{ from_user_id: 2, to_user_id: 1, cents: 40088 }] },
+        },
+      ],
+    })
+
+    const card = (await screen.findByText('Final budget')).parentElement as HTMLElement
+    await user.click(await within(card).findByRole('button', { name: /You/ }))
+    expect(within(card).getAllByText('+$801.76')).toHaveLength(2)
+    expect(within(card).queryByText('· $801.76')).toBeNull()
+  })
+
+  it('FE-W5COSTS-083: an expense saved without a currency opens in the trip currency, not the display one', async () => {
+    const user = userEvent.setup()
+    let put: Record<string, unknown> | null = null
+    server.use(http.put('/api/trips/1/budget/405', async ({ request }) => {
+      put = await request.json() as Record<string, unknown>
+      return HttpResponse.json({ item: hotel({ id: 405, currency: 'EUR' }) })
+    }))
+    mount([hotel({ id: 405, name: 'Tram pass', category: 'transport', total_price: 100, currency: null, exchange_rate: 1, payers: [{ user_id: 1, amount: 100 }] })])
+
+    await screen.findByText('Tram pass')
+    // The list reads the missing currency as the trip's own.
+    expect(screen.getByText(/100,00\s€ → \$115\.51/)).toBeInTheDocument()
+
+    await user.click(screen.getByTitle('Edit'))
+    expect(await screen.findByDisplayValue('100,00')).toBeInTheDocument()
+    // Seeding the display currency here would label 100 euro as 100 dollars, and a
+    // plain save would then store it that way.
+    expect(screen.getByText(/^EUR/)).toBeInTheDocument()
+    expect(screen.queryByText(/^USD/)).toBeNull()
+
+    // Saving without touching anything keeps the 100 euro.
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(put).toMatchObject({ total_price: 100, currency: 'EUR' }))
+  })
+})
+
+// ── A bill the server cannot convert: VND on an AUD trip ────────────────────────
+describe('CostsPanel: a bill the server cannot convert', () => {
+  // The reporter's setup: an AUD trip whose server cannot fetch rates while the browser
+  // can. An 8,920,000 VND dinner that never froze a rate was counted as 8,920,000 AUD.
+  // The settlement now leaves it out and lists it, and an editor's browser lends its AUD
+  // table to freeze a rate on it.
+  const pho = () => expense({
+    id: 501, name: 'Pho', category: 'food', total_price: 8920000, currency: 'VND', exchange_rate: 1,
+    expense_date: '2026-09-20',
+    payers: [{ user_id: 1, amount: 8920000 }],
+    members: [{ user_id: 1, username: 'alice' }, { user_id: 2, username: 'bob' }],
+  })
+  const leftOut = { balances: [], flows: [], settlements: [], currency: 'AUD', unconverted: { item_ids: [501], settlement_ids: [], currencies: ['VND'] } }
+
+  beforeEach(() => {
+    seedAlice()
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'AUD' } })
+    seedStore(useTripStore, { trip: buildTrip({ id: 1, currency: 'AUD' }) })
+    clearExchangeRateCache()
+    resetFreezeAttempts()
+    localStorage.setItem('trek_fx_AUD', JSON.stringify({ rates: { AUD: 1, VND: 18241.3, EUR: 0.61 }, ts: Date.now() }))
+  })
+  afterEach(clearExchangeRateCache)
+
+  it('FE-W5COSTS-090: VND/AUD regression: an editor heals the bill with the cached quote and the healed balances load', async () => {
+    let healed = false
+    const frozen: unknown[] = []
+    server.use(
+      http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [pho()] })),
+      http.get('/api/trips/1/budget/settlement', () => HttpResponse.json(healed
+        ? {
+            // 8,920,000 VND at 18,241.3 is 489.00 AUD, half of it Bob's.
+            balances: [
+              { user_id: 1, username: 'alice', avatar_url: null, balance: 244.5 },
+              { user_id: 2, username: 'bob', avatar_url: null, balance: -244.5 },
+            ],
+            flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 244.5 }],
+            settlements: [],
+            currency: 'AUD',
+            unconverted: { item_ids: [], settlement_ids: [], currencies: [] },
+          }
+        : leftOut)),
+      http.post('/api/trips/1/budget/freeze-rates', async ({ request }) => {
+        frozen.push(await request.json())
+        healed = true
+        return HttpResponse.json({ items: [{ ...pho(), exchange_rate: 18241.3 }], settlements: [], unresolved: [] })
+      }),
+    )
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+
+    // Only the currency the settlement is missing, at the rate the browser holds.
+    await waitFor(() => expect(frozen).toEqual([{ fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } }]))
+    // The settlement is read again and Bob's half can be settled.
+    expect(await screen.findByRole('button', { name: 'Settle' })).toBeInTheDocument()
+    expect(screen.getAllByText(/244\.50/).length).toBeGreaterThan(0)
+    // Nothing on the page counts the bill as 8,920,000 dollars any more.
+    expect(screen.queryByText(/\$8,920,000/)).toBeNull()
+    expect(frozen).toHaveLength(1)
+  })
+
+  it('FE-W5COSTS-091: a viewer\'s browser never freezes anything', async () => {
+    seedStore(usePermissionsStore, { permissions: { budget_edit: 'admin' } })
+    let frozen = 0
+    server.use(http.post('/api/trips/1/budget/freeze-rates', () => {
+      frozen += 1
+      return HttpResponse.json({ items: [], settlements: [], unresolved: [] })
+    }))
+    mount([pho()], leftOut)
+
+    await screen.findByText('Pho')
+    await new Promise(r => setTimeout(r, 50))
+    expect(frozen).toBe(0)
+  })
+
+  it('FE-W5COSTS-092: settle-up in the display currency lends its rate and asks the settlement in it', async () => {
+    // Read in euros: the browser has the AUD table, the server has no quote at all.
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'EUR' } })
+    const asked: { base: string | null; baseRate: string | null }[] = []
+    const posted: Record<string, unknown>[] = []
+    server.use(
+      http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] })),
+      http.get('/api/trips/1/budget/settlement', ({ request }) => {
+        const url = new URL(request.url)
+        asked.push({ base: url.searchParams.get('base'), baseRate: url.searchParams.get('base_rate') })
+        return HttpResponse.json({
+          balances: [], settlements: [], currency: 'EUR', unconverted: { item_ids: [], settlement_ids: [], currencies: [] },
+          flows: [{ from: { user_id: 2, username: 'bob' }, to: { user_id: 1, username: 'alice' }, amount: 20 }],
+        })
+      }),
+      http.post('/api/trips/1/budget/settlements', async ({ request }) => {
+        posted.push(await request.json() as Record<string, unknown>)
+        return HttpResponse.json({ settlement: { id: 1 } })
+      }),
+    )
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settle' }))
+    await waitFor(() => expect(posted).toHaveLength(1))
+    // The transfer freezes at the rate the settlement was labelled with, so it cancels its
+    // flow to the cent.
+    expect(posted[0]).toMatchObject({ from_user_id: 2, to_user_id: 1, amount: 20, currency: 'EUR', fallback_fx: { base: 'AUD', rates: { EUR: 0.61 } } })
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every(a => a.base === 'EUR' && a.baseRate === '0.61')).toBe(true)
+
+    const settleAll = screen.getByRole('button', { name: 'Settle up' })
+    fireEvent.click(settleAll)
+    await waitFor(() => expect(posted).toHaveLength(2))
+    expect(posted[1]).toMatchObject({ amount: 20, currency: 'EUR', fallback_fx: { base: 'AUD', rates: { EUR: 0.61 } } })
+  })
+
+  it('FE-W5COSTS-093: a payment added by hand lends the rate for its currency too', async () => {
+    const user = userEvent.setup()
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'EUR' } })
+    let posted: Record<string, unknown> | null = null
+    server.use(http.post('/api/trips/1/budget/settlements', async ({ request }) => {
+      posted = await request.json() as Record<string, unknown>
+      return HttpResponse.json({ settlement: { id: 1 } })
+    }))
+    mount([])
+
+    await user.click(await screen.findByRole('button', { name: 'Add payment' }))
+    await user.type(await screen.findByPlaceholderText('0.00'), '25')
+    const submits = screen.getAllByRole('button', { name: 'Add payment' })
+    await user.click(submits[submits.length - 1])
+
+    await waitFor(() => expect(posted).toBeTruthy())
+    expect(posted).toMatchObject({ amount: 25, currency: 'EUR', fallback_fx: { base: 'AUD', rates: { EUR: 0.61 } } })
+  })
+
+  it('FE-W5COSTS-094: a display rate the settlement query would refuse is not sent', async () => {
+    // A trip in gold read in rials: 2.6 billion rials to the ounce is past the 1e9 the query
+    // takes, and sent as `base_rate` it would fail the whole settlement with a 400.
+    seedStore(useTripStore, { trip: buildTrip({ id: 1, currency: 'XAU' }) })
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, default_currency: 'IRR' } })
+    localStorage.setItem('trek_fx_XAU', JSON.stringify({ rates: { XAU: 1, IRR: 2.6e9 }, ts: Date.now() }))
+    localStorage.setItem('trek_fx_IRR', JSON.stringify({ rates: { IRR: 1, XAU: 1 / 2.6e9 }, ts: Date.now() }))
+    const asked: { base: string | null; baseRate: string | null }[] = []
+    server.use(
+      http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [] })),
+      http.get('/api/trips/1/budget/settlement', ({ request }) => {
+        const url = new URL(request.url)
+        asked.push({ base: url.searchParams.get('base'), baseRate: url.searchParams.get('base_rate') })
+        return HttpResponse.json({
+          balances: [], flows: [], settlements: [], currency: 'XAU', unconverted: { item_ids: [], settlement_ids: [], currencies: [] },
+        })
+      }),
+    )
+    render(<CostsPanel tripId={1} tripMembers={tripMembers} />)
+
+    await waitFor(() => expect(asked.length).toBeGreaterThan(0))
+    // Still asked in rials, only without the figure; the server answers in the trip
+    // currency when it has no quote of its own.
+    expect(asked.every(a => a.base === 'IRR' && a.baseRate === null)).toBe(true)
   })
 })

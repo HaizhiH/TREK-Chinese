@@ -89,7 +89,10 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': 'Transit',
   'transit.walkLabel': 'Jalan kaki',
   'transit.searchHint': 'Cari koneksi nyata dan tambahkan langsung ke hari itu — data melalui Transitous.',
-  'trip.confirm.deletePlaceNight': 'Malam yang dipesan di “{name}” ikut hilang bersama tempat ini.',
-  'trip.confirm.deletePlaceBooked': 'Malam yang dipesan di “{name}” ikut hilang bersama tempat ini, beserta pemesanan “{booking}” dan pengeluaran yang terkait.',
+  'trip.confirm.deletePlaceNight': 'Ini juga menghapus penginapan yang dipesan di “{name}”.',
+  'trip.confirm.deletePlaceBooked':
+    'Ini juga menghapus penginapan yang dipesan di “{name}”, pemesanan “{booking}”, dan pengeluaran yang terkait.',
+  'trip.confirm.deletePlaceBookedSame':
+    'Ini juga menghapus penginapan yang dipesan di “{name}”, pemesanannya, dan pengeluaran yang terkait.',
 };
 export default trip;

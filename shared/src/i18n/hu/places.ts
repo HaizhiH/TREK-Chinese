@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Foglalási jegyzetek, visszaigazolási szám...',
   'places.mapsSearchPlaceholder': 'Helyek keresése...',
   'places.mapsSearchError': 'Helykeresés sikertelen.',
+  'places.searchGoogleInstead': 'Nem a megfelelő hely? Keresés inkább a Google-ben',
   'places.loadingDetails': 'Hely adatainak betöltése…',
   'places.osmHint':
     'OpenStreetMap keresés aktív (képek, nyitvatartás és értékelések nélkül). Bővített adatokhoz add meg a Google API kulcsot a beállításokban.',

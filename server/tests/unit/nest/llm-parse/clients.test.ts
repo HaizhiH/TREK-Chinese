@@ -287,6 +287,38 @@ describe('OpenAiCompatibleClient', () => {
     parts = JSON.parse((fetchFn.mock.calls[1][1] as RequestInit).body as string).messages[1].content;
     expect(parts.every((p: any) => p.type !== 'file' && p.type !== 'image_url')).toBe(true);
   });
+
+  /**
+   * A report could not say whether the schema ever reached the model or the
+   * ladder had fallen back to the prompt alone (#2477). The debug line names
+   * the rung that answered, and nothing of the booking.
+   */
+  it('logs which response_format the answering attempt carried (#2477)', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const ok = () => jsonResponse({ choices: [{ message: { content: '{"reservations":[]}' } }] });
+    const refused = () => jsonResponse({ error: 'no' }, false, 400);
+    const lines = () => debug.mock.calls.map(c => String(c[0])).filter(l => l.includes('response_format='));
+    try {
+      safeFetchLlmMock.mockResolvedValueOnce(ok());
+      await new OpenAiCompatibleClient().extract(baseInput);
+      safeFetchLlmMock.mockResolvedValueOnce(refused()).mockResolvedValueOnce(ok());
+      await new OpenAiCompatibleClient().extract(baseInput);
+      safeFetchLlmMock.mockResolvedValueOnce(refused()).mockResolvedValueOnce(refused()).mockResolvedValueOnce(ok());
+      await new OpenAiCompatibleClient().extract(baseInput);
+      safeFetchLlmMock.mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: '{}' } }] }));
+      await new OpenAiCompatibleClient().extract({ ...baseInput, model: 'hf.co/numind/NuExtract-2.0-2B-GGUF:latest' });
+
+      expect(lines()).toEqual([
+        '[DEBUG] LLM answered with response_format=json_schema',
+        '[DEBUG] LLM answered with response_format=json_object',
+        '[DEBUG] LLM answered with response_format=none',
+        '[DEBUG] LLM answered with response_format=none',
+      ]);
+      expect(debug.mock.calls.flat().join(' ')).not.toContain('Flight AB123');
+    } finally {
+      debug.mockRestore();
+    }
+  });
 });
 
 describe('OpenAiCompatibleClient — NuExtract path', () => {

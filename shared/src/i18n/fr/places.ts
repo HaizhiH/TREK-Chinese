@@ -37,7 +37,8 @@ const places: TranslationStrings = {
   'places.importGoogleList': 'Liste Google',
   'places.importNaverList': 'Liste Naver',
   'places.googleListHint': 'Collez un lien de liste Google Maps partagée pour importer tous les lieux.',
-  'places.googleDirHint': 'Un lien d’itinéraire fonctionne aussi : ses étapes deviennent des lieux, dans l’ordre du trajet.',
+  'places.googleDirHint':
+    'Un lien d’itinéraire fonctionne aussi : ses étapes deviennent des lieux, dans l’ordre du trajet.',
   'places.googleListImported': '{count} lieux importés depuis "{list}"',
   'places.googleListError': "Impossible d'importer la liste Google Maps",
   'places.naverListHint': 'Collez un lien de liste Naver Maps partagée pour importer tous les lieux.',
@@ -89,6 +90,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Notes de réservation, numéro de confirmation…',
   'places.mapsSearchPlaceholder': 'Rechercher des lieux…',
   'places.mapsSearchError': 'La recherche de lieu a échoué.',
+  'places.searchGoogleInstead': "Ce n'est pas le bon lieu ? Rechercher sur Google",
   'places.loadingDetails': 'Chargement des détails du lieu…',
   'places.osmHint':
     'Recherche via OpenStreetMap (pas de photos, horaires ni notes). Ajoutez une clé API Google dans les paramètres pour plus de détails.',

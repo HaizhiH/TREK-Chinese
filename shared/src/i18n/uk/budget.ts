@@ -157,6 +157,7 @@ const budget: TranslationStrings = {
   'costs.noReceipts': 'Немає доданих чеків',
   'costs.deleteReceipt': 'Видалити чек',
   'costs.viewReceipt': 'Переглянути чек',
-  'costs.receiptLeftBehind': 'Не вдалося зберегти, {count} завантажених чеків залишилися. Видаліть їх на вкладці «Файли».',
+  'costs.receiptLeftBehind':
+    'Не вдалося зберегти, {count} завантажених чеків залишилися. Видаліть їх на вкладці «Файли».',
 };
 export default budget;

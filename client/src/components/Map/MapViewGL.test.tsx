@@ -1379,6 +1379,33 @@ describe('MapViewGL', () => {
     expect(onReservationClick).toHaveBeenCalledWith(77)
   })
 
+  it('FE-COMP-MAPVIEWGL-087: a booking switched on for another day reaches the overlay unless the map is held to the day', async () => {
+    loadOnAttach()
+    const days = [{ id: 10, trip_id: 1, day_number: 1 }, { id: 11, trip_id: 1, day_number: 2 }]
+    const flight = {
+      id: 44, trip_id: 1, type: 'flight', title: 'A → B', status: 'confirmed', day_id: 10, end_day_id: 10,
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'A', code: 'AAA', lat: 1, lng: 2, timezone: null, local_time: null, local_date: null },
+        { role: 'to', sequence: 1, name: 'B', code: 'BBB', lat: 3, lng: 4, timezone: null, local_time: null, local_date: null },
+      ],
+    }
+    const reservations = [flight]
+    const ids = [44]
+    const drawn = () => (reservationOverlay.update.mock.lastCall?.[0] as { id: number }[]).map(r => r.id)
+
+    const { rerender } = render(
+      <MapViewGL places={[]} fitKey={1} reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={11} />,
+    )
+    await act(async () => {})
+    expect(drawn()).toEqual([44])
+
+    rerender(
+      <MapViewGL places={[]} fitKey={1} reservations={reservations} visibleConnectionIds={ids} days={days} selectedDayId={11} scopeConnectionsToDay />,
+    )
+    await act(async () => {})
+    expect(drawn()).toEqual([])
+  })
+
   it('FE-COMP-MAPVIEWGL-042: explore POIs get their own pin, hover popup and click callback', async () => {
     loadOnAttach()
     const basePoi: Poi = {

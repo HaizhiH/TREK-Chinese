@@ -89,6 +89,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Phiếu đặt chỗ, số xác nhận...',
   'places.mapsSearchPlaceholder': 'Tìm kiếm địa điểm...',
   'places.mapsSearchError': 'Tìm kiếm địa điểm không thành công.',
+  'places.searchGoogleInstead': 'Không đúng địa điểm? Tìm trên Google',
   'places.loadingDetails': 'Đang tải chi tiết địa điểm…',
   'places.osmHint':
     'Sử dụng tìm kiếm OpenStreetMap (không có ảnh, giờ mở cửa hoặc xếp hạng). Thêm khóa Google API trong cài đặt để biết đầy đủ chi tiết.',

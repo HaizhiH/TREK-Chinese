@@ -1,6 +1,7 @@
 import { readEnv } from '../app-config/env';
 import { encrypt_api_key } from '../nest/common/crypto/apiKeyCrypto';
 import { seedDocumentProviders } from './document-provider-seed';
+import { reseatBookedNights } from './reseat-booked-nights';
 
 import Database from 'better-sqlite3';
 import fs from 'fs';
@@ -5330,6 +5331,81 @@ function runMigrations(db: Database.Database): void {
           SELECT ${providerColumn ? 'provider' : "'google'"}, place_id, lang, expanded, payload_json, fetched_at FROM place_details_cache;
         DROP TABLE place_details_cache;
         ALTER TABLE place_details_cache_provider RENAME TO place_details_cache;
+      `);
+    },
+
+    /*
+     * Upstream migration 243 (upstream v4.3.1 slot 242).
+     * Seat every booked night where its check-in says, the way a night booked
+     * today is seated. The night leads its day now; the stops a booking put on
+     * their check-in day before this release sit last, and the trips people
+     * already have would keep that order until somebody edits the check-in.
+     * The rules, and the drawn roads that follow the stops, are in
+     * reseat-booked-nights.ts. Re-runnable.
+     */
+    () => {
+      const seated = reseatBookedNights(db);
+      if (seated > 0) console.log(`[DB] Seated ${seated} booked night(s) at the head of their day`);
+    },
+
+    /*
+     * Upstream migration 244 (upstream v4.3.2 slot 243).
+     * Immich learns the switch Synology, AirTrail and Dawarich already have: a
+     * server behind a self-signed certificate can be trusted per user (#2475).
+     * Off by default, and only 1 counts as on.
+     *
+     * The two settings rows are the toggle for it and the auto-upload toggle
+     * migration 112 meant to add. That one only ran where the Immich provider
+     * row already existed, which on a fresh install it never did (the seeds run
+     * after the migrations), so fresh installs never showed the upload toggle.
+     * Both rows are in seeds.ts as well for the same reason; here they reach the
+     * installs that already have the provider row. Re-runnable.
+     */
+    () => {
+      const hasColumn = db
+        .prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'immich_allow_insecure_tls'")
+        .get();
+      if (!hasColumn) {
+        db.exec('ALTER TABLE users ADD COLUMN immich_allow_insecure_tls INTEGER NOT NULL DEFAULT 0');
+      }
+      const hasImmich = db.prepare("SELECT 1 FROM photo_providers WHERE id = 'immich'").get();
+      if (hasImmich) {
+        db.exec(`
+          INSERT OR IGNORE INTO photo_provider_fields
+            (provider_id, field_key, label, input_type, placeholder, hint, required, secret, settings_key, payload_key, sort_order)
+          VALUES
+            ('immich', 'immich_allow_insecure_tls', 'skipSSLVerification', 'checkbox', NULL, NULL, 0, 0, 'allow_insecure_tls', 'allow_insecure_tls', 2),
+            ('immich', 'immich_auto_upload', 'immichAutoUpload', 'checkbox', NULL, NULL, 0, 0, 'auto_upload', 'auto_upload', 5)
+        `);
+      }
+    },
+
+    /*
+     * Upstream migration 245 (upstream v4.3.3 slot 244).
+     * A place that moves takes its Atlas country with it (#2527).
+     *
+     * place_regions caches the country and region Atlas resolved from a
+     * place's coordinates and address, and nothing re-derives a row that is
+     * already there. Correcting a place's location left the old row in charge,
+     * so Atlas, the dashboard stats and the journey stats kept counting the
+     * country the place had just left.
+     *
+     * A trigger rather than a delete in the places code, because the row is
+     * derived from the place and every writer of lat, lng or address has to
+     * let go of it: the place editor, update_place, the plugin RPC, the import
+     * enrichment and its address backfill, and whatever comes next. The WHEN
+     * clause matters because every place edit writes lat, lng and address
+     * back whether they changed or not, and renaming a place must not throw
+     * away a good row. The next Atlas load resolves the place where it is now.
+     */
+    () => {
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS trg_place_regions_follow_place
+        AFTER UPDATE OF lat, lng, address ON places
+        WHEN OLD.lat IS NOT NEW.lat OR OLD.lng IS NOT NEW.lng OR OLD.address IS NOT NEW.address
+        BEGIN
+          DELETE FROM place_regions WHERE place_id = NEW.id;
+        END
       `);
     },
   ];

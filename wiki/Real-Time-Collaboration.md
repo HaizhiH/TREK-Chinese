@@ -44,7 +44,7 @@ On **desktop** the panel shows Chat as a fixed 380 px column on the left when ot
 
 ### Links
 
-The **Links** tab collects the web addresses a trip runs on: the booking portal, the shared photo album, the restaurant's menu. **Add link** asks for a title and an `http(s)` address; anything else is refused. Each link opens in a new tab, and members with `collab_edit` can **pin** it to the top of the list or **delete** it. Pinned links come first, then the newest. Adding, pinning and deleting show up for every connected member at once.
+The **Links** tab collects the web addresses a trip runs on: the booking portal, the shared photo album, the restaurant's menu. **Add link** asks for a title and an `http(s)` address; anything else is refused. Each link is a chip with the site's favicon, the title and the host, two to a row where the panel is wide enough and one to a row where it is narrow, as in the Collab tab on the phone; a pinned chip is drawn in the accent tint. The whole chip is the link and opens the address in a new tab. Members with `collab_edit` can **edit** it in place (the pencil, for title and address alike), **pin** it to the top of the list or **delete** it, which asks first because the link goes for every member; the three sit faint in the chip's tail and come forward on hover, and are always shown on touch. Pinned links come first, then the newest. Adding, editing, pinning and deleting show up for every connected member at once.
 
 ## Conflict handling
 

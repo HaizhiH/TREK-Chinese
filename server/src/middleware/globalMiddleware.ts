@@ -268,6 +268,13 @@ export function applyGlobalMiddleware(
         ],
         workerSrc: ["'self'", "blob:"],
         childSrc: ["'self'", "blob:"],
+        // blob: because a picked clip is previewed and its poster frame grabbed
+        // through a <video> on an object URL, before any byte reaches the server.
+        // Unset, this fell back to default-src, which refuses blob: outright: the
+        // editor showed nothing and every clip landed without a poster, so its
+        // thumbnail answered 404 (#2341). Invisible in dev, where Vite serves the
+        // document without this header.
+        mediaSrc: ["'self'", "blob:"],
         fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
         // 'self' so same-origin file previews can embed PDFs via <object>/<embed>
         // (Firefox/Chrome enforce object-src; 'none' broke inline PDF previews there).

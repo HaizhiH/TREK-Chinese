@@ -1,4 +1,4 @@
-// FE-APISURF-001 to FE-APISURF-057
+// FE-APISURF-001 to FE-APISURF-059
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { AxiosResponse } from 'axios'
 import { http, HttpResponse } from 'msw'
@@ -455,6 +455,7 @@ describe('client > endpoint wiring', () => {
       { n: 'createSettlement', r: () => budgetApi.createSettlement(1, { from_user_id: 4, to_user_id: 5, amount: 10 }), e: 'POST /api/trips/1/budget/settlements' },
       { n: 'updateSettlement', r: () => budgetApi.updateSettlement(1, 6, { from_user_id: 4, to_user_id: 5, amount: 12 }), e: 'PUT /api/trips/1/budget/settlements/6' },
       { n: 'deleteSettlement', r: () => budgetApi.deleteSettlement(1, 6), e: 'DELETE /api/trips/1/budget/settlements/6' },
+      { n: 'freezeRates', r: () => budgetApi.freezeRates(1, {}), e: 'POST /api/trips/1/budget/freeze-rates' },
       { n: 'reorderItems', r: () => budgetApi.reorderItems(1, [2, 3]), e: 'PUT /api/trips/1/budget/reorder/items' },
       { n: 'reorderCategories', r: () => budgetApi.reorderCategories(1, ['Food']), e: 'PUT /api/trips/1/budget/reorder/categories' },
     ])
@@ -570,6 +571,19 @@ describe('client > request payloads', () => {
     expect((await traceOne(() => budgetApi.reorderCategories(1, ['Food', 'Fun']))).body)
       .toEqual({ orderedCategories: ['Food', 'Fun'] })
     expect((await traceOne(() => journeyApi.reorderEntries(2, [8, 7]))).body).toEqual({ orderedIds: [8, 7] })
+  })
+
+  it('FE-APISURF-059: the settlement carries the display rate only when the caller has one', async () => {
+    expect((await traceOne(() => budgetApi.settlement(1, 'EUR', 0.61))).url).toBe('/api/trips/1/budget/settlement?base=EUR&base_rate=0.61')
+    expect((await traceOne(() => budgetApi.settlement(1, 'EUR', null))).url).toBe('/api/trips/1/budget/settlement?base=EUR')
+    expect((await traceOne(() => budgetApi.settlement(1))).url).toBe('/api/trips/1/budget/settlement')
+    const lent = { fallback_fx: { base: 'AUD', rates: { VND: 18241.3 } } }
+    expect((await traceOne(() => budgetApi.freezeRates(1, lent))).body).toEqual(lent)
+  })
+
+  it('FE-APISURF-058: a dated day is asked for with the dated flag alone', async () => {
+    const rec = await traceOne(() => daysApi.create(1, { dated: true }))
+    expect(rec).toMatchObject({ method: 'POST', url: '/api/trips/1/days', body: { dated: true } })
   })
 
   it('FE-APISURF-023: user-id collections are sent as user_ids', async () => {

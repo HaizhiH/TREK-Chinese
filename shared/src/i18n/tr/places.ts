@@ -91,6 +91,7 @@ const places: TranslationStrings = {
   'places.reservationNotesPlaceholder': 'Rezervasyon notları, onay numarası...',
   'places.mapsSearchPlaceholder': 'Yerleri ara...',
   'places.mapsSearchError': 'Yer arama başarısız oldu.',
+  'places.searchGoogleInstead': "Doğru yer değil mi? Bunun yerine Google'da ara",
   'places.loadingDetails': 'Yer ayrıntıları yükleniyor…',
   'places.osmHint':
     'OpenStreetMap aramasını kullanma (fotoğraf, açılış saatleri veya derecelendirme yok). Tüm ayrıntılar için ayarlara bir Google API anahtarı ekleyin.',
