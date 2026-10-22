@@ -98,7 +98,20 @@ jobs:
   plugin-facts:
     name: Plugin Permission Facts
     runs-on: ubuntu-latest
+    outputs:
+      has_sonar_token: ${{ steps.check-sonar-token.outputs.has_sonar_token }}
     steps:
+      - name: Check SONAR_TOKEN availability
+        id: check-sonar-token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            echo "has_sonar_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_sonar_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
@@ -267,19 +280,13 @@ jobs:
       - name: Build shared
         run: npm run build --workspace=shared
 
-      - name: Write MinIO license
-        run: printf '%s' "${{ secrets.MINIO_LICENSE_KEY }}" > minio-licence.key
-
       - name: Start MinIO
-        # `services:` can't pass the `server /data --license ...` command to
-        # the AIStor image, so it starts via docker run. 127.0.0.1 endpoint is
-        # load-bearing: aws-lite picks path-style only for IP/localhost hosts,
-        # which is all stock MinIO/AIStor speaks.
+        # 127.0.0.1 endpoint is load-bearing: aws-lite picks path-style only for
+        # IP/localhost hosts, which is all stock MinIO speaks.
         run: |
-          docker run -d --name minio -p 127.0.0.1:9000:9000 \
-            -v "$PWD/minio-licence.key:/minio.license:ro" \
+          docker run -d --name minio --user 0:0 -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER=trekci -e MINIO_ROOT_PASSWORD=trekci-secret \
-            quay.io/minio/aistor/minio:RELEASE.2026-08-07T18-34-35Z server /data --license /minio.license
+            alpine/minio:latest-release server /tmp/data
 
       - name: Wait for MinIO
         # curl was removed from the AIStor image — poll from the runner instead.
@@ -437,13 +444,15 @@ jobs:
   scan:
     name: Scan
     runs-on: ubuntu-latest
-    # Fork PRs don't receive SONAR_TOKEN — skip the scan rather than fail it.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: [plugin-facts, server-coverage, client-coverage, shared-coverage, plugin-sdk-coverage]
+    # Fork PRs and repos without SONAR_TOKEN configured skip the scan rather than fail it.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.plugin-facts.outputs.has_sonar_token == 'true'
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     # Coverage jobs failing must stop the scan: a missing lcov file would make
     # every line of that package report as uncovered, and the dashboard would
     # show a collapse that did not happen. The preflight gates already stop it
     # transitively through these four, so they aren't repeated here.
-    needs: [server-coverage, client-coverage, shared-coverage, plugin-sdk-coverage]
 
     steps:
       - uses: actions/checkout@v6
@@ -477,6 +486,7 @@ jobs:
           path: plugin-sdk/coverage/
 
       - name: Scan
+        if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-scan-action@v8
         env:
           # SonarQube Cloud is the scan action's default host, so no
