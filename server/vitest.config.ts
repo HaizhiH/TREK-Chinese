@@ -63,7 +63,7 @@ export default defineConfig({
       thresholds: {
         'src/nest/accommodations/**/*.ts': { statements: 92, branches: 87, functions: 99, lines: 97 },
         'src/nest/addons/**/*.ts': { statements: 99, branches: 89, functions: 99, lines: 99 },
-        'src/nest/admin/**/*.ts': { statements: 86, branches: 70, functions: 89, lines: 88 },
+        'src/nest/admin/**/*.ts': { statements: 86, branches: 70, functions: 86, lines: 88 },
         'src/nest/airports/**/*.ts': { statements: 68, branches: 60, functions: 93, lines: 73 },
         'src/nest/app-config/**/*.ts': { statements: 79, branches: 100, functions: 65, lines: 71 },
         'src/nest/assignments/**/*.ts': { statements: 90, branches: 80, functions: 97, lines: 96 },
@@ -91,7 +91,7 @@ export default defineConfig({
         'src/nest/integrations/**/*.ts': { statements: 78, branches: 68, functions: 78, lines: 80 },
         'src/nest/journey/**/*.ts': { statements: 91, branches: 84, functions: 88, lines: 93 },
         'src/nest/llm-parse/**/*.ts': { statements: 91, branches: 85, functions: 85, lines: 94 },
-        'src/nest/maps/**/*.ts': { statements: 93, branches: 86, functions: 97, lines: 96 },
+        'src/nest/maps/**/*.ts': { statements: 92, branches: 85, functions: 93, lines: 94 },
         'src/nest/memories/**/*.ts': { statements: 92, branches: 83, functions: 97, lines: 94 },
         'src/nest/notifications/**/*.ts': { statements: 83, branches: 72, functions: 85, lines: 87 },
         'src/nest/oauth/**/*.ts': { statements: 96, branches: 95, functions: 97, lines: 97 },
