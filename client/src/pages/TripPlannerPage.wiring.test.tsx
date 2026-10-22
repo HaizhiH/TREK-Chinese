@@ -449,7 +449,7 @@ describe('TripPlannerPage — plan tab', () => {
     renderPage()
     expect(screen.queryByTestId('compass-pill')).not.toBeInTheDocument()
 
-    await act(async () => { props('map').onMapReady({ getBearing: () => 0 }) })
+    await act(async () => { props('map').onMapReady({ compass: { getBearing: () => 0 }, getBearing: () => 0 }) })
 
     await waitFor(() => expect(screen.getAllByTestId('compass-pill').length).toBeGreaterThan(0))
   })

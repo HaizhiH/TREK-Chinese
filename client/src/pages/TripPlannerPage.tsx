@@ -334,7 +334,7 @@ function TripPlannerPageDesktop(): React.ReactElement | null {
 
   const poi = usePoiExplore()
   const [mapController, setMapController] = useState<MapController | null>(null)
-  const compassMap = mapController?.compass || null
+  const compassMap = mapController?.compass || ((mapController as any)?.getBearing ? (mapController as any) : null)
   // The corridor search draws into the same map channel and answers the same question for
   // a drive, so the explore pill stands down while road trip mode is on.
   // Also in road trip mode: searching the view is a different question from searching the

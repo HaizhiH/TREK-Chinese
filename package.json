@@ -44,6 +44,9 @@
     },
     "fast-uri": "^3.1.6",
     "ip-address": "^10.3.1",
+    "proxy-addr": "^2.0.8",
+    "nodemailer": "^10.0.6",
+    "undici": "^7.29.1",
     "minimatch@^5.0.0": {
       "brace-expansion": "^2.1.4"
     },

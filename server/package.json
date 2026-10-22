@@ -54,7 +54,7 @@
     "json5": "^2.2.3",
     "jsonwebtoken": "^9.0.2",
     "nestjs-zod": "^5.5.0",
-    "nodemailer": "^9.1.1",
+    "nodemailer": "^10.0.6",
     "otplib": "^12.0.1",
     "pdf-parse": "^2.4.5",
     "qrcode": "^1.5.4",
@@ -65,7 +65,7 @@
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "tz-lookup": "^6.1.25",
-    "undici": "^7.29.0",
+    "undici": "^7.29.1",
     "unzipper": "^0.12.3",
     "uuid": "^14.0.0",
     "ws": "^8.21.0",
@@ -79,7 +79,10 @@
     "multer": "^2.3.0",
     "ws": "^8.21.0",
     "qs": "^6.15.2",
-    "file-type": "^21.3.4"
+    "file-type": "^21.3.4",
+    "proxy-addr": "^2.0.8",
+    "nodemailer": "^10.0.6",
+    "undici": "^7.29.1"
   },
   "devDependencies": {
     "@aws-lite/s3-types": "^0.2.8",

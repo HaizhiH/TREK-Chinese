@@ -2,7 +2,7 @@
 # Rebuild gosu with a current Go toolchain so the runtime image ships no stale
 # Go stdlib (Debian's apt gosu is built with an old Go that trips CVE scanners).
 # The binary and its runtime behaviour are identical to the apt package.
-FROM golang:1.25-alpine AS gosu-build
+FROM golang:1.26-alpine AS gosu-build
 RUN CGO_ENABLED=0 GOBIN=/out go install github.com/tianon/gosu@latest
 
 # ── Stage 1: shared ──────────────────────────────────────────────────────────

@@ -267,19 +267,13 @@ jobs:
       - name: Build shared
         run: npm run build --workspace=shared
 
-      - name: Write MinIO license
-        run: printf '%s' "${{ secrets.MINIO_LICENSE_KEY }}" > minio-licence.key
-
       - name: Start MinIO
-        # `services:` can't pass the `server /data --license ...` command to
-        # the AIStor image, so it starts via docker run. 127.0.0.1 endpoint is
-        # load-bearing: aws-lite picks path-style only for IP/localhost hosts,
-        # which is all stock MinIO/AIStor speaks.
+        # 127.0.0.1 endpoint is load-bearing: aws-lite picks path-style only for
+        # IP/localhost hosts, which is all stock MinIO speaks.
         run: |
           docker run -d --name minio -p 127.0.0.1:9000:9000 \
-            -v "$PWD/minio-licence.key:/minio.license:ro" \
             -e MINIO_ROOT_USER=trekci -e MINIO_ROOT_PASSWORD=trekci-secret \
-            quay.io/minio/aistor/minio:RELEASE.2026-08-07T18-34-35Z server /data --license /minio.license
+            minio/minio:latest server /data
 
       - name: Wait for MinIO
         # curl was removed from the AIStor image — poll from the runner instead.
