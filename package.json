@@ -48,11 +48,14 @@
     "nodemailer": "^10.0.6",
     "undici": "^7.29.1",
     "minimatch@^5.0.0": {
-      "brace-expansion": "^2.1.4"
+      "brace-expansion": "^2.1.6"
     },
     "minimatch@^9.0.0": {
-      "brace-expansion": "^2.1.4"
-    }
+      "brace-expansion": "^2.1.6"
+    },
+    "source-map-js": "^1.2.2",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "compression": "^1.8.2"
   },
   "comment:optionalDependencies": "The lockfile is generated on glibc, so the musl builds the Alpine image needs never land in it on their own. Keep the @img/* pins on the same version as client's sharp — a mismatch nests the binary away from libvips and the image build dies in generate-icons.",
   "optionalDependencies": {

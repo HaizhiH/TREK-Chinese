@@ -27,7 +27,7 @@
   "dependencies": {
     "@aws-lite/client": "^0.23.7",
     "@aws-lite/s3": "^0.2.7",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@nestjs/common": "^11.1.24",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.24",
@@ -41,7 +41,7 @@
     "archiver": "^6.0.1",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.3",
-    "compression": "^1.8.0",
+    "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "cron": "^4.4.0",
@@ -82,7 +82,16 @@
     "file-type": "^21.3.4",
     "proxy-addr": "^2.0.8",
     "nodemailer": "^10.0.6",
-    "undici": "^7.29.1"
+    "undici": "^7.29.1",
+    "minimatch@^5.0.0": {
+      "brace-expansion": "^2.1.6"
+    },
+    "minimatch@^9.0.0": {
+      "brace-expansion": "^2.1.6"
+    },
+    "source-map-js": "^1.2.2",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "compression": "^1.8.2"
   },
   "devDependencies": {
     "@aws-lite/s3-types": "^0.2.8",

@@ -273,7 +273,7 @@ jobs:
         run: |
           docker run -d --name minio -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER=trekci -e MINIO_ROOT_PASSWORD=trekci-secret \
-            minio/minio:latest server /data
+            alpine/minio:latest-release server /data
 
       - name: Wait for MinIO
         # curl was removed from the AIStor image — poll from the runner instead.
